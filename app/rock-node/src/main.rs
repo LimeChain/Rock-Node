@@ -1,9 +1,17 @@
 // rock-node-workspace/app/rock-node/src/main.rs
 
-use anyhow::Result;
-use rock_node_core::config::Config;
-use tracing::info;
 use serde_json;
+use anyhow::Result;
+use rock_node_core::app_context::AppContext;
+use rock_node_core::capability::CapabilityRegistry;
+use rock_node_core::config::Config;
+use rock_node_core::Plugin;
+use rock_node_observability_plugin::ObservabilityPlugin;
+use std::any::{Any, TypeId};
+use std::collections::HashMap;
+use std::sync::Arc;
+use tokio::sync::RwLock;
+use tracing::info;
 
 const BANNER: &str = r#"
 ██████╗  ██████╗  ██████╗██╗  ██╗    ███╗   ██╗ ██████╗ ██████╗ ███████╗
@@ -88,17 +96,28 @@ async fn main() -> Result<()> {
 
     // --- Step 3: Build the AppContext ---
     info!("Building application context...");
-    // TODO: Instantiate CapabilityRegistry, CoreMessaging, etc.
-    // TODO: Create the AppContext object with Arc handles.
+    let app_context = AppContext {
+        config: Arc::new(config),
+        capability_registry: Arc::new(CapabilityRegistry::new()),
+        service_providers: Arc::new(RwLock::new(HashMap::<TypeId, Arc<dyn Any + Send + Sync>>::new())),
+    };
 
+    let mut plugins: Vec<Box<dyn Plugin>> = vec![
+        Box::new(ObservabilityPlugin::new()),
+        // We will add other plugins here in subsequent steps
+    ];
+    
     // --- Step 4: Instantiate and Initialize Plugins ---
     info!("Initializing plugins...");
-    // TODO: Create a Vec of all plugins.
-    // TODO: Loop through plugins and call initialize(app_context.clone()).
+    for plugin in &mut plugins {
+        plugin.initialize(app_context.clone())?;
+    }
 
     // --- Step 5: Start Plugins ---
     info!("Starting plugins...");
-    // TODO: Loop through plugins and call start().
+    for plugin in &plugins {
+        plugin.start()?;
+    }
 
     info!("Rock Node running successfully.");
     

@@ -23,7 +23,7 @@ pub struct PluginConfigs {
 #[derive(Debug, Deserialize, Serialize)]
 pub struct ObservabilityConfig {
     pub enabled: bool,
-    pub http_port: u16,
+    pub listen_address: String, 
 }
 
 #[derive(Debug, Deserialize, Serialize)]
