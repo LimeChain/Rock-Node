@@ -1,0 +1,45 @@
+name: "🐞 Bug Report"
+description: "Report an issue, error, or unexpected behavior."
+title: "[BUG]: "
+labels: [type: bug]
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: "Bug Description"
+      description: "Provide a clear and concise description of what the bug is."
+    validations:
+      required: true
+  - type: textarea
+    id: steps-to-reproduce
+    attributes:
+      label: "Steps to Reproduce"
+      description: "Describe the exact steps to reproduce the behavior."
+      value: |
+        1. ...
+        2. ...
+        3. ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected-behavior
+    attributes:
+      label: "Expected Behavior"
+      description: "A clear description of what you expected to happen."
+    validations:
+      required: true
+  - type: textarea
+    id: actual-behavior
+    attributes:
+      label: "Actual Behavior"
+      description: "A clear description of what actually happened."
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: "Environment"
+      description: "Please provide any relevant details about your environment (e.g., OS, Node Version, Commit Hash)."
+      placeholder: "e.g., Ubuntu 22.04, main branch @ commit abc1234"
+    validations:
+      required: false

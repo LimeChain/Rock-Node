@@ -1,0 +1,35 @@
+name: "🚀 Feature Request"
+description: "Suggest an idea, enhancement, or new feature for this project."
+title: "[FEAT]: "
+labels: [type: feature]
+body:
+  - type: markdown
+    attributes:
+      value: "Thank you for contributing to the project! Please provide as much detail as possible."
+  - type: textarea
+    id: problem-description
+    attributes:
+      label: "Problem Description"
+      description: "What is the problem this feature solves? Is it related to a business requirement from the BA document?"
+      placeholder: "e.g., Mirror Nodes incur high costs from LIST operations on cloud buckets."
+    validations:
+      required: true
+  - type: textarea
+    id: proposed-solution
+    attributes:
+      label: "Proposed Solution"
+      description: "Describe the solution you're proposing. How does it work? Reference the SSD if applicable."
+      placeholder: "e.g., Implement the BlockStreamSubscribeService to provide a direct gRPC stream of blocks, eliminating the need for polling."
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance-criteria
+    attributes:
+      label: "Acceptance Criteria"
+      description: "Provide a clear, testable list of criteria that must be met for this feature to be considered complete."
+      value: |
+        - [ ] GIVEN a client connects to the service
+        - [ ] WHEN they request a stream from block X
+        - [ ] THEN the service streams all blocks starting from X
+    validations:
+      required: true
