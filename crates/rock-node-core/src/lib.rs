@@ -1,17 +1,15 @@
-/// The central trait that all plugins must implement.
-/// It defines the lifecycle hooks for a plugin.
-pub trait Plugin {
-    /// A unique name for the plugin.
-    fn name(&self) -> &'static str;
+// File: crates/rock-node-core/src/lib.rs
 
-    /// Called at startup to initialize the plugin.
-    /// The plugin can get shared facilities from the AppContext and
-    /// register its own capabilities or providers.
-    fn initialize(&mut self /*, context: AppContext */);
+// Declare all the modules in our crate
+pub mod app_context;
+pub mod capability;
+pub mod config;
+pub mod error;
+pub mod plugin;
 
-    /// Called after all plugins are initialized.
-    /// If the plugin exposes a network service, it should be started here.
-    fn start(&self);
-}
-
-// The AppContext and other core types will be defined here. 
+// Re-export the most important public types for easy access by other crates.
+pub use app_context::AppContext;
+pub use capability::{Capability, CapabilityRegistry};
+pub use config::Config;
+pub use error::{Error, Result};
+pub use plugin::Plugin;

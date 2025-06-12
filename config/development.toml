@@ -1,0 +1,26 @@
+# =========================================
+# Core Application Configuration
+# =========================================
+[core]
+log_level = "INFO"
+database_path = "data/" # Use a local 'data' directory for development
+
+# =========================================
+# Plugin-Specific Configurations
+# =========================================
+[plugins]
+
+    [plugins.observability]
+    enabled = true
+    http_port = 9600
+
+    [plugins.persistence]
+    enabled = true
+    hot_storage_path = "hot"
+    cold_storage_path = "cold"
+    archive_trigger_blocks = 1000
+
+    [plugins.subscribe_service]
+    enabled = true
+    grpc_port = 50211 # Standard port for Hedera gRPC
+    max_concurrent_streams = 250 
