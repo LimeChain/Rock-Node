@@ -1,7 +1,21 @@
+# File: rock-node-workspace/crates/rock-node-observability-plugin/Cargo.toml
+
 [package]
 name = "rock-node-observability-plugin"
 version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-rock-node-core = { path = "../rock-node-core" } 
+rock-node-core = { path = "../rock-node-core" }
+
+# The async runtime
+tokio = { version = "1", features = ["full"] }
+
+# A modern, ergonomic web framework for building the HTTP server
+axum = "0.7"
+
+# For easy error handling
+anyhow = "1"
+
+# For logging
+tracing = "0.1"
