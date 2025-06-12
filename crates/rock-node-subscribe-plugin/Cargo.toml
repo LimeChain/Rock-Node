@@ -1,0 +1,7 @@
+[package]
+name = "rock-node-subscribe-plugin"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+rock-node-core = { path = "../rock-node-core" } 

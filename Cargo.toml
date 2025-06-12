@@ -1,0 +1,23 @@
+[workspace]
+resolver = "2"
+members = [
+    "app/rock-node",
+    "crates/rock-node-core",
+    "crates/rock-node-persistence-plugin",
+    "crates/rock-node-verifier-plugin",
+    "crates/rock-node-observability-plugin",
+    "crates/rock-node-publish-plugin",
+    "crates/rock-node-subscribe-plugin"
+]
+
+[workspace.package]
+edition = "2021"
+version = "0.1.0"
+
+[workspace.dependencies]
+tokio = { version = "1", features = ["full"] }
+tonic = { version = "0.11", features = ["transport"] }
+prost = "0.12"
+config = "0.13"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] } 
