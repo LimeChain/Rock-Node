@@ -1,0 +1,26 @@
+name: "🛠️ Task / Chore"
+description: "For small, well-defined tasks, chores, or technical debt."
+title: "[TASK]: "
+labels: [type: chore]
+body:
+  - type: textarea
+    id: task-description
+    attributes:
+      label: "Task Description"
+      description: "What needs to be done and why is it necessary? (e.g., refactor, dependency update, config change)"
+      placeholder: "Example: Refactor the `StorageWriter` component to separate hot and cold storage logic more cleanly."
+    validations:
+      required: true
+  - type: textarea
+    id: definition-of-done
+    attributes:
+      label: "Definition of Done"
+      description: "Provide a clear checklist for when this task can be considered complete."
+      value: |
+        - [ ] ...
+        - [ ] ...
+    validations:
+      required: true
+  - type: markdown
+    attributes:
+      value: "This template is for tasks with a clear, pre-defined scope. For new features or bugs, please use the appropriate template."
