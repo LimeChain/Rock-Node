@@ -4,9 +4,31 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+# The application needs the core traits and types
 rock-node-core = { path = "../../crates/rock-node-core" }
+
+# Include the plugins you want in this build
 rock-node-persistence-plugin = { path = "../../crates/rock-node-persistence-plugin" }
 rock-node-verifier-plugin = { path = "../../crates/rock-node-verifier-plugin" }
 rock-node-observability-plugin = { path = "../../crates/rock-node-observability-plugin" }
 rock-node-publish-plugin = { path = "../../crates/rock-node-publish-plugin" }
-rock-node-subscribe-plugin = { path = "../../crates/rock-node-subscribe-plugin" } 
+rock-node-subscribe-plugin = { path = "../../crates/rock-node-subscribe-plugin" }
+
+# The async runtime for our application
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal"] }
+
+# For structured logging
+tracing = "0.1"
+
+# The subscriber that collects and prints logs
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+
+# For parsing the TOML configuration file
+toml = "0.8"
+
+# Serde is needed to deserialize the config file into our structs
+serde = { version = "1", features = ["derive"] }
+serde_json = "1.0"
+
+# For ergonomic error handling in the main function
+anyhow = "1" 

@@ -3,4 +3,8 @@ name = "rock-node-core"
 version = "0.1.0"
 edition = "2021"
 
-[dependencies] 
+[dependencies]
+tokio = { version = "1", features = ["sync"] }
+serde = { version = "1", features = ["derive"] }
+thiserror = "1"
+anyhow = "1" 
