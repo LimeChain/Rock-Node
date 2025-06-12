@@ -1,0 +1,1 @@
+// Placeholder for the persistence plugin logic 

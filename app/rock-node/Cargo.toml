@@ -1,0 +1,12 @@
+[package]
+name = "rock-node"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+rock-node-core = { path = "../../crates/rock-node-core" }
+rock-node-persistence-plugin = { path = "../../crates/rock-node-persistence-plugin" }
+rock-node-verifier-plugin = { path = "../../crates/rock-node-verifier-plugin" }
+rock-node-observability-plugin = { path = "../../crates/rock-node-observability-plugin" }
+rock-node-publish-plugin = { path = "../../crates/rock-node-publish-plugin" }
+rock-node-subscribe-plugin = { path = "../../crates/rock-node-subscribe-plugin" } 

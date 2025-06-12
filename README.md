@@ -1,2 +1,3 @@
-# Rock-Node
-Rock Node is high-performance Rust implementation of the hiero-block-node.
+# Rock Node
+
+A high-performance, decentralized data-availability layer for the Hiero network.
