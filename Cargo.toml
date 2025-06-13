@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "app/rock-node",
     "crates/rock-node-core",
+    "crates/rock-node-protobufs",
     "crates/rock-node-persistence-plugin",
     "crates/rock-node-verifier-plugin",
     "crates/rock-node-observability-plugin",
