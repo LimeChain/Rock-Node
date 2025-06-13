@@ -17,6 +17,7 @@ pub struct PluginConfigs {
     pub observability: ObservabilityConfig,
     pub persistence: PersistenceConfig,
     pub subscribe_service: SubscribeServiceConfig,
+    pub publish_service: PublishServiceConfig,
     // Add other plugin configs here
 }
 
@@ -25,6 +26,14 @@ pub struct ObservabilityConfig {
     pub enabled: bool,
     pub listen_address: String, 
 }
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct PublishServiceConfig {
+    pub enabled: bool,
+    pub grpc_address: String,
+    pub grpc_port: u16,
+    pub max_concurrent_streams: usize,
+} 
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct PersistenceConfig {
