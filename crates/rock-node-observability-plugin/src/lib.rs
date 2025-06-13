@@ -32,7 +32,7 @@ impl Plugin for ObservabilityPlugin {
         Ok(())
     }
 
-    fn start(&self) -> Result<()> {
+    fn start(&mut self) -> Result<()> {
         let config = &self.context.as_ref().unwrap().config.plugins.observability;
         if !config.enabled {
             info!("ObservabilityPlugin is disabled. Skipping start.");

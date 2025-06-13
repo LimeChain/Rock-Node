@@ -5,3 +5,7 @@ edition = "2021"
 
 [dependencies]
 rock-node-core = { path = "../rock-node-core" } 
+tokio = { version = "1", features = ["full"] }
+anyhow = "1"
+tracing = "0.1"
+uuid = "1"

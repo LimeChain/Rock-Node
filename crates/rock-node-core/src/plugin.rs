@@ -15,5 +15,5 @@ pub trait Plugin: Send + Sync {
     /// Called after all plugins are initialized.
     /// If the plugin exposes a network service, it should be started here
     /// in a non-blocking fashion (e.g., using `tokio::spawn`).
-    fn start(&self) -> Result<()>;
+    fn start(&mut self) -> Result<()>;
 }
