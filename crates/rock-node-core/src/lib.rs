@@ -6,10 +6,14 @@ pub mod capability;
 pub mod config;
 pub mod error;
 pub mod plugin;
+pub mod cache;
+pub mod events;
 
 // Re-export the most important public types for easy access by other crates.
 pub use app_context::AppContext;
+pub use cache::BlockDataCache;
 pub use capability::{Capability, CapabilityRegistry};
 pub use config::Config;
 pub use error::{Error, Result};
+pub use events::{BlockData, BlockItemsReceived, BlockPersisted, BlockVerified};
 pub use plugin::Plugin;

@@ -1,16 +1,19 @@
 // rock-node-workspace/app/rock-node/src/main.rs
 
+use rock_node_publish_plugin::PublishPlugin;
+use rock_node_verifier_plugin::VerifierPlugin;
+use rock_node_persistence_plugin::PersistencePlugin;
 use serde_json;
 use anyhow::Result;
 use rock_node_core::app_context::AppContext;
 use rock_node_core::capability::CapabilityRegistry;
 use rock_node_core::config::Config;
-use rock_node_core::Plugin;
+use rock_node_core::{events, BlockDataCache, Plugin};
 use rock_node_observability_plugin::ObservabilityPlugin;
 use std::any::{Any, TypeId};
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::RwLock;
+use tokio::sync::{mpsc, RwLock};
 use tracing::info;
 
 const BANNER: &str = r#"
@@ -95,15 +98,27 @@ async fn main() -> Result<()> {
     info!("{}", format_config(&config));
 
     // --- Step 3: Build the AppContext ---
+    // --- Create Channels and Core Facilities ---
+    let (tx_items, rx_items) = mpsc::channel::<events::BlockItemsReceived>(100);
+    let (tx_verified, rx_verified) = mpsc::channel::<events::BlockVerified>(100);
+    let (tx_persisted, _rx_persisted) = mpsc::channel::<events::BlockPersisted>(100);
+
     info!("Building application context...");
     let app_context = AppContext {
         config: Arc::new(config),
         capability_registry: Arc::new(CapabilityRegistry::new()),
         service_providers: Arc::new(RwLock::new(HashMap::<TypeId, Arc<dyn Any + Send + Sync>>::new())),
+        block_data_cache: Arc::new(BlockDataCache::new()),
+        tx_block_items_received: tx_items,
+        tx_block_verified: tx_verified,
+        tx_block_persisted: tx_persisted,
     };
 
     let mut plugins: Vec<Box<dyn Plugin>> = vec![
         Box::new(ObservabilityPlugin::new()),
+        Box::new(PublishPlugin::new()),
+        Box::new(VerifierPlugin::new(rx_items)),
+        Box::new(PersistencePlugin::new(rx_verified)),
         // We will add other plugins here in subsequent steps
     ];
     
@@ -115,7 +130,7 @@ async fn main() -> Result<()> {
 
     // --- Step 5: Start Plugins ---
     info!("Starting plugins...");
-    for plugin in &plugins {
+    for plugin in &mut plugins {
         plugin.start()?;
     }
 
