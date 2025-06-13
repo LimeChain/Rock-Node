@@ -17,14 +17,12 @@ fn main() -> Result<()> {
     // This is the single, temporary directory where we will assemble all .proto files.
     let unified_proto_dir = out_dir.join("unified_proto");
 
-    // --- ** THIS IS THE FIX ** ---
     // Clean up the unified directory from the previous build, if it exists,
     // then create it fresh. This makes the script idempotent.
     if unified_proto_dir.exists() {
         std::fs::remove_dir_all(&unified_proto_dir)?;
     }
     std::fs::create_dir_all(&unified_proto_dir)?;
-    // --- ** END FIX ** ---
 
     println!("cargo:rerun-if-changed={}", local_proto_root.display());
 
