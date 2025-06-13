@@ -8,6 +8,7 @@ pub mod error;
 pub mod plugin;
 pub mod cache;
 pub mod events;
+pub mod block_reader;
 
 // Re-export the most important public types for easy access by other crates.
 pub use app_context::AppContext;

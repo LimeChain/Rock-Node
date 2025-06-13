@@ -5,10 +5,12 @@ use rock_node_protobufs::{
     com::hedera::hapi::block::stream::block_item::Item as BlockItemType,
     org::hiero::block::api::{
         publish_stream_request::Request as PublishRequestType,
-        publish_stream_response, PublishStreamResponse,
+        publish_stream_response::{self, BlockAcknowledgement, ResendBlock},
+        PublishStreamResponse,
     },
 };
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::mpsc;
 use tonic::Status;
 use tracing::{info, warn};
@@ -22,7 +24,7 @@ pub struct SessionManager {
     state: SessionState,
     current_block_number: u64,
     item_buffer: Vec<rock_node_protobufs::com::hedera::hapi::block::stream::BlockItem>,
-    response_tx: mpsc::Sender<std::result::Result<PublishStreamResponse, Status>>,
+    response_tx: mpsc::Sender<Result<PublishStreamResponse, Status>>,
 }
 
 impl SessionManager {
@@ -78,7 +80,7 @@ impl SessionManager {
     async fn handle_block_header(&mut self, block_number: i64) -> bool {
         self.current_block_number = block_number as u64;
         self.state = SessionState::New;
-        self.item_buffer.clear();   
+        self.item_buffer.clear();
 
         let latest_persisted = self.shared_state.get_latest_persisted_block();
         if block_number <= latest_persisted {
@@ -113,8 +115,67 @@ impl SessionManager {
         };
         if self.context.tx_block_items_received.send(event).await.is_err() {
             warn!(session_id = %self.id, "Failed to publish BlockItemsReceived event.");
+            return;
         }
         self.item_buffer.clear();
+
+        self.wait_for_persistence_ack().await;
+    }
+
+    /// Spawns a task to wait for the `BlockPersisted` event and sends an ACK on success
+    /// or a `ResendBlock` message on failure or timeout.
+    async fn wait_for_persistence_ack(&self) {
+        // This will now compile because AppContext provides a `broadcast::Sender`.
+        let mut rx_persisted = self.context.tx_block_persisted.subscribe();
+        let response_tx_clone = self.response_tx.clone();
+        let block_to_await = self.current_block_number;
+        let session_id = self.id;
+
+        tokio::spawn(async move {
+            info!(%session_id, block = block_to_await, "Spawned ACK waiter task.");
+            
+            let timeout_result = tokio::time::timeout(Duration::from_secs(30), async {
+                while let Ok(persisted_event) = rx_persisted.recv().await {
+                    if persisted_event.block_number == block_to_await {
+                        return Some(persisted_event);
+                    }
+                }
+                None
+            }).await;
+
+            match timeout_result {
+                // Success case: The block was persisted in time.
+                Ok(Some(_)) => {
+                    info!(%session_id, block = block_to_await, "Block persisted. Sending session-specific ACK.");
+                    
+                    // FIX: Initialize the struct according to the compiler's expectation.
+                    let ack = PublishStreamResponse {
+                        response: Some(publish_stream_response::Response::Acknowledgement(
+                            BlockAcknowledgement { 
+                                block_number: block_to_await,
+                                block_already_exists: false,
+                                block_root_hash: vec![],
+                             },
+                        )),
+                    };
+                    if response_tx_clone.send(Ok(ack)).await.is_err() {
+                        warn!(%session_id, block = block_to_await, "Failed to send ACK, client may have disconnected.");
+                    }
+                },
+                // Failure case: Timeout or channel closed.
+                _ => {
+                    warn!(%session_id, block = block_to_await, "Did not receive persistence ACK for block. Requesting resend.");
+                    let resend_req = PublishStreamResponse {
+                        response: Some(publish_stream_response::Response::ResendBlock(
+                            ResendBlock { block_number: block_to_await },
+                        )),
+                    };
+                    if response_tx_clone.send(Ok(resend_req)).await.is_err() {
+                         warn!(%session_id, block = block_to_await, "Failed to send ResendBlock, client may have disconnected.");
+                    }
+                }
+            }
+        });
     }
 
     async fn send_skip_block(&self) {

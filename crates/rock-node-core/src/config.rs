@@ -15,10 +15,10 @@ pub struct CoreConfig {
 #[derive(Debug, Deserialize, Serialize)]
 pub struct PluginConfigs {
     pub observability: ObservabilityConfig,
-    pub persistence: PersistenceConfig,
+    pub persistence_service: PersistenceServiceConfig,
     pub subscribe_service: SubscribeServiceConfig,
     pub publish_service: PublishServiceConfig,
-    // Add other plugin configs here
+    pub verification_service: VerificationServiceConfig,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -36,11 +36,10 @@ pub struct PublishServiceConfig {
 } 
 
 #[derive(Debug, Deserialize, Serialize)]
-pub struct PersistenceConfig {
+pub struct PersistenceServiceConfig {
     pub enabled: bool,
-    pub hot_storage_path: String,
-    pub cold_storage_path: String,
-    pub archive_trigger_blocks: u64,
+    pub storage_path: String,
+    pub hot_storage_block_count: u64,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -49,3 +48,8 @@ pub struct SubscribeServiceConfig {
     pub grpc_port: u16,
     pub max_concurrent_streams: usize,
 } 
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct VerificationServiceConfig {
+    pub enabled: bool,
+}
