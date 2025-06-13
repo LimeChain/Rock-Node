@@ -3,6 +3,8 @@
 <div align="center">
   <img src="assets/logo.jpeg" alt="Rock Node Logo" width="300"/>
   
+  <p><em>Resilient as a Rock ⚡</em></p>
+  
   [![Rust Version](https://img.shields.io/badge/rust-1.75.0+-blue.svg)](https://www.rust-lang.org)
   [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 </div>

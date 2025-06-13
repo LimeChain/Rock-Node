@@ -14,6 +14,12 @@ database_path = "data/" # Use a local 'data' directory for development
     enabled = true
     listen_address = "0.0.0.0:9600"
 
+    [plugins.publish_service]
+    enabled = true
+    grpc_address = "0.0.0.0"
+    grpc_port = 8080
+    max_concurrent_streams = 250 
+
     [plugins.persistence]
     enabled = true
     hot_storage_path = "hot"
