@@ -12,8 +12,8 @@ use rock_node_core::{events, BlockDataCache, Plugin};
 use rock_node_observability_plugin::ObservabilityPlugin;
 use std::any::{Any, TypeId};
 use std::collections::HashMap;
-use std::sync::Arc;
-use tokio::sync::{mpsc, RwLock};
+use std::sync::{Arc, RwLock};
+use tokio::sync::{broadcast, mpsc};
 use tracing::info;
 
 const BANNER: &str = r#"
@@ -101,7 +101,7 @@ async fn main() -> Result<()> {
     // --- Create Channels and Core Facilities ---
     let (tx_items, rx_items) = mpsc::channel::<events::BlockItemsReceived>(100);
     let (tx_verified, rx_verified) = mpsc::channel::<events::BlockVerified>(100);
-    let (tx_persisted, _rx_persisted) = mpsc::channel::<events::BlockPersisted>(100);
+    let (tx_persisted, _) = broadcast::channel::<events::BlockPersisted>(100);
 
     info!("Building application context...");
     let app_context = AppContext {
@@ -114,14 +114,27 @@ async fn main() -> Result<()> {
         tx_block_persisted: tx_persisted,
     };
 
-    let mut plugins: Vec<Box<dyn Plugin>> = vec![
-        Box::new(ObservabilityPlugin::new()),
-        Box::new(PublishPlugin::new()),
-        Box::new(VerifierPlugin::new(rx_items)),
-        Box::new(PersistencePlugin::new(rx_verified)),
-        // We will add other plugins here in subsequent steps
-    ];
+    let mut plugins: Vec<Box<dyn Plugin>> = vec![];
+
+    // Read the verifier config *before* moving channels
+    let verification_service_enabled = app_context.config.plugins.verification_service.enabled;
+
+    if verification_service_enabled {
+        info!("VerifierPlugin is ENABLED. Wiring Verifier -> Persistence.");
+        // PersistencePlugin gets None for rx_items, since it will use rx_verified
+        plugins.push(Box::new(PersistencePlugin::new(None, rx_verified)));
+        // VerifierPlugin takes ownership of rx_items
+        plugins.push(Box::new(VerifierPlugin::new(rx_items)));
+
+    } else {
+        info!("VerifierPlugin is DISABLED. Wiring directly to Persistence.");
+        // PersistencePlugin takes ownership of rx_items
+        plugins.push(Box::new(PersistencePlugin::new(Some(rx_items), rx_verified)));
+    }
     
+    plugins.push(Box::new(ObservabilityPlugin::new()));
+    plugins.push(Box::new(PublishPlugin::new()));
+
     // --- Step 4: Instantiate and Initialize Plugins ---
     info!("Initializing plugins...");
     for plugin in &mut plugins {
@@ -140,4 +153,4 @@ async fn main() -> Result<()> {
     tokio::signal::ctrl_c().await?;
     
     Ok(())
-} 
+}

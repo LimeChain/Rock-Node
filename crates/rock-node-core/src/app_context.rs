@@ -1,29 +1,21 @@
-use crate::capability::CapabilityRegistry;
-use crate::config::Config;
-use crate::cache::BlockDataCache;
-use crate::events::{BlockItemsReceived, BlockVerified, BlockPersisted};
-use tokio::sync::mpsc::Sender;
 use std::any::{Any, TypeId};
 use std::collections::HashMap;
-use std::sync::Arc;
-use tokio::sync::RwLock;
+use std::sync::{Arc, RwLock};
+use tokio::sync::{broadcast, mpsc};
 
-/// The shared context that is passed to all plugins.
-/// It holds handles to all core, shared facilities of the application.
-/// It is cloneable and thread-safe.
 #[derive(Clone, Debug)]
 pub struct AppContext {
-    pub config: Arc<Config>,
-    pub capability_registry: Arc<CapabilityRegistry>,
-    /// A type-erased service locator for plugins to provide `Trait` implementations
-    /// to other plugins without direct coupling.
+    pub config: Arc<super::config::Config>,
+    pub capability_registry: Arc<super::capability::CapabilityRegistry>,
     pub service_providers: Arc<RwLock<HashMap<TypeId, Arc<dyn Any + Send + Sync>>>>,
-        
-    // The shared, temporary storage for block data
-    pub block_data_cache: Arc<BlockDataCache>,
+    pub block_data_cache: Arc<super::cache::BlockDataCache>,
+    
+    // Can be mpsc as only one system (verifier or persistence) will own the receiver
+    pub tx_block_items_received: mpsc::Sender<super::events::BlockItemsReceived>,
+    
+    // Can be mpsc as it's a 1-to-1 pipeline step
+    pub tx_block_verified: mpsc::Sender<super::events::BlockVerified>,
 
-    // Senders for our MPSC channels
-    pub tx_block_items_received: Sender<BlockItemsReceived>,
-    pub tx_block_verified: Sender<BlockVerified>,
-    pub tx_block_persisted: Sender<BlockPersisted>,
-} 
+    // MUST be broadcast to allow multiple concurrent sessions to wait for their specific ACKs
+    pub tx_block_persisted: broadcast::Sender<super::events::BlockPersisted>,
+}

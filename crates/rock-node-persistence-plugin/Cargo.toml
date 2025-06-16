@@ -2,10 +2,27 @@
 name = "rock-node-persistence-plugin"
 version = "0.1.0"
 edition = "2021"
+publish = false
 
 [dependencies]
-rock-node-core = { path = "../rock-node-core" } 
+# Required for the plugin system and core types
+rock-node-core = { path = "../rock-node-core" }
+
+# Async runtime and utilities
 tokio = { version = "1", features = ["full"] }
-anyhow = "1"
+
+# For structured logging
 tracing = "0.1"
-uuid = "1"
+
+# For easy error handling
+anyhow = "1"
+
+# For the hot-tier key-value store
+rocksdb = "0.22"
+
+# For binary serialization of data into the DB
+serde = { version = "1.0", features = ["derive"] }
+bincode = "1.3"
+
+# For using the cache_key from core events
+uuid = { version = "1", features = ["v4"] }

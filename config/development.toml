@@ -20,13 +20,21 @@ database_path = "data/" # Use a local 'data' directory for development
     grpc_port = 8080
     max_concurrent_streams = 250 
 
-    [plugins.persistence]
+    [plugins.persistence_service]
     enabled = true
-    hot_storage_path = "hot"
-    cold_storage_path = "cold"
-    archive_trigger_blocks = 1000
+
+    # The file system path where the RocksDB database will be stored.
+    # The application must have write permissions to this directory.
+    storage_path = "data/persistence"
+
+    # The number of recent blocks to keep in the 'hot' RocksDB tier.
+    # Older blocks will be deleted (and eventually archived to cold storage).
+    hot_storage_block_count = 1000
 
     [plugins.subscribe_service]
     enabled = true
     grpc_port = 50211 # Standard port for Hedera gRPC
     max_concurrent_streams = 250 
+
+    [plugins.verification_service]
+    enabled = false
