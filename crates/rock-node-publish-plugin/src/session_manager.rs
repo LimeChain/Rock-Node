@@ -95,13 +95,8 @@ impl SessionManager {
         self.state = SessionState::New;
         self.item_buffer.clear();
 
-        // **CORRECTED BEHAVIOR START**
-        // Fetch the latest block number that has been successfully persisted.
-        // This state is initialized by the PublishPlugin at startup.
         let latest_persisted = self.shared_state.get_latest_persisted_block();
 
-        // Per the design doc: "If this is less than last known verified block, respond with 'DuplicateBlock'".
-        // Our check implements this. We use `<=` to handle blocks that are older or the same as the latest.
         if block_number <= latest_persisted {
             warn!(
                 session_id = %self.id,
@@ -120,7 +115,21 @@ impl SessionManager {
             // Returning `false` signals the calling handler to terminate this session's stream.
             return false;
         }
-        // **CORRECTED BEHAVIOR END**
+
+        if block_number > latest_persisted + 1 {
+            warn!(
+                session_id = %self.id,
+                received_block = block_number,
+                expected_block = latest_persisted + 1,
+                "Rejecting future block. RockNode is BEHIND."
+            );
+
+            // Per the protocol, respond with BEHIND and the last block we successfully have.
+            let code = publish_stream_response::end_of_stream::Code::Behind;
+            let response = response_from_code(code, latest_persisted as u64);
+            self.send_response(response).await;
+            return false; // Terminate stream
+        }
 
         // If the block is not a duplicate, proceed with the multi-publisher leader election.
         let winner_entry = self.shared_state.block_winners.entry(block_number as u64).or_insert(self.id);
