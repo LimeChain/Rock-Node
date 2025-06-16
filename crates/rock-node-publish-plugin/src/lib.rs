@@ -1,4 +1,4 @@
-use rock_node_core::{app_context::AppContext, block_reader::BlockReader, error::Result, plugin::Plugin};
+use rock_node_core::{app_context::AppContext, block_reader::BlockReader, error::Result, plugin::Plugin, BlockReaderProvider};
 use rock_node_protobufs::org::hiero::block::api::block_stream_publish_service_server::BlockStreamPublishServiceServer;
 use state::SharedState;
 use std::any::TypeId;
@@ -45,25 +45,38 @@ impl Plugin for PublishPlugin {
         let listen_address = format!("{}:{}", config.grpc_address, config.grpc_port);
 
         let shared_state = Arc::new(SharedState::new());
-
-        let providers = context.service_providers.read().unwrap();
-        if let Some(provider) = providers.get(&TypeId::of::<Arc<dyn BlockReader>>()) {
-            if let Some(block_reader) = provider.downcast_ref::<Arc<dyn BlockReader>>() {
-                let block_number = block_reader.get_latest_persisted_block_number();
-                shared_state.set_latest_persisted_block(block_number);
-                info!("BlockReader service found. Initial latest persisted block is: {}", block_number);
-            }
-        } else {
-            warn!("No BlockReader provider found. Ensure PersistencePlugin is initialized before PublishPlugin. Starting with clean state (block -1).");
-            shared_state.set_latest_persisted_block(-1);
-        }
+        {
+            let providers = context.service_providers.read().unwrap();
+            
+            let key = TypeId::of::<BlockReaderProvider>();
         
+            if let Some(provider_any) = providers.get(&key) {
+                if let Some(provider_handle) = provider_any.downcast_ref::<BlockReaderProvider>() {
+                    
+                    let block_reader: Arc<dyn BlockReader> = provider_handle.get_service();
+                    
+                    let block_number = block_reader.get_latest_persisted_block_number();
+                    shared_state.set_latest_persisted_block(block_number);
+                    info!(
+                        "Successfully retrieved BlockReader via provider handle. Latest persisted block is: {}",
+                        block_number
+                    );
+        
+                } else {
+                    warn!("Found BlockReaderProvider key, but failed to downcast. This indicates a critical type mismatch bug.");
+                }
+            } else {
+                warn!("No BlockReaderProvider handle found. Is the persistence plugin configured and running correctly?");
+            }
+        }
+
         let service = PublishServiceImpl {
             context: context.clone(),
-            shared_state,
+            shared_state, // Pass the initialized state
         };
         let server = BlockStreamPublishServiceServer::new(service);
 
+        // Spawn the server task. It will now have the correct initial state.
         tokio::spawn(async move {
             info!("Publish gRPC service listening on {}", listen_address);
             if let Err(e) = tonic::transport::Server::builder()

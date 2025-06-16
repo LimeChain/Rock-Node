@@ -2,14 +2,9 @@ mod storage;
 
 use crate::storage::StorageManager;
 use rock_node_core::{
-    app_context::AppContext,
-    capability::Capability,
-    error::Result,
-    events::{BlockItemsReceived, BlockPersisted, BlockVerified},
-    plugin::Plugin,
-    block_reader::BlockReader,
+    app_context::AppContext, block_reader::BlockReader, capability::Capability, error::Result, events::{BlockItemsReceived, BlockPersisted, BlockVerified}, plugin::Plugin, BlockReaderProvider
 };
-use std::{any::TypeId, sync::Arc};
+use std::{any::{TypeId}, sync::Arc};
 use tokio::sync::mpsc::Receiver;
 use tracing::{info, warn};
 
@@ -56,34 +51,50 @@ impl PersistencePlugin {
 }
 
 impl Plugin for PersistencePlugin {
-    fn name(&self) -> &'static str { "persistence-plugin" }
+    fn name(&self) -> &'static str {
+        "persistence-plugin"
+    }
 
     fn initialize(&mut self, context: AppContext) -> Result<()> {
         info!("Initializing PersistencePlugin...");
         let config = &context.config.plugins.persistence_service;
-        let storage_manager =
+    
+        let (storage_manager, initial_range) =
             StorageManager::new(&config.storage_path, config.hot_storage_block_count)?;
-        info!(
-            "StorageManager initialized at path '{}' with hot tier limit of {} blocks.",
-            &config.storage_path, config.hot_storage_block_count
-        );
-        self.storage_manager = Some(storage_manager.clone());
-        let storage_manager_arc = Arc::new(storage_manager);
+    
+        if let Some((earliest, latest)) = initial_range {
+            info!(
+                "Persistence database loaded successfully. Blocks available -> {} to {}.",
+                earliest, latest
+            );
+        } else {
+            info!("Persistence database is new or empty. No blocks found.");
+        }
+    
 
-        // --- FIX: Perform all borrowing operations within a dedicated scope ---
-        {
-            // The borrow starts here.
-            let mut providers = context.service_providers.write().unwrap();
-            providers.insert(TypeId::of::<Arc<dyn BlockReader>>(), storage_manager_arc);
-            info!("PersistencePlugin registered as a BlockReader provider.");
-        } // -- The borrow (the `providers` lock guard) ends here automatically.
+    self.storage_manager = Some(storage_manager.clone());
+    let storage_manager_arc = Arc::new(storage_manager);
+    {
+        let mut providers = context.service_providers.write().unwrap();
 
-        // Now that the borrow is released, it's safe to move `context`.
-        self.context = Some(context);
+        // --- THE FIX ---
+        let block_reader_service: Arc<dyn BlockReader> = storage_manager_arc;
+        let provider_handle = BlockReaderProvider::new(block_reader_service);
+
+        // 1. Store an Arc to the handle. The concrete type behind dyn Any is `BlockReaderProvider`.
+        let value_to_store = Arc::new(provider_handle);
         
-        Ok(())
-    }
+        // 2. The key MUST be the TypeId of the object we just stored inside the Arc.
+        let key = TypeId::of::<BlockReaderProvider>();
 
+        providers.insert(key, value_to_store);
+        
+        info!("PersistencePlugin registered a BlockReaderProvider handle.");
+    }
+    self.context = Some(context);
+    Ok(())
+    }
+    
     fn start(&mut self) -> Result<()> {
         info!("Starting PersistencePlugin...");
         let context = self.context.as_ref().expect("Plugin must be initialized").clone();
@@ -124,7 +135,6 @@ impl Plugin for PersistencePlugin {
     }
 }
 
-// process_event function is correct and does not need changes.
 async fn process_event(event: InboundEvent, context: &AppContext, storage_manager: &StorageManager) {
     let block_number = event.block_number();
     let cache_key = event.cache_key();

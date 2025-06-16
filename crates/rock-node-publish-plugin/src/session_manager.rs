@@ -16,7 +16,6 @@ use tonic::Status;
 use tracing::{info, warn};
 use uuid::Uuid;
 
-/// Manages the state for a single, active publisher connection.
 pub struct SessionManager {
     pub id: Uuid,
     context: AppContext,
@@ -44,61 +43,97 @@ impl SessionManager {
         }
     }
 
-    /// Processes a single request from the client stream. Returns `true` if the session should end.
     pub async fn handle_request(&mut self, request: PublishRequestType) -> bool {
         match request {
             PublishRequestType::BlockItems(block_item_set) => {
                 for item in block_item_set.block_items {
                     if let Some(item_type) = &item.item {
+                        // The BlockHeader is the first item of any new block.
+                        // This is where we perform the check.
                         if let BlockItemType::BlockHeader(header) = item_type {
+                            // If `handle_block_header` returns false, it means the block
+                            // was rejected and the stream should be terminated.
                             if !self.handle_block_header(header.number as i64).await {
-                                return true; // Handshake failed, end session.
+                                return true; // Terminate connection.
                             }
                         }
                     }
 
+                    // Only buffer items if this session is the primary one for this block.
                     if self.state == SessionState::Primary {
                         self.item_buffer.push(item.clone());
                     }
 
+                    // The BlockProof is the last item. Once received, the block is complete.
                     if let Some(BlockItemType::BlockProof(_)) = &item.item {
                         if self.state == SessionState::Primary {
                             self.publish_complete_block().await;
-                            return true; // End session after successfully publishing a block.
+                            self.reset_for_next_block();
                         }
                     }
                 }
             }
             PublishRequestType::EndStream(_) => {
                 info!(session_id = %self.id, "Publisher sent EndStream. Closing connection.");
-                return true; // Exit the loop
+                return true;
             }
         }
         false
     }
 
+    /// Resets the session's buffer and state to be ready for the next block race.
+    fn reset_for_next_block(&mut self) {
+        info!(session_id = %self.id, block_number = self.current_block_number, "Processed block. Resetting session for next block.");
+        self.item_buffer.clear();
+        self.state = SessionState::New;
+        self.current_block_number = 0;
+    }
+    
+    /// Handles an incoming BlockHeader. It contains the logic to reject old blocks.
     async fn handle_block_header(&mut self, block_number: i64) -> bool {
         self.current_block_number = block_number as u64;
         self.state = SessionState::New;
         self.item_buffer.clear();
 
+        // **CORRECTED BEHAVIOR START**
+        // Fetch the latest block number that has been successfully persisted.
+        // This state is initialized by the PublishPlugin at startup.
         let latest_persisted = self.shared_state.get_latest_persisted_block();
+
+        // Per the design doc: "If this is less than last known verified block, respond with 'DuplicateBlock'".
+        // Our check implements this. We use `<=` to handle blocks that are older or the same as the latest.
         if block_number <= latest_persisted {
-            warn!(session_id = %self.id, block_number, latest_persisted, "Received duplicate block. Rejecting.");
+            warn!(
+                session_id = %self.id,
+                received_block = block_number,
+                latest_persisted_block = latest_persisted,
+                "Rejecting duplicate block based on startup state."
+            );
+            
+            // The protocol requires sending an EndOfStream message with a specific code.
             let code = publish_stream_response::end_of_stream::Code::DuplicateBlock;
-            self.send_response(response_from_code(code, latest_persisted as u64)).await;
+            
+            // The protocol also states: "Response includes the last known block".
+            let response = response_from_code(code, latest_persisted as u64);
+            self.send_response(response).await;
+            
+            // Returning `false` signals the calling handler to terminate this session's stream.
             return false;
         }
+        // **CORRECTED BEHAVIOR END**
 
+        // If the block is not a duplicate, proceed with the multi-publisher leader election.
         let winner_entry = self.shared_state.block_winners.entry(block_number as u64).or_insert(self.id);
         if *winner_entry == self.id {
             self.state = SessionState::Primary;
-            info!(session_id = %self.id, block_number, "This session is now PRIMARY.");
+            info!(session_id = %self.id, block_number, "Session is PRIMARY for this block.");
         } else {
             self.state = SessionState::Behind;
             info!(session_id = %self.id, block_number, "Another session is primary. Sending SkipBlock.");
             self.send_skip_block().await;
         }
+        
+        // Returning `true` signals that the session should continue.
         true
     }
 
@@ -122,14 +157,12 @@ impl SessionManager {
         self.wait_for_persistence_ack().await;
     }
 
-    /// Spawns a task to wait for the `BlockPersisted` event and sends an ACK on success
-    /// or a `ResendBlock` message on failure or timeout.
     async fn wait_for_persistence_ack(&self) {
-        // This will now compile because AppContext provides a `broadcast::Sender`.
         let mut rx_persisted = self.context.tx_block_persisted.subscribe();
         let response_tx_clone = self.response_tx.clone();
         let block_to_await = self.current_block_number;
         let session_id = self.id;
+        let shared_state_clone = self.shared_state.clone();
 
         tokio::spawn(async move {
             info!(%session_id, block = block_to_await, "Spawned ACK waiter task.");
@@ -144,11 +177,10 @@ impl SessionManager {
             }).await;
 
             match timeout_result {
-                // Success case: The block was persisted in time.
                 Ok(Some(_)) => {
-                    info!(%session_id, block = block_to_await, "Block persisted. Sending session-specific ACK.");
-                    
-                    // FIX: Initialize the struct according to the compiler's expectation.
+                    info!(%session_id, block = block_to_await, "Block persisted. Sending session-specific ACK and updating shared state.");
+                    // IMPORTANT: Update the shared state so future connections know about this newly persisted block.
+                    shared_state_clone.set_latest_persisted_block(block_to_await as i64);
                     let ack = PublishStreamResponse {
                         response: Some(publish_stream_response::Response::Acknowledgement(
                             BlockAcknowledgement { 
@@ -162,7 +194,6 @@ impl SessionManager {
                         warn!(%session_id, block = block_to_await, "Failed to send ACK, client may have disconnected.");
                     }
                 },
-                // Failure case: Timeout or channel closed.
                 _ => {
                     warn!(%session_id, block = block_to_await, "Did not receive persistence ACK for block. Requesting resend.");
                     let resend_req = PublishStreamResponse {
@@ -175,6 +206,8 @@ impl SessionManager {
                     }
                 }
             }
+            // After processing, remove this block's winner to allow garbage collection.
+            shared_state_clone.block_winners.remove(&block_to_await);
         });
     }
 
