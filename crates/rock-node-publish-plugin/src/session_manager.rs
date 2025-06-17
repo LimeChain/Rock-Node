@@ -2,6 +2,7 @@ use crate::state::{SharedState, SessionState};
 use anyhow::Result;
 use rock_node_core::AppContext;
 use rock_node_protobufs::{
+    com::hedera::hapi::block::stream::Block,
     com::hedera::hapi::block::stream::block_item::Item as BlockItemType,
     org::hiero::block::api::{
         publish_stream_request::Request as PublishRequestType,
@@ -9,6 +10,7 @@ use rock_node_protobufs::{
         PublishStreamResponse,
     },
 };
+use prost::Message;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
@@ -48,23 +50,17 @@ impl SessionManager {
             PublishRequestType::BlockItems(block_item_set) => {
                 for item in block_item_set.block_items {
                     if let Some(item_type) = &item.item {
-                        // The BlockHeader is the first item of any new block.
-                        // This is where we perform the check.
                         if let BlockItemType::BlockHeader(header) = item_type {
-                            // If `handle_block_header` returns false, it means the block
-                            // was rejected and the stream should be terminated.
                             if !self.handle_block_header(header.number as i64).await {
-                                return true; // Terminate connection.
+                                return true;
                             }
                         }
                     }
 
-                    // Only buffer items if this session is the primary one for this block.
                     if self.state == SessionState::Primary {
                         self.item_buffer.push(item.clone());
                     }
 
-                    // The BlockProof is the last item. Once received, the block is complete.
                     if let Some(BlockItemType::BlockProof(_)) = &item.item {
                         if self.state == SessionState::Primary {
                             self.publish_complete_block().await;
@@ -80,16 +76,14 @@ impl SessionManager {
         }
         false
     }
-
-    /// Resets the session's buffer and state to be ready for the next block race.
+    
     fn reset_for_next_block(&mut self) {
         info!(session_id = %self.id, block_number = self.current_block_number, "Processed block. Resetting session for next block.");
         self.item_buffer.clear();
         self.state = SessionState::New;
         self.current_block_number = 0;
     }
-    
-    /// Handles an incoming BlockHeader. It contains the logic to reject old blocks.
+
     async fn handle_block_header(&mut self, block_number: i64) -> bool {
         self.current_block_number = block_number as u64;
         self.state = SessionState::New;
@@ -105,14 +99,10 @@ impl SessionManager {
                 "Rejecting duplicate block based on startup state."
             );
             
-            // The protocol requires sending an EndOfStream message with a specific code.
             let code = publish_stream_response::end_of_stream::Code::DuplicateBlock;
-            
-            // The protocol also states: "Response includes the last known block".
             let response = response_from_code(code, latest_persisted as u64);
             self.send_response(response).await;
             
-            // Returning `false` signals the calling handler to terminate this session's stream.
             return false;
         }
 
@@ -124,14 +114,12 @@ impl SessionManager {
                 "Rejecting future block. RockNode is BEHIND."
             );
 
-            // Per the protocol, respond with BEHIND and the last block we successfully have.
             let code = publish_stream_response::end_of_stream::Code::Behind;
             let response = response_from_code(code, latest_persisted as u64);
             self.send_response(response).await;
-            return false; // Terminate stream
+            return false;
         }
 
-        // If the block is not a duplicate, proceed with the multi-publisher leader election.
         let winner_entry = self.shared_state.block_winners.entry(block_number as u64).or_insert(self.id);
         if *winner_entry == self.id {
             self.state = SessionState::Primary;
@@ -142,27 +130,43 @@ impl SessionManager {
             self.send_skip_block().await;
         }
         
-        // Returning `true` signals that the session should continue.
         true
     }
 
     async fn publish_complete_block(&mut self) {
         info!(session_id = %self.id, block_number = self.current_block_number, "Block is complete. Publishing to core.");
+
+        // 1. Create the parent `Block` protobuf message.
+        // `std::mem::take` efficiently moves the buffered items without needing to clone them.
+        let block_proto = Block {
+            items: std::mem::take(&mut self.item_buffer),
+        };
+
+        // 2. Encode the entire `Block` message into bytes.
+        let mut encoded_block_contents = Vec::new();
+        if let Err(e) = block_proto.encode(&mut encoded_block_contents) {
+            warn!(session_id = %self.id, error = %e, "Failed to encode complete block proto. Aborting publish.");
+            return; // Don't proceed if we can't encode the data
+        }
+
+        // 3. Create the event with the correctly encoded contents.
         let block_data = rock_node_core::events::BlockData {
             block_number: self.current_block_number,
-            contents: format!("Real data for block #{}. Contains {} items.", self.current_block_number, self.item_buffer.len()),
+            contents: encoded_block_contents, // Use the real data
         };
+
+        // 4. Put the data in the cache and send the event to the persistence service.
         let cache_key = self.context.block_data_cache.insert(block_data);
         let event = rock_node_core::events::BlockItemsReceived {
             block_number: self.current_block_number,
             cache_key,
         };
+
         if self.context.tx_block_items_received.send(event).await.is_err() {
-            warn!(session_id = %self.id, "Failed to publish BlockItemsReceived event.");
+            warn!(session_id = %self.id, "Failed to publish BlockItemsReceived event to core channel.");
             return;
         }
-        self.item_buffer.clear();
-
+        
         self.wait_for_persistence_ack().await;
     }
 
@@ -188,7 +192,6 @@ impl SessionManager {
             match timeout_result {
                 Ok(Some(_)) => {
                     info!(%session_id, block = block_to_await, "Block persisted. Sending session-specific ACK and updating shared state.");
-                    // IMPORTANT: Update the shared state so future connections know about this newly persisted block.
                     shared_state_clone.set_latest_persisted_block(block_to_await as i64);
                     let ack = PublishStreamResponse {
                         response: Some(publish_stream_response::Response::Acknowledgement(
@@ -215,7 +218,6 @@ impl SessionManager {
                     }
                 }
             }
-            // After processing, remove this block's winner to allow garbage collection.
             shared_state_clone.block_winners.remove(&block_to_await);
         });
     }

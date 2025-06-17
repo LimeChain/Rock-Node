@@ -4,7 +4,7 @@ use uuid::Uuid;
 #[derive(Debug, Clone)]
 pub struct BlockData {
     pub block_number: u64,
-    pub contents: String, // We'll use a simple string for now
+    pub contents: Vec<u8>, // We'll use a simple string for now
 }
 
 /// Published by the Publish plugin after it has received a complete block

@@ -19,6 +19,7 @@ pub struct PluginConfigs {
     pub subscribe_service: SubscribeServiceConfig,
     pub publish_service: PublishServiceConfig,
     pub verification_service: VerificationServiceConfig,
+    pub block_access_service: BlockAccessServiceConfig,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -52,4 +53,11 @@ pub struct SubscribeServiceConfig {
 #[derive(Debug, Deserialize, Serialize)]
 pub struct VerificationServiceConfig {
     pub enabled: bool,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct BlockAccessServiceConfig {
+    pub enabled: bool,
+    pub grpc_address: String,
+    pub grpc_port: u16,
 }

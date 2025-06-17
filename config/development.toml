@@ -38,3 +38,8 @@ database_path = "data/" # Use a local 'data' directory for development
 
     [plugins.verification_service]
     enabled = false
+
+    [plugins.block_access_service]
+    enabled = true
+    grpc_address = "0.0.0.0"
+    grpc_port = 8081

@@ -4,6 +4,8 @@ use crate::storage::StorageManager;
 use rock_node_core::{
     app_context::AppContext, block_reader::BlockReader, capability::Capability, error::Result, events::{BlockItemsReceived, BlockPersisted, BlockVerified}, plugin::Plugin, BlockReaderProvider
 };
+use rock_node_protobufs::com::hedera::hapi::block::stream::Block;
+use prost::Message;
 use std::{any::{TypeId}, sync::Arc};
 use tokio::sync::mpsc::Receiver;
 use tracing::{info, warn};
@@ -142,25 +144,40 @@ async fn process_event(event: InboundEvent, context: &AppContext, storage_manage
         "Persistence: Processing block #{} with cache key [{}].",
         block_number, cache_key
     );
+
     if let Some(data) = context.block_data_cache.get(&cache_key) {
-        if let Err(e) = storage_manager.write_block(block_number, &data) {
-            warn!("CRITICAL: Failed to persist block #{}: {}", block_number, e);
-        } else {
-            info!("Persistence: Successfully wrote block #{} to storage.", block_number);
-            let persisted_event = BlockPersisted {
-                block_number,
-                cache_key,
-            };
-            if context.tx_block_persisted.send(persisted_event).is_err() {
+        match Block::decode(data.contents.as_slice()) {
+            Ok(block_proto) => {
+                if let Err(e) = storage_manager.write_block(block_number, &block_proto) {
+                    warn!("CRITICAL: Failed to persist block #{}: {}", block_number, e);
+                } else {
+                    info!(
+                        "Persistence: Successfully wrote block #{} to storage.",
+                        block_number
+                    );
+                    let persisted_event = BlockPersisted {
+                        block_number,
+                        cache_key,
+                    };
+                    if context.tx_block_persisted.send(persisted_event).is_err() {
+                        warn!(
+                            "Failed to publish BlockPersisted event for block #{}. No subscribers.",
+                            block_number
+                        );
+                    }
+                }
+            }
+            Err(e) => {
+                // This can happen if the data in the cache is corrupted.
                 warn!(
-                    "Failed to publish BlockPersisted event for block #{}. All subscribers have disconnected.",
-                    block_number
+                    "Could not decode BlockData from cache for block #{}: {}",
+                    block_number, e
                 );
             }
         }
     } else {
         warn!(
-            "Could not find data for block #{} in cache with key [{}]. It may have expired or been processed by another instance.",
+            "Could not find data for block #{} in cache with key [{}].",
             block_number, cache_key
         );
     }

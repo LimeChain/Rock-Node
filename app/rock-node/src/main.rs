@@ -3,6 +3,7 @@
 use rock_node_publish_plugin::PublishPlugin;
 use rock_node_verifier_plugin::VerifierPlugin;
 use rock_node_persistence_plugin::PersistencePlugin;
+use rock_node_block_access_plugin::BlockAccessPlugin;
 use serde_json;
 use anyhow::Result;
 use rock_node_core::app_context::AppContext;
@@ -134,6 +135,7 @@ async fn main() -> Result<()> {
     
     plugins.push(Box::new(ObservabilityPlugin::new()));
     plugins.push(Box::new(PublishPlugin::new()));
+    plugins.push(Box::new(BlockAccessPlugin::new()));
 
     // --- Step 4: Instantiate and Initialize Plugins ---
     info!("Initializing plugins...");

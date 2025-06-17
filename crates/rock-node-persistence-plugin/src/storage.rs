@@ -1,30 +1,28 @@
 use anyhow::Result;
-use rock_node_core::{events::BlockData, block_reader::BlockReader};
+use rock_node_core::{block_reader::BlockReader};
+use rock_node_protobufs::com::hedera::hapi::block::stream::Block;
+use prost::Message;
 use rocksdb::{DB, Options, WriteBatch};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tracing::info;
 
+// Storing raw bytes is more reliable for serialized data.
 #[derive(Serialize, Deserialize, Debug)]
 pub struct StoredBlock {
-    pub contents: String,
+    pub contents: Vec<u8>,
 }
 
 const LATEST_BLOCK_KEY: &[u8] = b"METADATA::LATEST_PERSISTED_BLOCK";
 const EARLIEST_BLOCK_KEY: &[u8] = b"METADATA::EARLIEST_PERSISTED_BLOCK";
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct StorageManager {
     db: Arc<DB>,
     hot_storage_block_count: u64,
 }
 
 impl StorageManager {
-    /// Creates a new StorageManager, opens the database, and reports the block range found.
-    ///
-    /// # Returns
-    /// A tuple containing the new StorageManager instance and an Option with the
-    /// (earliest, latest) block numbers if the database was not empty.
     pub fn new(path: &str, hot_storage_block_count: u64) -> Result<(Self, Option<(i64, i64)>)> {
         let mut opts = Options::default();
         opts.create_if_missing(true);
@@ -47,27 +45,35 @@ impl StorageManager {
         Ok((manager, initial_range))
     }
 
-    pub fn write_block(&self, block_number: u64, data: &BlockData) -> Result<()> {
+
+    // The `BlockData` from the event likely contains the full Block object.
+    // We serialize it to bytes here for storage.
+    pub fn write_block(&self, block_number: u64, block_proto: &Block) -> Result<()> {
         let key = block_number.to_be_bytes();
+
+        // Serialize the protobuf message into bytes
+        let mut block_bytes = Vec::new();
+        block_proto.encode(&mut block_bytes)?;
+
         let stored_block = StoredBlock {
-            contents: data.contents.clone(),
+            contents: block_bytes,
         };
+        
+        // Now serialize the `StoredBlock` struct using bincode for DB storage
         let value = bincode::serialize(&stored_block)?;
 
         let mut batch = WriteBatch::default();
         batch.put(&key, &value);
         batch.put(LATEST_BLOCK_KEY, &key);
 
-        // If this is the very first block, also set the earliest key.
         if self.get_earliest_persisted_block_number() == -1 {
             batch.put(EARLIEST_BLOCK_KEY, &key);
         }
 
         self.db.write(batch)?;
-
         self.archive_if_needed()
     }
-
+    
     fn archive_if_needed(&self) -> Result<()> {
         let latest = self.get_latest_persisted_block_number();
         let earliest = self.get_earliest_persisted_block_number();
@@ -131,5 +137,21 @@ impl BlockReader for StorageManager {
 
     fn get_earliest_persisted_block_number(&self) -> i64 {
         self.read_block_number_from_key(EARLIEST_BLOCK_KEY)
+    }
+    
+    fn read_block(&self, block_number: u64) -> Result<Option<Vec<u8>>> {
+        let key = block_number.to_be_bytes();
+        info!("Reading block #{}", block_number);
+        match self.db.get(&key)? {
+            Some(db_vec) => {
+                info!("Found block #{}", block_number);
+                // Deserialize from bincode first to get the StoredBlock
+                let stored_block: StoredBlock = bincode::deserialize(&db_vec)?;
+                // Return the raw protobuf bytes
+                info!("Stored block contents: {:?}", stored_block.contents);
+                Ok(Some(stored_block.contents))
+            }
+            None => Ok(None),
+        }
     }
 }
