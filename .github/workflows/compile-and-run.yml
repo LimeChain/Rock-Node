@@ -33,7 +33,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       - name: Build workspace (all crates & targets)
-        run: cargo build --workspace --all-targets --locked
+        run: cargo build --workspace --locked
 
       - name: Start Rock Node in background
         run: |
