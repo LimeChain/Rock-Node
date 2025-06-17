@@ -2,7 +2,7 @@
 # Core Application Configuration
 # =========================================
 [core]
-log_level = "INFO"
+log_level = "TRACE"
 database_path = "data/" # Use a local 'data' directory for development
 
 # =========================================
@@ -17,7 +17,7 @@ database_path = "data/" # Use a local 'data' directory for development
     [plugins.publish_service]
     enabled = true
     grpc_address = "0.0.0.0"
-    grpc_port = 8080
+    grpc_port = 6790
     max_concurrent_streams = 250 
 
     [plugins.persistence_service]
@@ -42,4 +42,9 @@ database_path = "data/" # Use a local 'data' directory for development
     [plugins.block_access_service]
     enabled = true
     grpc_address = "0.0.0.0"
-    grpc_port = 8081
+    grpc_port = 6791
+
+    [plugins.server_status_service]
+    enabled = true
+    grpc_address = "0.0.0.0"
+    grpc_port = 6792

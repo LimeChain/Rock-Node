@@ -1,5 +1,5 @@
 [package]
-name = "rock-node-publish-plugin"
+name = "rock-node-server-status-plugin"
 version = "0.1.0"
 edition = "2021"
 
@@ -7,12 +7,8 @@ edition = "2021"
 rock-node-core = { path = "../rock-node-core" }
 rock-node-protobufs = { path = "../rock-node-protobufs" }
 
-# Async runtime and utilities
+# Async runtime and gRPC
 tokio = { version = "1", features = ["full"] }
-tokio-stream = "0.1"
-futures-util = "0.3"
-
-# gRPC library
 tonic = "0.13.1"
 
 # For easy error handling
@@ -20,12 +16,3 @@ anyhow = "1"
 
 # For logging
 tracing = "0.1"
-
-# For unique session IDs
-uuid = { version = "1", features = ["v4"] }
-
-# For concurrent hash maps
-dashmap = "5.5"
-
-# For protobufs
-prost = "0.13.5"
