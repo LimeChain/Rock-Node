@@ -7,6 +7,8 @@ publish = false
 [dependencies]
 # Required for the plugin system and core types
 rock-node-core = { path = "../rock-node-core" }
+rock-node-protobufs = { path = "../rock-node-protobufs" }
+prost = "0.12"
 
 # Async runtime and utilities
 tokio = { version = "1", features = ["full"] }

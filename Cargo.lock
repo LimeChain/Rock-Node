@@ -1150,6 +1150,7 @@ name = "rock-node"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "rock-node-block-access-plugin",
  "rock-node-core",
  "rock-node-observability-plugin",
  "rock-node-persistence-plugin",
@@ -1162,6 +1163,21 @@ dependencies = [
  "toml",
  "tracing",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "rock-node-block-access-plugin"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "futures-util",
+ "prost",
+ "rock-node-core",
+ "rock-node-protobufs",
+ "tokio",
+ "tokio-stream",
+ "tonic",
+ "tracing",
 ]
 
 [[package]]
@@ -1193,7 +1209,9 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "bincode",
+ "prost",
  "rock-node-core",
+ "rock-node-protobufs",
  "rocksdb",
  "serde",
  "tokio",
@@ -1221,6 +1239,7 @@ dependencies = [
  "anyhow",
  "dashmap",
  "futures-util",
+ "prost",
  "rock-node-core",
  "rock-node-protobufs",
  "tokio",

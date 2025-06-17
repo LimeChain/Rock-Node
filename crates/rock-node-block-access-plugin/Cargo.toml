@@ -1,11 +1,12 @@
 [package]
-name = "rock-node-publish-plugin"
+name = "rock-node-block-access-plugin"
 version = "0.1.0"
 edition = "2021"
 
 [dependencies]
 rock-node-core = { path = "../rock-node-core" }
 rock-node-protobufs = { path = "../rock-node-protobufs" }
+prost = "0.12"
 
 # Async runtime and utilities
 tokio = { version = "1", features = ["full"] }
@@ -20,12 +21,3 @@ anyhow = "1"
 
 # For logging
 tracing = "0.1"
-
-# For unique session IDs
-uuid = { version = "1", features = ["v4"] }
-
-# For concurrent hash maps
-dashmap = "5.5"
-
-# For protobufs
-prost = "0.12"

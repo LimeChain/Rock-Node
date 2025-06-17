@@ -61,7 +61,7 @@ impl Plugin for VerifierPlugin {
 
                 // Fetch data using the claim check.
                 if let Some(data) = context.block_data_cache.get(&event.cache_key) {
-                    info!("Verifier: Fetched data: '{}'", data.contents);
+                    info!("Verifier: Fetched data: '{:?}'", data.contents);
                 }
                 
                 // Pretend to do work
