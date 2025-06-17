@@ -5,14 +5,14 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-tonic = "0.11"
-prost = "0.12"
+tonic = "0.13.1"
+prost = "0.13.5"
 
 # Add serde as a dependency for the generated structs
 serde = { version = "1", features = ["derive"] }
 
 [build-dependencies]
-tonic-build = { version = "0.11", features = ["prost"] }
+tonic-build = { version = "0.13.1", features = ["prost"] }
 anyhow = "1"
 walkdir = "2"
 fs_extra = "1.3"

@@ -6,7 +6,7 @@ edition = "2021"
 [dependencies]
 rock-node-core = { path = "../rock-node-core" }
 rock-node-protobufs = { path = "../rock-node-protobufs" }
-prost = "0.12"
+prost = "0.13.5"
 
 # Async runtime and utilities
 tokio = { version = "1", features = ["full"] }
@@ -14,7 +14,7 @@ tokio-stream = "0.1"
 futures-util = "0.3"
 
 # gRPC library
-tonic = "0.11"
+tonic = "0.13.1"
 
 # For easy error handling
 anyhow = "1"

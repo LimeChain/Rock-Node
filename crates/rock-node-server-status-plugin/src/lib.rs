@@ -1,50 +1,54 @@
+mod service;
+
 use rock_node_core::{
-    app_context::AppContext, error::Result, plugin::Plugin, BlockReaderProvider,
+    app_context::AppContext,
+    service_provider::{BlockReaderProvider},
+    error::Result,
+    plugin::Plugin,
 };
-use rock_node_protobufs::org::hiero::block::api::block_access_service_server::BlockAccessServiceServer;
-use std::any::TypeId;
+use rock_node_protobufs::org::hiero::block::api::block_node_service_server::BlockNodeServiceServer;
+use service::StatusServiceImpl;
+use std::{any::TypeId};
 use tracing::{error, info, warn};
 
-mod service;
-use service::BlockAccessServiceImpl;
-
 #[derive(Debug, Default)]
-pub struct BlockAccessPlugin {
-    // Store the context here
+pub struct StatusPlugin {
     context: Option<AppContext>,
 }
 
-impl BlockAccessPlugin {
+impl StatusPlugin {
     pub fn new() -> Self {
         Self::default()
     }
 }
 
-impl Plugin for BlockAccessPlugin {
+impl Plugin for StatusPlugin {
     fn name(&self) -> &'static str {
-        "block-access-plugin"
+        "status-plugin"
     }
 
     fn initialize(&mut self, context: AppContext) -> Result<()> {
-        info!("BlockAccessPlugin initialized.");
+        info!("StatusPlugin initialized.");
         self.context = Some(context);
         Ok(())
     }
 
     fn start(&mut self) -> Result<()> {
-        info!("Starting BlockAccessPlugin...");
+        info!("Starting StatusPlugin...");
         let context = self
             .context
             .as_ref()
             .expect("Plugin must be initialized before starting")
             .clone();
 
-        let config = &context.config.plugins.block_access_service;
+        // Ensure the plugin is enabled in config before starting the server
+        let config = &context.config.plugins.server_status_service;
         if !config.enabled {
-            info!("BlockAccessPlugin is disabled. Skipping start.");
+            info!("StatusPlugin is disabled. Skipping start.");
             return Ok(());
         }
 
+        // Get the BlockReader service provided by the persistence plugin
         let block_reader = {
             let providers = context.service_providers.read().unwrap();
             let key = TypeId::of::<BlockReaderProvider>();
@@ -63,17 +67,17 @@ impl Plugin for BlockAccessPlugin {
         };
 
         let listen_address = format!("{}:{}", config.grpc_address, config.grpc_port);
-        let service = BlockAccessServiceImpl { block_reader };
-        let server = BlockAccessServiceServer::new(service);
+        let service = StatusServiceImpl { block_reader };
+        let server = BlockNodeServiceServer::new(service);
 
         tokio::spawn(async move {
-            info!("BlockAccess gRPC service listening on {}", listen_address);
+            info!("Status gRPC service listening on {}", listen_address);
             if let Err(e) = tonic::transport::Server::builder()
                 .add_service(server)
                 .serve(listen_address.parse().unwrap())
                 .await
             {
-                error!("gRPC server failed: {}", e);
+                error!("Status gRPC server failed: {}", e);
             }
         });
 

@@ -62,7 +62,7 @@ fn main() -> Result<()> {
     println!("cargo:warning=Compiling {} protobuf definitions from unified directory...", all_protos.len());
     tonic_build::configure()
         .type_attribute(".", "#[derive(serde::Serialize, serde::Deserialize)]")
-        .compile(&all_protos, &[unified_proto_dir])?;
+        .compile_protos(&all_protos, &[unified_proto_dir])?;
 
     Ok(())
 }
