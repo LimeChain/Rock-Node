@@ -1,0 +1,40 @@
+name: Rock Node
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  unit-tests-and-lint:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Install dependencies (protoc)
+        run: sudo apt-get update -y && sudo apt-get install -y protobuf-compiler
+
+      - name: Set up Rust toolchain (stable)
+        uses: dtolnay/rust-toolchain@v1
+        with:
+          toolchain: stable
+          components: "clippy, rustfmt"
+
+      - name: Cache cargo registry and build artifacts
+        uses: Swatinem/rust-cache@v2
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Run linter (Clippy)
+        run: cargo clippy --workspace -- -D warnings
+
+      - name: Run unit tests
+        run: cargo test --workspace --locked

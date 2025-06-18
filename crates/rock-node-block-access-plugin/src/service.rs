@@ -159,3 +159,218 @@ impl BlockAccessServiceImpl {
         Ok(Response::new(response))
     }
 }
+
+//================================================================================//
+//=============================== UNIT TESTS =====================================//
+//================================================================================//
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rock_node_core::block_reader::BlockReader;
+    use rock_node_protobufs::{com::hedera::hapi::block::stream::BlockItem, org::hiero::block::api::block_request::BlockSpecifier};
+    use std::collections::HashMap;
+    use anyhow::Result;
+
+    #[derive(Debug, Default)]
+    struct MockBlockReader {
+        blocks: HashMap<u64, Vec<u8>>,
+        earliest_block: i64,
+        latest_block: i64,
+        force_db_error: bool,
+    }
+
+    impl MockBlockReader {
+        fn new(earliest: i64, latest: i64) -> Self {
+            Self {
+                earliest_block: earliest,
+                latest_block: latest,
+                ..Default::default()
+            }
+        }
+
+        fn insert_block(&mut self, number: u64, data: Vec<u8>) {
+            self.blocks.insert(number, data);
+        }
+    }
+
+    impl BlockReader for MockBlockReader {
+        fn read_block(&self, block_number: u64) -> Result<Option<Vec<u8>>> {
+            if self.force_db_error {
+                return Err(anyhow::anyhow!("Forced database error"));
+            }
+            Ok(self.blocks.get(&block_number).cloned())
+        }
+
+        fn get_earliest_persisted_block_number(&self) -> i64 {
+            self.earliest_block
+        }
+
+        fn get_latest_persisted_block_number(&self) -> i64 {
+            self.latest_block
+        }
+    }
+
+    fn create_test_service(reader: MockBlockReader) -> BlockAccessServiceImpl {
+        BlockAccessServiceImpl {
+            block_reader: Arc::new(reader),
+            metrics: Arc::new(MetricsRegistry::new().unwrap()),
+        }
+    }
+
+    // Helper to create a valid, serializable mock Block object
+    fn create_mock_block() -> Block {
+        Block {
+            items: vec![BlockItem::default()],
+        }
+    }
+
+    fn create_mock_block_bytes() -> Vec<u8> {
+        create_mock_block().encode_to_vec()
+    }
+
+    #[tokio::test]
+    async fn test_get_block_by_number_success() {
+        let mut reader = MockBlockReader::new(100, 200);
+        let mock_block_bytes = create_mock_block_bytes();
+        reader.insert_block(150, mock_block_bytes);
+        let service = create_test_service(reader);
+
+        let request = Request::new(BlockRequest {
+            block_specifier: Some(BlockSpecifier::BlockNumber(150)),
+        });
+
+        let response = service.get_block(request).await.unwrap().into_inner();
+
+        assert_eq!(response.status, block_response::Code::Success as i32);
+        assert_eq!(response.block, Some(create_mock_block()));
+    }
+
+    #[tokio::test]
+    async fn test_get_latest_block_success() {
+        let mut reader = MockBlockReader::new(100, 200);
+        let mock_block_bytes = create_mock_block_bytes();
+        reader.insert_block(200, mock_block_bytes);
+        let service = create_test_service(reader);
+
+        let request = Request::new(BlockRequest {
+            block_specifier: Some(BlockSpecifier::RetrieveLatest(true)),
+        });
+
+        let response = service.get_block(request).await.unwrap().into_inner();
+
+        assert_eq!(response.status, block_response::Code::Success as i32);
+        assert_eq!(response.block, Some(create_mock_block()));
+    }
+
+    #[tokio::test]
+    async fn test_block_not_found_in_range() {
+        let reader = MockBlockReader::new(100, 200);
+        let service = create_test_service(reader);
+
+        let request = Request::new(BlockRequest {
+            block_specifier: Some(BlockSpecifier::BlockNumber(150)),
+        });
+
+        let response = service.get_block(request).await.unwrap().into_inner();
+
+        assert_eq!(response.status, block_response::Code::NotFound as i32);
+        assert!(response.block.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_block_not_available_too_low() {
+        let reader = MockBlockReader::new(100, 200);
+        let service = create_test_service(reader);
+
+        let request = Request::new(BlockRequest {
+            block_specifier: Some(BlockSpecifier::BlockNumber(50)),
+        });
+
+        let response = service.get_block(request).await.unwrap().into_inner();
+        assert_eq!(response.status, block_response::Code::NotAvailable as i32);
+        assert!(response.block.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_invalid_request_missing_specifier() {
+        let reader = MockBlockReader::default();
+        let service = create_test_service(reader);
+        let request = Request::new(BlockRequest { block_specifier: None });
+
+        let response = service.get_block(request).await.unwrap().into_inner();
+
+        assert_eq!(response.status, block_response::Code::InvalidRequest as i32);
+        assert!(response.block.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_db_error_on_read() {
+        let mut reader = MockBlockReader::new(100, 200);
+        reader.force_db_error = true;
+        let service = create_test_service(reader);
+
+        let request = Request::new(BlockRequest {
+            block_specifier: Some(BlockSpecifier::BlockNumber(150)),
+        });
+        let response = service.get_block(request).await.unwrap().into_inner();
+
+        assert_eq!(response.status, block_response::Code::Unknown as i32);
+        assert!(response.block.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_empty_block_bytes_from_storage() {
+        let mut reader = MockBlockReader::new(100, 200);
+        reader.insert_block(150, vec![]);
+        let service = create_test_service(reader);
+
+        let request = Request::new(BlockRequest {
+            block_specifier: Some(BlockSpecifier::BlockNumber(150)),
+        });
+        let response = service.get_block(request).await.unwrap().into_inner();
+
+        assert_eq!(response.status, block_response::Code::Unknown as i32);
+        assert!(response.block.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_decoding_error_from_storage() {
+        let mut reader = MockBlockReader::new(100, 200);
+        reader.insert_block(150, vec![1, 2, 3, 4]);
+        let service = create_test_service(reader);
+
+        let request = Request::new(BlockRequest {
+            block_specifier: Some(BlockSpecifier::BlockNumber(150)),
+        });
+        let response = service.get_block(request).await.unwrap().into_inner();
+
+        assert_eq!(response.status, block_response::Code::Unknown as i32);
+        assert!(response.block.is_none());
+    }
+
+
+
+    #[tokio::test]
+    async fn test_latest_block_on_empty_db() {
+        let reader = MockBlockReader::new(-1, -1);
+        let service = create_test_service(reader);
+
+        let request = Request::new(BlockRequest {
+            block_specifier: Some(BlockSpecifier::RetrieveLatest(true)),
+        });
+
+        let response = service.get_block(request).await.unwrap().into_inner();
+        assert_eq!(response.status, block_response::Code::NotFound as i32);
+        assert!(response.block.is_none());
+    }
+
+    #[test]
+    fn test_code_to_string_helper() {
+        assert_eq!(code_to_string(block_response::Code::Success), "Success");
+        assert_eq!(code_to_string(block_response::Code::InvalidRequest), "InvalidRequest");
+        assert_eq!(code_to_string(block_response::Code::NotFound), "NotFound");
+        assert_eq!(code_to_string(block_response::Code::NotAvailable), "NotAvailable");
+        assert_eq!(code_to_string(block_response::Code::Unknown), "Unknown");
+    }
+}
