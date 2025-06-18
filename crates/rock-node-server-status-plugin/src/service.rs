@@ -1,14 +1,16 @@
-use rock_node_core::block_reader::BlockReader;
+use rock_node_core::{block_reader::BlockReader, MetricsRegistry};
 use rock_node_protobufs::org::hiero::block::api::{
     block_node_service_server::BlockNodeService, ServerStatusRequest, ServerStatusResponse,
 };
 use std::sync::Arc;
+use std::time::Instant;
 use tonic::{Request, Response, Status};
 use tracing::debug;
 
 #[derive(Debug)]
 pub struct StatusServiceImpl {
     pub block_reader: Arc<dyn BlockReader>,
+    pub metrics: Arc<MetricsRegistry>,
 }
 
 #[tonic::async_trait]
@@ -17,6 +19,7 @@ impl BlockNodeService for StatusServiceImpl {
         &self,
         request: Request<ServerStatusRequest>,
     ) -> Result<Response<ServerStatusResponse>, Status> {
+        let start_time = Instant::now();
         debug!("Processing serverStatus request: {:?}", request);
 
         // Get the block range from the persistence service.
@@ -35,6 +38,27 @@ impl BlockNodeService for StatusServiceImpl {
             // TODO: Populate version information from the AppContext or build-time variables.
             version_information: None,
         };
+
+        // --- Record Metrics ---
+        let duration = start_time.elapsed().as_secs_f64();
+        
+        self.metrics
+            .server_status_request_duration_seconds
+            .with_label_values(&["success"])
+            .observe(duration);
+            
+        self.metrics
+            .server_status_requests_total
+            .with_label_values(&["success"])
+            .inc();
+            
+        self.metrics
+            .server_status_earliest_available_block
+            .set(earliest_block);
+            
+        self.metrics
+            .server_status_latest_available_block
+            .set(latest_block);
 
         Ok(Response::new(response))
     }

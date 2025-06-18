@@ -17,6 +17,12 @@ pub struct MetricsRegistry {
     pub block_access_requests_total: CounterVec,
     pub block_access_request_duration_seconds: HistogramVec,
     pub block_access_latest_available_block: IntGauge,
+
+    // --- Status Plugin Metrics ---
+    pub server_status_requests_total: CounterVec,
+    pub server_status_request_duration_seconds: HistogramVec,
+    pub server_status_earliest_available_block: IntGauge,
+    pub server_status_latest_available_block: IntGauge,
 }
 
 impl MetricsRegistry {
@@ -64,6 +70,38 @@ impl MetricsRegistry {
         ))?;
         registry.register(Box::new(block_access_latest_available_block.clone()))?;
 
+        // --- Status Plugin Metrics Initialization ---
+        let server_status_requests_total = CounterVec::new(
+            Opts::new(
+                "rocknode_server_status_requests_total",
+                "The total number of server_status gRPC requests processed.",
+            ),
+            &["status"],
+        )?;
+        registry.register(Box::new(server_status_requests_total.clone()))?;
+
+        let server_status_request_duration_seconds = HistogramVec::new(
+            Opts::new(
+                "rocknode_server_status_request_duration_seconds",
+                "The duration of server_status gRPC requests, in seconds.",
+            )
+            .into(),
+            &["status"],
+        )?;
+        registry.register(Box::new(server_status_request_duration_seconds.clone()))?;
+
+        let server_status_earliest_available_block = IntGauge::with_opts(Opts::new(
+            "rocknode_server_status_earliest_available_block",
+            "The earliest block number reported by the status service.",
+        ))?;
+        registry.register(Box::new(server_status_earliest_available_block.clone()))?;
+
+        let server_status_latest_available_block = IntGauge::with_opts(Opts::new(
+            "rocknode_server_status_latest_available_block",
+            "The latest block number reported by the status service.",
+        ))?;
+        registry.register(Box::new(server_status_latest_available_block.clone()))?;
+
         Ok(Self {
             registry,
             blocks_acknowledged,
@@ -71,6 +109,10 @@ impl MetricsRegistry {
             block_access_requests_total,
             block_access_request_duration_seconds,
             block_access_latest_available_block,
+            server_status_requests_total,
+            server_status_request_duration_seconds,
+            server_status_earliest_available_block,
+            server_status_latest_available_block,
         })
     }
 
