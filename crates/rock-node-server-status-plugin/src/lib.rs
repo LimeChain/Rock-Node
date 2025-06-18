@@ -67,7 +67,12 @@ impl Plugin for StatusPlugin {
         };
 
         let listen_address = format!("{}:{}", config.grpc_address, config.grpc_port);
-        let service = StatusServiceImpl { block_reader };
+        
+        // Pass the metrics registry to the service implementation
+        let service = StatusServiceImpl { 
+            block_reader,
+            metrics: context.metrics.clone(),
+        };
         let server = BlockNodeServiceServer::new(service);
 
         tokio::spawn(async move {
