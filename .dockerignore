@@ -1,0 +1,17 @@
+# .dockerignore
+
+# Ignore the git directory
+.git
+.gitignore
+
+# Ignore the massive target directory from local builds
+# The build inside the container will use its own, separate target directory.
+target/
+
+# Ignore local data and development artifacts
+data/
+.env
+
+# Ignore IDE-specific files
+.idea/
+.vscode/

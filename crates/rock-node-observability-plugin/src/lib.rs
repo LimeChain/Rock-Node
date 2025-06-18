@@ -1,22 +1,36 @@
-// File: rock-node-workspace/crates/rock-node-observability-plugin/src/lib.rs
-
 use anyhow::Context;
-use axum::{http::StatusCode, response::IntoResponse, routing::get, Router};
-use rock_node_core::{app_context::AppContext, error::Result, plugin::Plugin};
+use axum::{
+    body::Body, extract::State, http::{Response, StatusCode}, response::IntoResponse, routing::get, Router
+};
+use rock_node_core::{app_context::AppContext, error::Result, plugin::Plugin, MetricsRegistry};
+use std::sync::Arc;
 use tracing::info;
 
 #[derive(Debug, Default)]
 pub struct ObservabilityPlugin {
-    // This field will hold the context after initialization.
     context: Option<AppContext>,
 }
+
 impl ObservabilityPlugin {
     pub fn new() -> Self {
         Self::default()
     }
 }
 
-// A simple health check handler that returns "OK".
+/// Axum handler that serves the Prometheus metrics.
+/// It takes the shared `MetricsRegistry` from the application state.
+async fn get_metrics(State(metrics): State<Arc<MetricsRegistry>>) -> Response<Body> {
+    Response::builder()
+        .status(200)
+        .header(
+            "Content-Type",
+            prometheus::TEXT_FORMAT,
+        )
+        .body(Body::from(metrics.gather()))
+        .unwrap()
+}
+
+/// A simple health check handler that returns "OK".
 async fn health_check() -> impl IntoResponse {
     (StatusCode::OK, "OK")
 }
@@ -33,7 +47,8 @@ impl Plugin for ObservabilityPlugin {
     }
 
     fn start(&mut self) -> Result<()> {
-        let config = &self.context.as_ref().unwrap().config.plugins.observability;
+        let context = self.context.as_ref().unwrap().clone();
+        let config = &context.config.plugins.observability;
         if !config.enabled {
             info!("ObservabilityPlugin is disabled. Skipping start.");
             return Ok(());
@@ -41,24 +56,24 @@ impl Plugin for ObservabilityPlugin {
 
         info!("Starting Observability HTTP server...");
 
-        // Create the axum router with our health check endpoint.
-        let app = Router::new().route("/livez", get(health_check));
+        // Create the axum router with both the /livez and /metrics endpoints.
+        let app = Router::new()
+            .route("/livez", get(health_check))
+            .route("/metrics", get(get_metrics))
+            // This line provides the Arc<MetricsRegistry> to our handlers as shared state.
+            .with_state(context.metrics);
 
-        // Read the full listen address from our config file.
         let listen_address = config.listen_address.clone();
 
-        // Spawn a new asynchronous task to run the web server.
-        // This is crucial - it must not block the main application thread.
         tokio::spawn(async move {
             info!("Observability server listening on http://{}", listen_address);
-
-            // Bind the server to the configured address.
             let listener = tokio::net::TcpListener::bind(&listen_address)
                 .await
                 .with_context(|| format!("Failed to bind observability server to {}", listen_address))
-                .unwrap(); // Using unwrap here is okay for a top-level task that should crash if it fails to start.
-
-            axum::serve(listener, app).await.unwrap();
+                .unwrap();
+            
+            // Use `into_make_service` for compatibility with latest axum/hyper versions.
+            axum::serve(listener, app.into_make_service()).await.unwrap();
         });
 
         Ok(())

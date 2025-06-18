@@ -2,7 +2,7 @@
 # Core Application Configuration
 # =========================================
 [core]
-log_level = "TRACE"
+log_level = "INFO"
 database_path = "data/" # Use a local 'data' directory for development
 
 # =========================================
@@ -17,7 +17,7 @@ database_path = "data/" # Use a local 'data' directory for development
     [plugins.publish_service]
     enabled = true
     grpc_address = "0.0.0.0"
-    grpc_port = 6790
+    grpc_port = 8090
     max_concurrent_streams = 250 
 
     [plugins.persistence_service]
@@ -28,12 +28,12 @@ database_path = "data/" # Use a local 'data' directory for development
     storage_path = "data/persistence"
 
     # The number of recent blocks to keep in the 'hot' RocksDB tier.
-    # Older blocks will be deleted (and eventually archived to cold storage).
+    # Older blocks will be deleted (and archived to cold storage).
     hot_storage_block_count = 1000
 
     [plugins.subscribe_service]
     enabled = true
-    grpc_port = 50211 # Standard port for Hedera gRPC
+    grpc_port = 6890
     max_concurrent_streams = 250 
 
     [plugins.verification_service]
