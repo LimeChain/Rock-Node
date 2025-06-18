@@ -1,4 +1,4 @@
-use prometheus::{self, Encoder, IntCounter, IntGauge, Opts, Registry, TextEncoder};
+use prometheus::{self, CounterVec, Encoder, HistogramVec, IntCounter, IntGauge, Opts, Registry, TextEncoder};
 
 /// A registry for all Prometheus metrics in the application.
 ///
@@ -9,13 +9,14 @@ pub struct MetricsRegistry {
     // The internal registry that holds all the metric collectors.
     registry: Registry,
 
-    // --- DEFINE YOUR METRICS AS PUBLIC FIELDS ---
-
-    /// A counter for the total number of blocks processed and persisted.
+    // --- Core Metrics ---
     pub blocks_acknowledged: IntCounter,
-    /// A gauge representing the number of currently active publisher gRPC streams.
     pub active_publish_sessions: IntGauge,
-    // Add more metrics here as your application grows.
+
+    // --- Block Access Plugin Metrics ---
+    pub block_access_requests_total: CounterVec,
+    pub block_access_request_duration_seconds: HistogramVec,
+    pub block_access_latest_available_block: IntGauge,
 }
 
 impl MetricsRegistry {
@@ -24,8 +25,7 @@ impl MetricsRegistry {
     pub fn new() -> Result<Self, prometheus::Error> {
         let registry = Registry::new();
 
-        // --- INITIALIZE AND REGISTER EACH METRIC ---
-
+        // --- Core Metrics Initialization ---
         let blocks_acknowledged = IntCounter::with_opts(Opts::new(
             "rocknode_blocks_acknowledged",
             "Total number of blocks acknowledged",
@@ -38,10 +38,39 @@ impl MetricsRegistry {
         ))?;
         registry.register(Box::new(active_publish_sessions.clone()))?;
 
+        // --- Block Access Plugin Metrics Initialization ---
+        let block_access_requests_total = CounterVec::new(
+            Opts::new(
+                "rocknode_block_access_requests_total",
+                "The total number of getBlock gRPC requests processed.",
+            ),
+            &["status", "request_type"],
+        )?;
+        registry.register(Box::new(block_access_requests_total.clone()))?;
+
+        let block_access_request_duration_seconds = HistogramVec::new(
+            Opts::new(
+                "rocknode_block_access_request_duration_seconds",
+                "The duration of getBlock gRPC requests from start to finish, in seconds.",
+            )
+            .into(),
+            &["status", "request_type"],
+        )?;
+        registry.register(Box::new(block_access_request_duration_seconds.clone()))?;
+
+        let block_access_latest_available_block = IntGauge::with_opts(Opts::new(
+            "rocknode_block_access_latest_available_block",
+            "The most recent block number known to be available for serving.",
+        ))?;
+        registry.register(Box::new(block_access_latest_available_block.clone()))?;
+
         Ok(Self {
             registry,
             blocks_acknowledged,
             active_publish_sessions,
+            block_access_requests_total,
+            block_access_request_duration_seconds,
+            block_access_latest_available_block,
         })
     }
 
