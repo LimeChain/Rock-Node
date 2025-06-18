@@ -35,6 +35,7 @@ impl SharedState {
     }
 
     pub fn set_latest_persisted_block(&self, block_number: i64) {
-        self.latest_persisted_block.store(block_number, Ordering::Relaxed);
+        self.latest_persisted_block
+            .store(block_number, Ordering::Relaxed);
     }
 }

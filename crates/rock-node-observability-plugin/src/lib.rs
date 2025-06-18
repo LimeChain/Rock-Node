@@ -1,6 +1,11 @@
 use anyhow::Context;
 use axum::{
-    body::Body, extract::State, http::{Response, StatusCode}, response::IntoResponse, routing::get, Router
+    body::Body,
+    extract::State,
+    http::{Response, StatusCode},
+    response::IntoResponse,
+    routing::get,
+    Router,
 };
 use rock_node_core::{app_context::AppContext, error::Result, plugin::Plugin, MetricsRegistry};
 use std::sync::Arc;
@@ -22,10 +27,7 @@ impl ObservabilityPlugin {
 async fn get_metrics(State(metrics): State<Arc<MetricsRegistry>>) -> Response<Body> {
     Response::builder()
         .status(200)
-        .header(
-            "Content-Type",
-            prometheus::TEXT_FORMAT,
-        )
+        .header("Content-Type", prometheus::TEXT_FORMAT)
         .body(Body::from(metrics.gather()))
         .unwrap()
 }
@@ -66,14 +68,21 @@ impl Plugin for ObservabilityPlugin {
         let listen_address = config.listen_address.clone();
 
         tokio::spawn(async move {
-            info!("Observability server listening on http://{}", listen_address);
+            info!(
+                "Observability server listening on http://{}",
+                listen_address
+            );
             let listener = tokio::net::TcpListener::bind(&listen_address)
                 .await
-                .with_context(|| format!("Failed to bind observability server to {}", listen_address))
+                .with_context(|| {
+                    format!("Failed to bind observability server to {}", listen_address)
+                })
                 .unwrap();
-            
+
             // Use `into_make_service` for compatibility with latest axum/hyper versions.
-            axum::serve(listener, app.into_make_service()).await.unwrap();
+            axum::serve(listener, app.into_make_service())
+                .await
+                .unwrap();
         });
 
         Ok(())

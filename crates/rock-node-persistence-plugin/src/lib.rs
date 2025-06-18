@@ -1,12 +1,18 @@
 mod storage;
 
 use crate::storage::StorageManager;
+use prost::Message;
 use rock_node_core::{
-    app_context::AppContext, block_reader::BlockReader, capability::Capability, error::Result, events::{BlockItemsReceived, BlockPersisted, BlockVerified}, plugin::Plugin, BlockReaderProvider
+    app_context::AppContext,
+    block_reader::BlockReader,
+    capability::Capability,
+    error::Result,
+    events::{BlockItemsReceived, BlockPersisted, BlockVerified},
+    plugin::Plugin,
+    BlockReaderProvider,
 };
 use rock_node_protobufs::com::hedera::hapi::block::stream::Block;
-use prost::Message;
-use std::{any::{TypeId}, sync::Arc};
+use std::{any::TypeId, sync::Arc};
 use tokio::sync::mpsc::Receiver;
 use tracing::{info, warn};
 
@@ -60,10 +66,10 @@ impl Plugin for PersistencePlugin {
     fn initialize(&mut self, context: AppContext) -> Result<()> {
         info!("Initializing PersistencePlugin...");
         let config = &context.config.plugins.persistence_service;
-    
+
         let (storage_manager, initial_range) =
             StorageManager::new(&config.storage_path, config.hot_storage_block_count)?;
-    
+
         if let Some((earliest, latest)) = initial_range {
             info!(
                 "Persistence database loaded successfully. Blocks available -> {} to {}.",
@@ -72,34 +78,37 @@ impl Plugin for PersistencePlugin {
         } else {
             info!("Persistence database is new or empty. No blocks found.");
         }
-    
 
-    self.storage_manager = Some(storage_manager.clone());
-    let storage_manager_arc = Arc::new(storage_manager);
-    {
-        let mut providers = context.service_providers.write().unwrap();
+        self.storage_manager = Some(storage_manager.clone());
+        let storage_manager_arc = Arc::new(storage_manager);
+        {
+            let mut providers = context.service_providers.write().unwrap();
 
-        // --- THE FIX ---
-        let block_reader_service: Arc<dyn BlockReader> = storage_manager_arc;
-        let provider_handle = BlockReaderProvider::new(block_reader_service);
+            // --- THE FIX ---
+            let block_reader_service: Arc<dyn BlockReader> = storage_manager_arc;
+            let provider_handle = BlockReaderProvider::new(block_reader_service);
 
-        // 1. Store an Arc to the handle. The concrete type behind dyn Any is `BlockReaderProvider`.
-        let value_to_store = Arc::new(provider_handle);
-        
-        // 2. The key MUST be the TypeId of the object we just stored inside the Arc.
-        let key = TypeId::of::<BlockReaderProvider>();
+            // 1. Store an Arc to the handle. The concrete type behind dyn Any is `BlockReaderProvider`.
+            let value_to_store = Arc::new(provider_handle);
 
-        providers.insert(key, value_to_store);
-        
-        info!("PersistencePlugin registered a BlockReaderProvider handle.");
+            // 2. The key MUST be the TypeId of the object we just stored inside the Arc.
+            let key = TypeId::of::<BlockReaderProvider>();
+
+            providers.insert(key, value_to_store);
+
+            info!("PersistencePlugin registered a BlockReaderProvider handle.");
+        }
+        self.context = Some(context);
+        Ok(())
     }
-    self.context = Some(context);
-    Ok(())
-    }
-    
+
     fn start(&mut self) -> Result<()> {
         info!("Starting PersistencePlugin...");
-        let context = self.context.as_ref().expect("Plugin must be initialized").clone();
+        let context = self
+            .context
+            .as_ref()
+            .expect("Plugin must be initialized")
+            .clone();
         let storage_manager = self
             .storage_manager
             .as_ref()
@@ -137,7 +146,11 @@ impl Plugin for PersistencePlugin {
     }
 }
 
-async fn process_event(event: InboundEvent, context: &AppContext, storage_manager: &StorageManager) {
+async fn process_event(
+    event: InboundEvent,
+    context: &AppContext,
+    storage_manager: &StorageManager,
+) {
     let block_number = event.block_number();
     let cache_key = event.cache_key();
     info!(

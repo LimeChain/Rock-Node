@@ -1,6 +1,4 @@
-use rock_node_core::{
-    app_context::AppContext, error::Result, plugin::Plugin, BlockReaderProvider,
-};
+use rock_node_core::{app_context::AppContext, error::Result, plugin::Plugin, BlockReaderProvider};
 use rock_node_protobufs::org::hiero::block::api::block_access_service_server::BlockAccessServiceServer;
 use std::any::TypeId;
 use tracing::{error, info, warn};
@@ -53,17 +51,21 @@ impl Plugin for BlockAccessPlugin {
                     info!("Successfully retrieved BlockReaderProvider handle.");
                     provider_handle.get_service()
                 } else {
-                    return Err(anyhow::anyhow!("FATAL: Failed to downcast BlockReaderProvider.").into());
+                    return Err(
+                        anyhow::anyhow!("FATAL: Failed to downcast BlockReaderProvider.").into(),
+                    );
                 }
             } else {
-                warn!("BlockReaderProvider not found. The service will not be able to serve blocks.");
+                warn!(
+                    "BlockReaderProvider not found. The service will not be able to serve blocks."
+                );
                 return Ok(());
             }
         };
 
         let listen_address = format!("{}:{}", config.grpc_address, config.grpc_port);
-        
-        let service = BlockAccessServiceImpl { 
+
+        let service = BlockAccessServiceImpl {
             block_reader,
             metrics: context.metrics.clone(),
         };

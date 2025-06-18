@@ -3,7 +3,7 @@ use clap::Parser;
 use rock_node_block_access_plugin::BlockAccessPlugin;
 use rock_node_core::{
     app_context::AppContext, capability::CapabilityRegistry, config::Config, events,
-    BlockDataCache, Plugin, MetricsRegistry,
+    BlockDataCache, MetricsRegistry, Plugin,
 };
 use rock_node_observability_plugin::ObservabilityPlugin;
 use rock_node_persistence_plugin::PersistencePlugin;
@@ -41,7 +41,10 @@ struct Args {
 async fn main() -> Result<()> {
     // --- Step 1: Parse Command-Line Arguments ---
     let args = Args::parse();
-    info!("Attempting to load configuration from: {:?}", &args.config_path);
+    info!(
+        "Attempting to load configuration from: {:?}",
+        &args.config_path
+    );
 
     // --- Step 2: Load Config and Initialize Logging ---
     let config_str = std::fs::read_to_string(&args.config_path).map_err(|e| {
@@ -76,7 +79,9 @@ async fn main() -> Result<()> {
         config: Arc::new(config),
         metrics: Arc::new(MetricsRegistry::new()?),
         capability_registry: Arc::new(CapabilityRegistry::new()),
-        service_providers: Arc::new(RwLock::new(HashMap::<TypeId, Arc<dyn Any + Send + Sync>>::new())),
+        service_providers: Arc::new(RwLock::new(
+            HashMap::<TypeId, Arc<dyn Any + Send + Sync>>::new(),
+        )),
         block_data_cache: Arc::new(BlockDataCache::new()),
         tx_block_items_received: tx_items,
         tx_block_verified: tx_verified,
@@ -94,7 +99,10 @@ async fn main() -> Result<()> {
         plugins.push(Box::new(VerifierPlugin::new(rx_items)));
     } else {
         info!("VerifierPlugin is DISABLED. Wiring directly to Persistence.");
-        plugins.push(Box::new(PersistencePlugin::new(Some(rx_items), rx_verified)));
+        plugins.push(Box::new(PersistencePlugin::new(
+            Some(rx_items),
+            rx_verified,
+        )));
     }
 
     plugins.push(Box::new(PublishPlugin::new()));
@@ -116,6 +124,6 @@ async fn main() -> Result<()> {
     info!("Rock Node running successfully. Press Ctrl+C to shut down.");
     tokio::signal::ctrl_c().await?;
     info!("Shutdown signal received. Exiting.");
-    
+
     Ok(())
 }

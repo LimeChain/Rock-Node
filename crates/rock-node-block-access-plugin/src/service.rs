@@ -1,3 +1,4 @@
+use prost::Message;
 use rock_node_core::{block_reader::BlockReader, MetricsRegistry};
 use rock_node_protobufs::{
     com::hedera::hapi::block::stream::Block,
@@ -6,8 +7,7 @@ use rock_node_protobufs::{
         BlockResponse,
     },
 };
-use prost::Message;
-use std::{sync::Arc, time::Instant, convert::TryFrom};
+use std::{convert::TryFrom, sync::Arc, time::Instant};
 use tonic::{Request, Response, Status};
 use tracing::{debug, error, warn};
 
@@ -69,7 +69,10 @@ impl BlockAccessService for BlockAccessServiceImpl {
         let block_number_to_fetch = match block_number_result {
             Ok(num) => num,
             Err(code) => {
-                let response = BlockResponse { status: code as i32, block: None };
+                let response = BlockResponse {
+                    status: code as i32,
+                    block: None,
+                };
                 return self.record_metrics(response, start_time, request_type);
             }
         };
@@ -77,7 +80,10 @@ impl BlockAccessService for BlockAccessServiceImpl {
         // Step 3: Continue with the rest of the logic.
         if block_number_to_fetch < 0 {
             debug!("DB is empty or latest block could not be determined.");
-            let response = BlockResponse { status: block_response::Code::NotFound as i32, block: None };
+            let response = BlockResponse {
+                status: block_response::Code::NotFound as i32,
+                block: None,
+            };
             return self.record_metrics(response, start_time, request_type);
         }
         let block_number_u64 = block_number_to_fetch as u64;
@@ -85,8 +91,14 @@ impl BlockAccessService for BlockAccessServiceImpl {
         let block_read_result = match self.block_reader.read_block(block_number_u64) {
             Ok(result) => result,
             Err(e) => {
-                error!("Database error while fetching block #{}: {}", block_number_u64, e);
-                let response = BlockResponse { status: block_response::Code::Unknown as i32, block: None };
+                error!(
+                    "Database error while fetching block #{}: {}",
+                    block_number_u64, e
+                );
+                let response = BlockResponse {
+                    status: block_response::Code::Unknown as i32,
+                    block: None,
+                };
                 return self.record_metrics(response, start_time, request_type);
             }
         };
@@ -95,13 +107,21 @@ impl BlockAccessService for BlockAccessServiceImpl {
             Some(block_bytes) => {
                 if block_bytes.is_empty() {
                     warn!("Block #{} was found in storage, but its content is empty. This indicates a data pipeline issue.", block_number_u64);
-                    BlockResponse { status: block_response::Code::Unknown as i32, block: None }
+                    BlockResponse {
+                        status: block_response::Code::Unknown as i32,
+                        block: None,
+                    }
                 } else {
                     match Block::decode(block_bytes.as_slice()) {
                         Ok(block) => {
-                            debug!("Successfully decoded block #{}, returning SUCCESS.", block_number_u64);
+                            debug!(
+                                "Successfully decoded block #{}, returning SUCCESS.",
+                                block_number_u64
+                            );
                             if request_type == "latest" {
-                                self.metrics.block_access_latest_available_block.set(block_number_to_fetch);
+                                self.metrics
+                                    .block_access_latest_available_block
+                                    .set(block_number_to_fetch);
                             }
                             BlockResponse {
                                 status: block_response::Code::Success as i32,
@@ -109,8 +129,14 @@ impl BlockAccessService for BlockAccessServiceImpl {
                             }
                         }
                         Err(e) => {
-                            error!("Failed to decode non-empty block #{} from storage bytes: {}", block_number_u64, e);
-                            BlockResponse { status: block_response::Code::Unknown as i32, block: None }
+                            error!(
+                                "Failed to decode non-empty block #{} from storage bytes: {}",
+                                block_number_u64, e
+                            );
+                            BlockResponse {
+                                status: block_response::Code::Unknown as i32,
+                                block: None,
+                            }
                         }
                     }
                 }
@@ -119,14 +145,24 @@ impl BlockAccessService for BlockAccessServiceImpl {
                 let earliest = self.block_reader.get_earliest_persisted_block_number();
                 let latest = self.block_reader.get_latest_persisted_block_number();
 
-                let status_code = if block_number_to_fetch < earliest || block_number_to_fetch > latest {
-                    debug!("Block #{} is outside of this node's range [{} - {}].", block_number_u64, earliest, latest);
-                    block_response::Code::NotAvailable
-                } else {
-                    warn!("Block #{} was not found but is within the expected range [{} - {}].", block_number_u64, earliest, latest);
-                    block_response::Code::NotFound
-                };
-                BlockResponse { status: status_code as i32, block: None }
+                let status_code =
+                    if block_number_to_fetch < earliest || block_number_to_fetch > latest {
+                        debug!(
+                            "Block #{} is outside of this node's range [{} - {}].",
+                            block_number_u64, earliest, latest
+                        );
+                        block_response::Code::NotAvailable
+                    } else {
+                        warn!(
+                            "Block #{} was not found but is within the expected range [{} - {}].",
+                            block_number_u64, earliest, latest
+                        );
+                        block_response::Code::NotFound
+                    };
+                BlockResponse {
+                    status: status_code as i32,
+                    block: None,
+                }
             }
         };
 
@@ -142,7 +178,8 @@ impl BlockAccessServiceImpl {
         request_type: &'static str,
     ) -> Result<Response<BlockResponse>, Status> {
         // Updated to use TryFrom, per the compiler warning
-        let status_enum = block_response::Code::try_from(response.status).unwrap_or(block_response::Code::Unknown);
+        let status_enum = block_response::Code::try_from(response.status)
+            .unwrap_or(block_response::Code::Unknown);
         let status_label = code_to_string(status_enum);
         let duration = start_time.elapsed().as_secs_f64();
 
@@ -167,10 +204,13 @@ impl BlockAccessServiceImpl {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rock_node_core::block_reader::BlockReader;
-    use rock_node_protobufs::{com::hedera::hapi::block::stream::BlockItem, org::hiero::block::api::block_request::BlockSpecifier};
-    use std::collections::HashMap;
     use anyhow::Result;
+    use rock_node_core::block_reader::BlockReader;
+    use rock_node_protobufs::{
+        com::hedera::hapi::block::stream::BlockItem,
+        org::hiero::block::api::block_request::BlockSpecifier,
+    };
+    use std::collections::HashMap;
 
     #[derive(Debug, Default)]
     struct MockBlockReader {
@@ -296,7 +336,9 @@ mod tests {
     async fn test_invalid_request_missing_specifier() {
         let reader = MockBlockReader::default();
         let service = create_test_service(reader);
-        let request = Request::new(BlockRequest { block_specifier: None });
+        let request = Request::new(BlockRequest {
+            block_specifier: None,
+        });
 
         let response = service.get_block(request).await.unwrap().into_inner();
 
@@ -349,8 +391,6 @@ mod tests {
         assert!(response.block.is_none());
     }
 
-
-
     #[tokio::test]
     async fn test_latest_block_on_empty_db() {
         let reader = MockBlockReader::new(-1, -1);
@@ -368,9 +408,15 @@ mod tests {
     #[test]
     fn test_code_to_string_helper() {
         assert_eq!(code_to_string(block_response::Code::Success), "Success");
-        assert_eq!(code_to_string(block_response::Code::InvalidRequest), "InvalidRequest");
+        assert_eq!(
+            code_to_string(block_response::Code::InvalidRequest),
+            "InvalidRequest"
+        );
         assert_eq!(code_to_string(block_response::Code::NotFound), "NotFound");
-        assert_eq!(code_to_string(block_response::Code::NotAvailable), "NotAvailable");
+        assert_eq!(
+            code_to_string(block_response::Code::NotAvailable),
+            "NotAvailable"
+        );
         assert_eq!(code_to_string(block_response::Code::Unknown), "Unknown");
     }
 }

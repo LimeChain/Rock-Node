@@ -1,8 +1,8 @@
 use anyhow::Result;
-use rock_node_core::{block_reader::BlockReader};
-use rock_node_protobufs::com::hedera::hapi::block::stream::Block;
 use prost::Message;
-use rocksdb::{DB, Options, WriteBatch};
+use rock_node_core::block_reader::BlockReader;
+use rock_node_protobufs::com::hedera::hapi::block::stream::Block;
+use rocksdb::{Options, WriteBatch, DB};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tracing::info;
@@ -45,7 +45,6 @@ impl StorageManager {
         Ok((manager, initial_range))
     }
 
-
     // The `BlockData` from the event likely contains the full Block object.
     // We serialize it to bytes here for storage.
     pub fn write_block(&self, block_number: u64, block_proto: &Block) -> Result<()> {
@@ -58,7 +57,7 @@ impl StorageManager {
         let stored_block = StoredBlock {
             contents: block_bytes,
         };
-        
+
         // Now serialize the `StoredBlock` struct using bincode for DB storage
         let value = bincode::serialize(&stored_block)?;
 
@@ -73,7 +72,7 @@ impl StorageManager {
         self.db.write(batch)?;
         self.archive_if_needed()
     }
-    
+
     fn archive_if_needed(&self) -> Result<()> {
         let latest = self.get_latest_persisted_block_number();
         let earliest = self.get_earliest_persisted_block_number();
@@ -138,7 +137,7 @@ impl BlockReader for StorageManager {
     fn get_earliest_persisted_block_number(&self) -> i64 {
         self.read_block_number_from_key(EARLIEST_BLOCK_KEY)
     }
-    
+
     fn read_block(&self, block_number: u64) -> Result<Option<Vec<u8>>> {
         let key = block_number.to_be_bytes();
         info!("Reading block #{}", block_number);

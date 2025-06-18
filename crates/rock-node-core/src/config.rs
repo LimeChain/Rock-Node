@@ -26,7 +26,7 @@ pub struct PluginConfigs {
 #[derive(Debug, Deserialize, Serialize)]
 pub struct ObservabilityConfig {
     pub enabled: bool,
-    pub listen_address: String, 
+    pub listen_address: String,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -35,7 +35,7 @@ pub struct PublishServiceConfig {
     pub grpc_address: String,
     pub grpc_port: u16,
     pub max_concurrent_streams: usize,
-} 
+}
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct PersistenceServiceConfig {
@@ -49,7 +49,7 @@ pub struct SubscribeServiceConfig {
     pub enabled: bool,
     pub grpc_port: u16,
     pub max_concurrent_streams: usize,
-} 
+}
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct VerificationServiceConfig {
