@@ -9,6 +9,7 @@ use std::process::Command;
 use walkdir::WalkDir;
 
 fn main() -> Result<()> {
+    std::env::set_var("PROTOC", protobuf_src::protoc());
     let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
     let workspace_root = manifest_dir.join("../..").canonicalize()?;
     let local_proto_root = workspace_root.join("proto");

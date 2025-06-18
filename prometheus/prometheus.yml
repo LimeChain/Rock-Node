@@ -1,0 +1,9 @@
+global:
+  scrape_interval: 10s
+  evaluation_interval: 10s
+
+scrape_configs:
+  - job_name: "rock-node"
+    scheme: http
+    static_configs:
+      - targets: ["rock-node:9600"]

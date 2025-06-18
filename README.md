@@ -1,10 +1,10 @@
 # Rock Node
 
 <div align="center">
-  <img src="assets/logo.jpeg" alt="Rock Node Logo" width="300"/>
+  <img src="assets/logo.jpeg" alt="Rock Node Logo" width="350"/>
   
   <p><em>Resilient as a Rock ⚡</em></p>
-  
+  [![Build Application](https://github.com/LimeChain/Rock-Node/actions/workflows/compile-and-run.yml/badge.svg)](https://github.com/LimeChain/Rock-Node/actions/workflows/compile-and-run.yml)
   [![Rust Version](https://img.shields.io/badge/rust-1.75.0+-blue.svg)](https://www.rust-lang.org)
   [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 </div>

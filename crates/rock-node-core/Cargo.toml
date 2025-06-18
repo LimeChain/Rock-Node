@@ -14,3 +14,6 @@ uuid = { version = "1", features = ["v4"] }
 
 # A high-performance, concurrent hash map for our shared cache
 dashmap = "5.5"
+
+# Metrics
+prometheus = { version = "0.13", features = ["process"] }
