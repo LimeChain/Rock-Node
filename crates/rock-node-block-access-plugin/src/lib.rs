@@ -10,7 +10,6 @@ use service::BlockAccessServiceImpl;
 
 #[derive(Debug, Default)]
 pub struct BlockAccessPlugin {
-    // Store the context here
     context: Option<AppContext>,
 }
 
@@ -63,7 +62,11 @@ impl Plugin for BlockAccessPlugin {
         };
 
         let listen_address = format!("{}:{}", config.grpc_address, config.grpc_port);
-        let service = BlockAccessServiceImpl { block_reader };
+        
+        let service = BlockAccessServiceImpl { 
+            block_reader,
+            metrics: context.metrics.clone(),
+        };
         let server = BlockAccessServiceServer::new(service);
 
         tokio::spawn(async move {
