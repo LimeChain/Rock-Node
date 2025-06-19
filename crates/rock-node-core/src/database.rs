@@ -1,5 +1,5 @@
 use anyhow::Result;
-use rocksdb::{Options, ColumnFamilyDescriptor, DB};
+use rocksdb::{ColumnFamilyDescriptor, Options, DB};
 use std::sync::Arc;
 
 // Define the names of our Column Families as public constants

@@ -128,7 +128,10 @@ impl Plugin for PersistencePlugin {
             let mut providers = context.service_providers.write().unwrap();
             let reader_provider =
                 BlockReaderProvider::new(service_arc.clone() as Arc<dyn BlockReader>);
-            providers.insert(TypeId::of::<BlockReaderProvider>(), Arc::new(reader_provider));
+            providers.insert(
+                TypeId::of::<BlockReaderProvider>(),
+                Arc::new(reader_provider),
+            );
             let writer_provider = BlockWriterProvider::new(service_arc as Arc<dyn BlockWriter>);
             providers.insert(
                 TypeId::of::<BlockWriterProvider>(),

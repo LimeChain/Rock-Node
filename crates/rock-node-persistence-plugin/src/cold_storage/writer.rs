@@ -62,12 +62,20 @@ impl ColdWriter {
         temp_data_path: &Path,
         temp_index_path: &Path,
     ) -> Result<()> {
-        let data_file = OpenOptions::new().write(true).create(true).truncate(true).open(temp_data_path)?;
-        let index_file = OpenOptions::new().write(true).create(true).truncate(true).open(temp_index_path)?;
+        let data_file = OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(temp_data_path)?;
+        let index_file = OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(temp_index_path)?;
 
         let mut data_writer = BufWriter::new(data_file);
         let mut index_writer = BufWriter::new(index_file);
-        
+
         // CORRECTION: Explicitly type `current_offset` as u64.
         let mut current_offset: u64 = 0;
 

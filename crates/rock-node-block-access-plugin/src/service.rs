@@ -249,7 +249,7 @@ mod tests {
         fn get_latest_persisted_block_number(&self) -> i64 {
             self.latest_block
         }
-        
+
         fn get_highest_contiguous_block_number(&self) -> Result<u64> {
             Ok(self.latest_block as u64)
         }

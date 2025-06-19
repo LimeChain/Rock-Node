@@ -1,5 +1,5 @@
 use anyhow::Result;
-use rock_node_protobufs::com::hedera::hapi::block::stream::Block; 
+use rock_node_protobufs::com::hedera::hapi::block::stream::Block;
 use std::fmt::Debug;
 
 /// The write-path interface for the Persistence Service.

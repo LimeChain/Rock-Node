@@ -2,12 +2,9 @@ use anyhow::Result;
 use clap::Parser;
 use rock_node_block_access_plugin::BlockAccessPlugin;
 use rock_node_core::{
-    app_context::AppContext,
-    capability::CapabilityRegistry,
-    config::Config,
-    database::DatabaseManager,
-    database_provider::DatabaseManagerProvider,
-    events, BlockDataCache, MetricsRegistry, Plugin,
+    app_context::AppContext, capability::CapabilityRegistry, config::Config,
+    database::DatabaseManager, database_provider::DatabaseManagerProvider, events, BlockDataCache,
+    MetricsRegistry, Plugin,
 };
 use rock_node_observability_plugin::ObservabilityPlugin;
 use rock_node_persistence_plugin::PersistencePlugin;

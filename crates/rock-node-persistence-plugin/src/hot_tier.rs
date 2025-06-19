@@ -29,7 +29,7 @@ impl HotTier {
             .db
             .cf_handle(CF_HOT_BLOCKS)
             .ok_or_else(|| anyhow!("Could not get handle for CF: {}", CF_HOT_BLOCKS))?;
-        
+
         let key = block_number.to_be_bytes();
         match self.db.get_cf(cf, &key)? {
             Some(db_vec) => {
@@ -49,14 +49,22 @@ impl HotTier {
                 blocks.push(Block::decode(block_bytes.as_slice())?);
             } else {
                 // This should ideally not happen if our contiguous logic is correct.
-                return Err(anyhow!("Missing block #{} in hot tier during batch read", block_number));
+                return Err(anyhow!(
+                    "Missing block #{} in hot tier during batch read",
+                    block_number
+                ));
             }
         }
         Ok(blocks)
     }
-    
+
     /// Adds a block write operation to a WriteBatch.
-    pub fn add_block_to_batch(&self, block: &Block, block_number: u64, batch: &mut WriteBatch) -> Result<()> {
+    pub fn add_block_to_batch(
+        &self,
+        block: &Block,
+        block_number: u64,
+        batch: &mut WriteBatch,
+    ) -> Result<()> {
         let cf = self
             .db
             .cf_handle(CF_HOT_BLOCKS)
@@ -65,10 +73,12 @@ impl HotTier {
         let key = block_number.to_be_bytes();
         let mut block_bytes = Vec::new();
         block.encode(&mut block_bytes)?;
-        
-        let stored_block = StoredBlock { contents: block_bytes };
+
+        let stored_block = StoredBlock {
+            contents: block_bytes,
+        };
         let value = bincode::serialize(&stored_block)?;
-        
+
         batch.put_cf(cf, &key, &value);
         Ok(())
     }
@@ -79,12 +89,12 @@ impl HotTier {
             .db
             .cf_handle(CF_HOT_BLOCKS)
             .ok_or_else(|| anyhow!("Could not get handle for CF: {}", CF_HOT_BLOCKS))?;
-        
+
         let key = block_number.to_be_bytes();
         batch.delete_cf(cf, &key);
         Ok(())
     }
-    
+
     /// Commits a batch of writes and deletes to the database.
     pub fn commit_batch(&self, batch: WriteBatch) -> Result<()> {
         self.db.write(batch)?;

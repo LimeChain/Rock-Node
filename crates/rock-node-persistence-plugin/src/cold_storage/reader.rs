@@ -43,7 +43,10 @@ impl ColdReader {
     /// Scans the cold storage directory for .rbi files and populates the in-memory index.
     /// This should be called once on startup.
     pub fn scan_and_build_index(&self) -> Result<()> {
-        info!("Scanning for cold storage archives in '{}'...", self.config.cold_storage_path);
+        info!(
+            "Scanning for cold storage archives in '{}'...",
+            self.config.cold_storage_path
+        );
         let path = Path::new(&self.config.cold_storage_path);
         if !path.exists() {
             info!("Cold storage path does not exist, skipping scan.");
@@ -57,7 +60,10 @@ impl ColdReader {
                 self.load_index_file(&path)?;
             }
         }
-        info!("Cold storage scan complete. Indexed {} blocks.", self.index.len());
+        info!(
+            "Cold storage scan complete. Indexed {} blocks.",
+            self.index.len()
+        );
         Ok(())
     }
 
@@ -73,7 +79,8 @@ impl ColdReader {
                 offset: u64::from_be(record.offset),
                 length: u32::from_be(record.length),
             };
-            self.index.insert(u64::from_be(record.block_number), location);
+            self.index
+                .insert(u64::from_be(record.block_number), location);
         }
         Ok(())
     }
@@ -83,10 +90,10 @@ impl ColdReader {
         if let Some(location) = self.index.get(&block_number) {
             let mut file = File::open(&location.archive_path)?;
             file.seek(SeekFrom::Start(location.offset))?;
-            
+
             let mut compressed_bytes = vec![0; location.length as usize];
             file.read_exact(&mut compressed_bytes)?;
-            
+
             let decompressed = zstd::decode_all(compressed_bytes.as_slice())?;
             return Ok(Some(decompressed));
         }
