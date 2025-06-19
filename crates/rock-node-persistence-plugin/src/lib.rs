@@ -1,12 +1,17 @@
-mod storage;
+mod cold_storage;
+mod hot_tier;
+mod service;
+mod state;
 
-use crate::storage::StorageManager;
+use crate::service::PersistenceService;
 use prost::Message;
 use rock_node_core::{
     app_context::AppContext,
     block_reader::BlockReader,
+    block_writer::BlockWriter,
     capability::Capability,
-    error::Result,
+    database_provider::DatabaseManagerProvider,
+    error::Result as CoreResult,
     events::{BlockItemsReceived, BlockPersisted, BlockVerified},
     plugin::Plugin,
     BlockReaderProvider,
@@ -15,33 +20,55 @@ use rock_node_protobufs::com::hedera::hapi::block::stream::Block;
 use std::{any::TypeId, sync::Arc};
 use tokio::sync::mpsc::Receiver;
 use tracing::{info, warn};
+use uuid::Uuid;
 
-/// A generic event wrapper to allow one processing function
-#[derive(Debug)]
 enum InboundEvent {
     Verified(BlockVerified),
     Unverified(BlockItemsReceived),
 }
-
 impl InboundEvent {
     fn block_number(&self) -> u64 {
-        match self {
-            Self::Verified(e) => e.block_number,
-            Self::Unverified(e) => e.block_number,
-        }
+        self.into()
     }
-    fn cache_key(&self) -> uuid::Uuid {
-        match self {
-            Self::Verified(e) => e.cache_key,
-            Self::Unverified(e) => e.cache_key,
+    fn cache_key(&self) -> Uuid {
+        self.into()
+    }
+}
+impl From<&InboundEvent> for u64 {
+    fn from(event: &InboundEvent) -> Self {
+        match event {
+            InboundEvent::Verified(e) => e.block_number,
+            InboundEvent::Unverified(e) => e.block_number,
         }
     }
 }
+impl From<&InboundEvent> for Uuid {
+    fn from(event: &InboundEvent) -> Self {
+        match event {
+            InboundEvent::Verified(e) => e.cache_key,
+            InboundEvent::Unverified(e) => e.cache_key,
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct BlockWriterProvider {
+    writer: Arc<dyn BlockWriter>,
+}
+impl BlockWriterProvider {
+    pub fn new(writer: Arc<dyn BlockWriter>) -> Self {
+        Self { writer }
+    }
+    pub fn get_writer(&self) -> Arc<dyn BlockWriter> {
+        self.writer.clone()
+    }
+}
+
 pub struct PersistencePlugin {
     context: Option<AppContext>,
     rx_block_items_received: Option<Receiver<BlockItemsReceived>>,
     rx_block_verified: Option<Receiver<BlockVerified>>,
-    storage_manager: Option<StorageManager>,
+    service: Option<PersistenceService>,
 }
 
 impl PersistencePlugin {
@@ -53,7 +80,7 @@ impl PersistencePlugin {
             context: None,
             rx_block_items_received,
             rx_block_verified: Some(rx_block_verified),
-            storage_manager: None,
+            service: None,
         }
     }
 }
@@ -63,129 +90,111 @@ impl Plugin for PersistencePlugin {
         "persistence-plugin"
     }
 
-    fn initialize(&mut self, context: AppContext) -> Result<()> {
-        info!("Initializing PersistencePlugin...");
-        let config = &context.config.plugins.persistence_service;
+    fn initialize(&mut self, context: AppContext) -> CoreResult<()> {
+        info!("Initializing new tiered PersistencePlugin...");
 
-        let (storage_manager, initial_range) =
-            StorageManager::new(&config.storage_path, config.hot_storage_block_count)?;
+        // Look for the PROVIDER, not the manager directly.
+        let db_provider = context
+            .service_providers
+            .read()
+            .unwrap()
+            .get(&TypeId::of::<DatabaseManagerProvider>())
+            .and_then(|any| any.downcast_ref::<DatabaseManagerProvider>().cloned())
+            .ok_or_else(|| anyhow::anyhow!("DatabaseManagerProvider not found in AppContext! It must be initialized first."))?;
 
-        if let Some((earliest, latest)) = initial_range {
-            info!(
-                "Persistence database loaded successfully. Blocks available -> {} to {}.",
-                earliest, latest
-            );
-        } else {
-            info!("Persistence database is new or empty. No blocks found.");
-        }
+        // Now, get the actual manager from the provider.
+        let db_manager = db_provider.get_manager();
 
-        self.storage_manager = Some(storage_manager.clone());
-        let storage_manager_arc = Arc::new(storage_manager);
+        let db_handle = db_manager.db_handle();
+        let config_arc = Arc::new(context.config.plugins.persistence_service.clone());
+
+        let state_manager = Arc::new(state::StateManager::new(db_handle.clone()));
+        let hot_tier = Arc::new(hot_tier::HotTier::new(db_handle.clone()));
+        let cold_writer = Arc::new(cold_storage::writer::ColdWriter::new(config_arc.clone()));
+        let cold_reader = Arc::new(cold_storage::reader::ColdReader::new(config_arc.clone()));
+        cold_reader.scan_and_build_index()?;
+        let archiver = Arc::new(cold_storage::archiver::Archiver::new(
+            config_arc,
+            hot_tier.clone(),
+            cold_writer,
+            state_manager.clone(),
+        ));
+        let service =
+            service::PersistenceService::new(hot_tier, cold_reader, archiver, state_manager);
+        let service_arc = Arc::new(service.clone());
+        self.service = Some(service);
+
         {
             let mut providers = context.service_providers.write().unwrap();
-
-            // --- THE FIX ---
-            let block_reader_service: Arc<dyn BlockReader> = storage_manager_arc;
-            let provider_handle = BlockReaderProvider::new(block_reader_service);
-
-            // 1. Store an Arc to the handle. The concrete type behind dyn Any is `BlockReaderProvider`.
-            let value_to_store = Arc::new(provider_handle);
-
-            // 2. The key MUST be the TypeId of the object we just stored inside the Arc.
-            let key = TypeId::of::<BlockReaderProvider>();
-
-            providers.insert(key, value_to_store);
-
-            info!("PersistencePlugin registered a BlockReaderProvider handle.");
+            let reader_provider =
+                BlockReaderProvider::new(service_arc.clone() as Arc<dyn BlockReader>);
+            providers.insert(TypeId::of::<BlockReaderProvider>(), Arc::new(reader_provider));
+            let writer_provider = BlockWriterProvider::new(service_arc as Arc<dyn BlockWriter>);
+            providers.insert(
+                TypeId::of::<BlockWriterProvider>(),
+                Arc::new(writer_provider),
+            );
+            info!("PersistencePlugin registered providers for BlockReader and BlockWriter.");
         }
         self.context = Some(context);
         Ok(())
     }
 
-    fn start(&mut self) -> Result<()> {
-        info!("Starting PersistencePlugin...");
-        let context = self
-            .context
-            .as_ref()
-            .expect("Plugin must be initialized")
-            .clone();
-        let storage_manager = self
-            .storage_manager
-            .as_ref()
-            .expect("Plugin must be initialized")
-            .clone();
-
+    fn start(&mut self) -> CoreResult<()> {
+        info!("Starting PersistencePlugin event loop...");
+        let context = self.context.as_ref().unwrap().clone();
+        let service = self.service.as_ref().unwrap().clone();
         let mut rx_verified = self.rx_block_verified.take().unwrap();
         let rx_items_received_opt = self.rx_block_items_received.take();
-
         tokio::spawn(async move {
             let use_verified_stream = context
                 .capability_registry
                 .is_registered(Capability::ProvidesVerifiedBlocks)
                 .await;
-
             if use_verified_stream {
-                info!("Verifier plugin detected. Subscribing to 'BlockVerified' events.");
+                info!("Subscribing to 'BlockVerified' events.");
                 while let Some(event) = rx_verified.recv().await {
-                    process_event(InboundEvent::Verified(event), &context, &storage_manager).await;
+                    process_event(InboundEvent::Verified(event), &context, &service).await;
                 }
             } else {
-                info!("No verifier plugin detected. Subscribing to 'BlockItemsReceived' events.");
+                info!("Subscribing to 'BlockItemsReceived' events.");
                 if let Some(mut rx_items) = rx_items_received_opt {
                     while let Some(event) = rx_items.recv().await {
-                        process_event(InboundEvent::Unverified(event), &context, &storage_manager)
-                            .await;
+                        process_event(InboundEvent::Unverified(event), &context, &service).await;
                     }
                 } else {
-                    panic!("FATAL: PersistencePlugin is configured to listen for unverified items, but was not given a receiver.");
+                    panic!(
+                        "FATAL: PersistencePlugin misconfigured. No verifier and no unverified receiver."
+                    );
                 }
             }
         });
-
         Ok(())
     }
 }
 
-async fn process_event(
-    event: InboundEvent,
-    context: &AppContext,
-    storage_manager: &StorageManager,
-) {
+async fn process_event(event: InboundEvent, context: &AppContext, service: &PersistenceService) {
     let block_number = event.block_number();
     let cache_key = event.cache_key();
-    info!(
-        "Persistence: Processing block #{} with cache key [{}].",
-        block_number, cache_key
-    );
-
     if let Some(data) = context.block_data_cache.get(&cache_key) {
         match Block::decode(data.contents.as_slice()) {
             Ok(block_proto) => {
-                if let Err(e) = storage_manager.write_block(block_number, &block_proto) {
-                    warn!("CRITICAL: Failed to persist block #{}: {}", block_number, e);
+                if let Err(e) = service.write_block(&block_proto) {
+                    warn!("[FATAL] Failed to persist block #{}: {}", block_number, e);
                 } else {
-                    info!(
-                        "Persistence: Successfully wrote block #{} to storage.",
-                        block_number
-                    );
+                    info!("Successfully persisted block #{}.", block_number);
                     let persisted_event = BlockPersisted {
                         block_number,
                         cache_key,
                     };
-                    if context.tx_block_persisted.send(persisted_event).is_err() {
-                        warn!(
-                            "Failed to publish BlockPersisted event for block #{}. No subscribers.",
-                            block_number
-                        );
-                    }
+                    let _ = context.tx_block_persisted.send(persisted_event);
                 }
             }
             Err(e) => {
-                // This can happen if the data in the cache is corrupted.
                 warn!(
                     "Could not decode BlockData from cache for block #{}: {}",
                     block_number, e
-                );
+                )
             }
         }
     } else {

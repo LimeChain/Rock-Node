@@ -28,3 +28,8 @@ bincode = "1.3"
 
 # For using the cache_key from core events
 uuid = { version = "1", features = ["v4"] }
+
+# A high-performance, concurrent hash map for our shared cache
+dashmap = "5.5"
+
+zstd = "0.13" 

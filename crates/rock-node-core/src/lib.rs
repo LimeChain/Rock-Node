@@ -1,8 +1,7 @@
-// File: crates/rock-node-core/src/lib.rs
-
 // Declare all the modules in our crate
 pub mod app_context;
 pub mod block_reader;
+pub mod block_writer;
 pub mod cache;
 pub mod capability;
 pub mod config;
@@ -11,6 +10,8 @@ pub mod events;
 pub mod metrics;
 pub mod plugin;
 pub mod service_provider;
+pub mod database;
+pub mod database_provider;
 
 // Re-export the most important public types for easy access by other crates.
 pub use app_context::AppContext;
@@ -22,3 +23,5 @@ pub use events::{BlockData, BlockItemsReceived, BlockPersisted, BlockVerified};
 pub use metrics::MetricsRegistry;
 pub use plugin::Plugin;
 pub use service_provider::BlockReaderProvider;
+pub use database::DatabaseManager;
+pub use database_provider::DatabaseManagerProvider;

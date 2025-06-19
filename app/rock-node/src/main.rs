@@ -2,8 +2,12 @@ use anyhow::Result;
 use clap::Parser;
 use rock_node_block_access_plugin::BlockAccessPlugin;
 use rock_node_core::{
-    app_context::AppContext, capability::CapabilityRegistry, config::Config, events,
-    BlockDataCache, MetricsRegistry, Plugin,
+    app_context::AppContext,
+    capability::CapabilityRegistry,
+    config::Config,
+    database::DatabaseManager,
+    database_provider::DatabaseManagerProvider,
+    events, BlockDataCache, MetricsRegistry, Plugin,
 };
 use rock_node_observability_plugin::ObservabilityPlugin;
 use rock_node_persistence_plugin::PersistencePlugin;
@@ -41,12 +45,8 @@ struct Args {
 async fn main() -> Result<()> {
     // --- Step 1: Parse Command-Line Arguments ---
     let args = Args::parse();
-    info!(
-        "Attempting to load configuration from: {:?}",
-        &args.config_path
-    );
 
-    // --- Step 2: Load Config and Initialize Logging ---
+    // --- Step 2: Load Config and Initialize Logging (ONCE) ---
     let config_str = std::fs::read_to_string(&args.config_path).map_err(|e| {
         anyhow::anyhow!(
             "Failed to read config file at '{}': {}",
@@ -56,6 +56,7 @@ async fn main() -> Result<()> {
     })?;
 
     let config: Config = toml::from_str(&config_str)?;
+    let config = Arc::new(config); // Wrap config in an Arc early
     let default_log_level = &config.core.log_level;
 
     tracing_subscriber::fmt()
@@ -65,34 +66,56 @@ async fn main() -> Result<()> {
         )
         .init();
 
+    info!(
+        "Logger initialized with level '{}'. Loading from: {:?}",
+        default_log_level, &args.config_path
+    );
+
     // --- Step 3: Print Banner and Show Config ---
     println!("{}", BANNER);
     info!("Configuration loaded successfully.\n{:#?}", config);
 
-    // --- Step 4: Build the AppContext ---
+    // --- Step 4: Initialize Core Shared Services ---
+    info!("Initializing shared services...");
+    let db_manager = Arc::new(DatabaseManager::new(&config.core.database_path)?);
+    info!("DatabaseManager initialized.");
+
+    let service_providers = Arc::new(RwLock::new(
+        HashMap::<TypeId, Arc<dyn Any + Send + Sync>>::new(),
+    ));
+
+    {
+        let mut providers = service_providers.write().unwrap();
+        // Create the provider wrapper and store an Arc to IT.
+        let db_manager_provider = DatabaseManagerProvider::new(db_manager);
+        providers.insert(
+            TypeId::of::<DatabaseManagerProvider>(), // The key is the TypeId of the PROVIDER
+            Arc::new(db_manager_provider),
+        );
+        info!("DatabaseManagerProvider registered as a core service provider.");
+    }
+
+    // --- Step 5: Build the AppContext ---
     let (tx_items, rx_items) = mpsc::channel::<events::BlockItemsReceived>(100);
     let (tx_verified, rx_verified) = mpsc::channel::<events::BlockVerified>(100);
     let (tx_persisted, _) = broadcast::channel::<events::BlockPersisted>(100);
 
     info!("Building application context...");
     let app_context = AppContext {
-        config: Arc::new(config),
+        config: config.clone(),
         metrics: Arc::new(MetricsRegistry::new()?),
         capability_registry: Arc::new(CapabilityRegistry::new()),
-        service_providers: Arc::new(RwLock::new(
-            HashMap::<TypeId, Arc<dyn Any + Send + Sync>>::new(),
-        )),
+        service_providers,
         block_data_cache: Arc::new(BlockDataCache::new()),
         tx_block_items_received: tx_items,
         tx_block_verified: tx_verified,
         tx_block_persisted: tx_persisted,
     };
 
-    // --- Step 5: Assemble Plugins ---
+    // --- Step 6: Assemble Plugins ---
     let mut plugins: Vec<Box<dyn Plugin>> = vec![];
     let verification_service_enabled = app_context.config.plugins.verification_service.enabled;
 
-    // IMPORTANT: The provider (Persistence) must be initialized before the consumers.
     if verification_service_enabled {
         info!("VerifierPlugin is ENABLED. Wiring Verifier -> Persistence.");
         plugins.push(Box::new(PersistencePlugin::new(None, rx_verified)));
@@ -110,7 +133,7 @@ async fn main() -> Result<()> {
     plugins.push(Box::new(StatusPlugin::new()));
     plugins.push(Box::new(ObservabilityPlugin::new()));
 
-    // --- Step 6: Initialize and Start Plugins ---
+    // --- Step 7: Initialize and Start Plugins ---
     info!("Initializing plugins...");
     for plugin in &mut plugins {
         plugin.initialize(app_context.clone())?;
