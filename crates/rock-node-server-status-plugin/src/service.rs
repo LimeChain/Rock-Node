@@ -79,9 +79,9 @@ impl BlockNodeService for StatusServiceImpl {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use anyhow::Result;
     use rock_node_core::{block_reader::BlockReader, MetricsRegistry};
     use rock_node_protobufs::org::hiero::block::api::ServerStatusRequest;
-    use anyhow::Result;
     use std::sync::Arc;
 
     // A mock implementation of the BlockReader trait for testing the status service.
