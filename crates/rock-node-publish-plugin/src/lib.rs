@@ -6,6 +6,7 @@ use rock_node_protobufs::org::hiero::block::api::block_stream_publish_service_se
 use state::SharedState;
 use std::any::TypeId;
 use std::sync::Arc;
+use std::time::Duration;
 use tracing::{info, warn};
 
 mod service;
@@ -50,17 +51,14 @@ impl Plugin for PublishPlugin {
         let shared_state = Arc::new(SharedState::new());
         {
             let providers = context.service_providers.read().unwrap();
-
             let key = TypeId::of::<BlockReaderProvider>();
-
             if let Some(provider_any) = providers.get(&key) {
                 if let Some(provider_handle) = provider_any.downcast_ref::<BlockReaderProvider>() {
                     let block_reader: Arc<dyn BlockReader> = provider_handle.get_service();
-
                     let block_number = block_reader.get_latest_persisted_block_number();
                     shared_state.set_latest_persisted_block(block_number);
                     info!(
-                        "Successfully retrieved BlockReader via provider handle. Latest persisted block is: {}",
+                        "Successfully retrieved BlockReader. Latest persisted block is: {}",
                         block_number
                     );
                 } else {
@@ -73,14 +71,20 @@ impl Plugin for PublishPlugin {
 
         let service = PublishServiceImpl {
             context: context.clone(),
-            shared_state, // Pass the initialized state
+            shared_state,
         };
-        let server = BlockStreamPublishServiceServer::new(service);
 
-        // Spawn the server task. It will now have the correct initial state.
+        const MAX_MESSAGE_SIZE: usize = 1024 * 1024 * 32; // 32 MB
+        let server = BlockStreamPublishServiceServer::new(service)
+            .max_decoding_message_size(MAX_MESSAGE_SIZE);
+
         tokio::spawn(async move {
             info!("Publish gRPC service listening on {}", listen_address);
+
             if let Err(e) = tonic::transport::Server::builder()
+                .http2_keepalive_interval(Some(Duration::from_secs(30)))
+                .http2_keepalive_timeout(Some(Duration::from_secs(10)))
+                .tcp_nodelay(true)
                 .add_service(server)
                 .serve(listen_address.parse().unwrap())
                 .await
