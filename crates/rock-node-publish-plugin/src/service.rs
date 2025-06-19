@@ -28,6 +28,12 @@ impl BlockStreamPublishService for PublishServiceImpl {
         let mut inbound_stream = request.into_inner();
         let (response_tx, response_rx) = mpsc::channel(16);
 
+        // --- Metrics Instrumentation ---
+        // Increment active sessions gauge when a new stream is established.
+        self.context.metrics.active_publish_sessions.inc();
+        let metrics_clone = self.context.metrics.clone();
+        // ---
+
         let mut session_manager =
             SessionManager::new(self.context.clone(), self.shared_state.clone(), response_tx);
         let session_id = session_manager.id;
@@ -42,6 +48,10 @@ impl BlockStreamPublishService for PublishServiceImpl {
                 }
             }
             info!(%session_id, "Session handler task finished.");
+            // --- Metrics Instrumentation ---
+            // Decrement gauge when the stream handler task concludes.
+            metrics_clone.active_publish_sessions.dec();
+            // ---
         });
 
         Ok(Response::new(ReceiverStream::new(response_rx)))

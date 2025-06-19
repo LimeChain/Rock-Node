@@ -12,7 +12,7 @@ use rock_node_protobufs::{
     },
 };
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 use tonic::Status;
 use tracing::{info, warn};
@@ -61,6 +61,7 @@ impl SessionManager {
 
                     if self.state == SessionState::Primary {
                         self.item_buffer.push(item.clone());
+                        self.context.metrics.publish_items_processed_total.inc();
                     }
 
                     if let Some(BlockItemType::BlockProof(_)) = &item.item {
@@ -103,7 +104,20 @@ impl SessionManager {
                 latest_persisted_block = latest_persisted,
                 "Rejecting duplicate block."
             );
-            let response = response_from_code(publish_stream_response::end_of_stream::Code::DuplicateBlock, latest_persisted as u64);
+            self.context
+                .metrics
+                .publish_blocks_received_total
+                .with_label_values(&["duplicate"])
+                .inc();
+            self.context
+                .metrics
+                .publish_responses_sent_total
+                .with_label_values(&["EndStream_DuplicateBlock"])
+                .inc();
+            let response = response_from_code(
+                publish_stream_response::end_of_stream::Code::DuplicateBlock,
+                latest_persisted as u64,
+            );
             let _ = self.send_response(response).await;
             return false;
         }
@@ -115,17 +129,44 @@ impl SessionManager {
                 expected_block = latest_persisted + 1,
                 "Rejecting future block. RockNode is BEHIND."
             );
-            let response = response_from_code(publish_stream_response::end_of_stream::Code::Behind, latest_persisted as u64);
+            self.context
+                .metrics
+                .publish_blocks_received_total
+                .with_label_values(&["future_block"])
+                .inc();
+            self.context
+                .metrics
+                .publish_responses_sent_total
+                .with_label_values(&["EndStream_Behind"])
+                .inc();
+            let response = response_from_code(
+                publish_stream_response::end_of_stream::Code::Behind,
+                latest_persisted as u64,
+            );
             let _ = self.send_response(response).await;
             return false;
         }
 
-        let winner_entry = self.shared_state.block_winners.entry(block_number as u64).or_insert(self.id);
+        let winner_entry = self
+            .shared_state
+            .block_winners
+            .entry(block_number as u64)
+            .or_insert(self.id);
         if *winner_entry == self.id {
             self.state = SessionState::Primary;
+            self.context
+                .metrics
+                .publish_blocks_received_total
+                .with_label_values(&["primary"])
+                .inc();
             info!(session_id = %self.id, block_number, "Session is PRIMARY for this block.");
         } else {
             self.state = SessionState::Behind;
+            self.context
+                .metrics
+                .publish_blocks_received_total
+                .with_label_values(&["behind"])
+                .inc();
             info!(session_id = %self.id, block_number, "Another session is primary. Sending SkipBlock.");
             self.send_skip_block().await;
         }
@@ -158,7 +199,13 @@ impl SessionManager {
             cache_key,
         };
 
-        if self.context.tx_block_items_received.send(event).await.is_err() {
+        if self
+            .context
+            .tx_block_items_received
+            .send(event)
+            .await
+            .is_err()
+        {
             warn!(session_id = %self.id, "Failed to publish BlockItemsReceived event to core channel.");
             return false;
         }
@@ -181,6 +228,8 @@ impl SessionManager {
 
         info!(session_id = %self.id, block = block_to_await, "Awaiting persistence ACK...");
 
+        let start_time = Instant::now();
+
         let timeout_result = tokio::time::timeout(Duration::from_secs(30), async {
             while let Ok(persisted_event) = rx_persisted.recv().await {
                 if persisted_event.block_number == block_to_await {
@@ -188,7 +237,8 @@ impl SessionManager {
                 }
             }
             None
-        }).await;
+        })
+        .await;
 
         // Clean up the winner map regardless of the outcome.
         self.shared_state.block_winners.remove(&block_to_await);
@@ -196,7 +246,24 @@ impl SessionManager {
         match timeout_result {
             Ok(Some(_)) => {
                 info!(session_id = %self.id, block = block_to_await, "Block persisted. Sending ACK and updating shared state.");
-                self.shared_state.set_latest_persisted_block(block_to_await as i64);
+
+                // --- Metrics Instrumentation ---
+                let duration = start_time.elapsed().as_secs_f64();
+                self.context
+                    .metrics
+                    .publish_persistence_duration_seconds
+                    .with_label_values(&["acknowledged"])
+                    .observe(duration);
+                self.context.metrics.blocks_acknowledged.inc(); // Core metric
+                self.context
+                    .metrics
+                    .publish_responses_sent_total
+                    .with_label_values(&["Acknowledgement"])
+                    .inc();
+                // ---
+
+                self.shared_state
+                    .set_latest_persisted_block(block_to_await as i64);
 
                 let ack = PublishStreamResponse {
                     response: Some(publish_stream_response::Response::Acknowledgement(
@@ -208,16 +275,33 @@ impl SessionManager {
                     )),
                 };
                 if self.send_response(ack).await.is_err() {
-                     // Client likely disconnected, which is an error state for this cycle.
+                    // Client likely disconnected, which is an error state for this cycle.
                     return Err(());
                 }
                 Ok(())
             }
             _ => {
                 warn!(session_id = %self.id, block = block_to_await, "Did not receive persistence ACK for block. Requesting resend.");
+
+                // --- Metrics Instrumentation ---
+                let duration = start_time.elapsed().as_secs_f64();
+                self.context
+                    .metrics
+                    .publish_persistence_duration_seconds
+                    .with_label_values(&["timeout"])
+                    .observe(duration);
+                self.context
+                    .metrics
+                    .publish_responses_sent_total
+                    .with_label_values(&["ResendBlock"])
+                    .inc();
+                // ---
+
                 let resend_req = PublishStreamResponse {
                     response: Some(publish_stream_response::Response::ResendBlock(
-                        ResendBlock { block_number: block_to_await },
+                        ResendBlock {
+                            block_number: block_to_await,
+                        },
                     )),
                 };
                 let _ = self.send_response(resend_req).await;
@@ -227,6 +311,11 @@ impl SessionManager {
     }
 
     async fn send_skip_block(&self) {
+        self.context
+            .metrics
+            .publish_responses_sent_total
+            .with_label_values(&["SkipBlock"])
+            .inc();
         let response = PublishStreamResponse {
             response: Some(publish_stream_response::Response::SkipBlock(
                 publish_stream_response::SkipBlock {
@@ -237,7 +326,7 @@ impl SessionManager {
         let _ = self.send_response(response).await;
     }
 
-    async fn send_response(&self, response: PublishStreamResponse) -> Result<(),()> {
+    async fn send_response(&self, response: PublishStreamResponse) -> Result<(), ()> {
         if self.response_tx.send(Ok(response)).await.is_err() {
             warn!(session_id = %self.id, "Failed to send response to client. Connection may be closed.");
             return Err(());

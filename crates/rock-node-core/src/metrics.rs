@@ -25,6 +25,12 @@ pub struct MetricsRegistry {
     pub server_status_request_duration_seconds: HistogramVec,
     pub server_status_earliest_available_block: IntGauge,
     pub server_status_latest_available_block: IntGauge,
+
+    // --- Publish Plugin Metrics ---
+    pub publish_blocks_received_total: CounterVec,
+    pub publish_items_processed_total: IntCounter,
+    pub publish_persistence_duration_seconds: HistogramVec,
+    pub publish_responses_sent_total: CounterVec,
 }
 
 impl MetricsRegistry {
@@ -36,13 +42,13 @@ impl MetricsRegistry {
         // --- Core Metrics Initialization ---
         let blocks_acknowledged = IntCounter::with_opts(Opts::new(
             "rocknode_blocks_acknowledged",
-            "Total number of blocks acknowledged",
+            "Total number of blocks acknowledged by the publish plugin after successful persistence.",
         ))?;
         registry.register(Box::new(blocks_acknowledged.clone()))?;
 
         let active_publish_sessions = IntGauge::with_opts(Opts::new(
             "rocknode_active_publish_sessions",
-            "Number of currently active gRPC publisher sessions",
+            "Number of currently active gRPC publisher sessions.",
         ))?;
         registry.register(Box::new(active_publish_sessions.clone()))?;
 
@@ -104,6 +110,41 @@ impl MetricsRegistry {
         ))?;
         registry.register(Box::new(server_status_latest_available_block.clone()))?;
 
+        // --- Publish Plugin Metrics Initialization ---
+        let publish_blocks_received_total = CounterVec::new(
+            Opts::new(
+                "rocknode_publish_blocks_received_total",
+                "Total number of block headers received from publishers, categorized by outcome.",
+            ),
+            &["outcome"],
+        )?;
+        registry.register(Box::new(publish_blocks_received_total.clone()))?;
+
+        let publish_items_processed_total = IntCounter::with_opts(Opts::new(
+            "rocknode_publish_items_processed_total",
+            "Total number of individual BlockItem messages processed by primary sessions.",
+        ))?;
+        registry.register(Box::new(publish_items_processed_total.clone()))?;
+
+        let publish_persistence_duration_seconds = HistogramVec::new(
+            Opts::new(
+                "rocknode_publish_persistence_duration_seconds",
+                "Duration from block publish to persistence acknowledgement.",
+            )
+            .into(),
+            &["outcome"],
+        )?;
+        registry.register(Box::new(publish_persistence_duration_seconds.clone()))?;
+
+        let publish_responses_sent_total = CounterVec::new(
+            Opts::new(
+                "rocknode_publish_responses_sent_total",
+                "Total number of different response types sent back to publisher clients.",
+            ),
+            &["response_type"],
+        )?;
+        registry.register(Box::new(publish_responses_sent_total.clone()))?;
+
         Ok(Self {
             registry,
             blocks_acknowledged,
@@ -115,6 +156,10 @@ impl MetricsRegistry {
             server_status_request_duration_seconds,
             server_status_earliest_available_block,
             server_status_latest_available_block,
+            publish_blocks_received_total,
+            publish_items_processed_total,
+            publish_persistence_duration_seconds,
+            publish_responses_sent_total,
         })
     }
 

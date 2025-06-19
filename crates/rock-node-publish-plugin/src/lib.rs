@@ -75,7 +75,8 @@ impl Plugin for PublishPlugin {
         };
 
         const MAX_MESSAGE_SIZE: usize = 1024 * 1024 * 32; // 32 MB
-        let server = BlockStreamPublishServiceServer::new(service).max_decoding_message_size(MAX_MESSAGE_SIZE);
+        let server = BlockStreamPublishServiceServer::new(service)
+            .max_decoding_message_size(MAX_MESSAGE_SIZE);
 
         tokio::spawn(async move {
             info!("Publish gRPC service listening on {}", listen_address);
