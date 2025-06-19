@@ -52,7 +52,7 @@ Before you begin, ensure you have the following installed:
 
 ### Configuration
 
-The application uses TOML configuration files. A default configuration is provided in `config/development.toml`. You can modify this file to suit your needs.
+The application uses TOML configuration files. A default configuration is provided in `config/config.toml`. You can modify this file to suit your needs.
 
 Example configuration:
 ```toml
@@ -71,7 +71,7 @@ To run using Docker:
 
 ```bash
 docker build -t rock-node .
-docker run -p 9600:9600 rock-node
+docker compose up -d
 ```
 
 ## Contributing
