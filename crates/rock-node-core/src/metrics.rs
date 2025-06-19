@@ -1,4 +1,6 @@
-use prometheus::{self, CounterVec, Encoder, HistogramVec, IntCounter, IntGauge, Opts, Registry, TextEncoder};
+use prometheus::{
+    self, CounterVec, Encoder, HistogramVec, IntCounter, IntGauge, Opts, Registry, TextEncoder,
+};
 
 /// A registry for all Prometheus metrics in the application.
 ///

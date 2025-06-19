@@ -21,3 +21,6 @@ anyhow = "1"
 
 # For logging
 tracing = "0.1"
+
+# For metrics
+prometheus = "0.13"

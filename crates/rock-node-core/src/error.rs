@@ -17,4 +17,4 @@ pub enum Error {
 }
 
 /// A specialized Result type for core operations.
-pub type Result<T> = std::result::Result<T, Error>; 
+pub type Result<T> = std::result::Result<T, Error>;

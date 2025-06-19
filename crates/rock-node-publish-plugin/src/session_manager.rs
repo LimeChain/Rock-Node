@@ -1,16 +1,16 @@
-use crate::state::{SharedState, SessionState};
+use crate::state::{SessionState, SharedState};
 use anyhow::Result;
+use prost::Message;
 use rock_node_core::AppContext;
 use rock_node_protobufs::{
-    com::hedera::hapi::block::stream::Block,
     com::hedera::hapi::block::stream::block_item::Item as BlockItemType,
+    com::hedera::hapi::block::stream::Block,
     org::hiero::block::api::{
         publish_stream_request::Request as PublishRequestType,
         publish_stream_response::{self, BlockAcknowledgement, ResendBlock},
         PublishStreamResponse,
     },
 };
-use prost::Message;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
@@ -76,7 +76,7 @@ impl SessionManager {
         }
         false
     }
-    
+
     fn reset_for_next_block(&mut self) {
         info!(session_id = %self.id, block_number = self.current_block_number, "Processed block. Resetting session for next block.");
         self.item_buffer.clear();
@@ -98,11 +98,11 @@ impl SessionManager {
                 latest_persisted_block = latest_persisted,
                 "Rejecting duplicate block based on startup state."
             );
-            
+
             let code = publish_stream_response::end_of_stream::Code::DuplicateBlock;
             let response = response_from_code(code, latest_persisted as u64);
             self.send_response(response).await;
-            
+
             return false;
         }
 
@@ -120,7 +120,11 @@ impl SessionManager {
             return false;
         }
 
-        let winner_entry = self.shared_state.block_winners.entry(block_number as u64).or_insert(self.id);
+        let winner_entry = self
+            .shared_state
+            .block_winners
+            .entry(block_number as u64)
+            .or_insert(self.id);
         if *winner_entry == self.id {
             self.state = SessionState::Primary;
             info!(session_id = %self.id, block_number, "Session is PRIMARY for this block.");
@@ -129,7 +133,7 @@ impl SessionManager {
             info!(session_id = %self.id, block_number, "Another session is primary. Sending SkipBlock.");
             self.send_skip_block().await;
         }
-        
+
         true
     }
 
@@ -162,11 +166,17 @@ impl SessionManager {
             cache_key,
         };
 
-        if self.context.tx_block_items_received.send(event).await.is_err() {
+        if self
+            .context
+            .tx_block_items_received
+            .send(event)
+            .await
+            .is_err()
+        {
             warn!(session_id = %self.id, "Failed to publish BlockItemsReceived event to core channel.");
             return;
         }
-        
+
         self.wait_for_persistence_ack().await;
     }
 
@@ -179,7 +189,7 @@ impl SessionManager {
 
         tokio::spawn(async move {
             info!(%session_id, block = block_to_await, "Spawned ACK waiter task.");
-            
+
             let timeout_result = tokio::time::timeout(Duration::from_secs(30), async {
                 while let Ok(persisted_event) = rx_persisted.recv().await {
                     if persisted_event.block_number == block_to_await {
@@ -187,7 +197,8 @@ impl SessionManager {
                     }
                 }
                 None
-            }).await;
+            })
+            .await;
 
             match timeout_result {
                 Ok(Some(_)) => {
@@ -195,26 +206,28 @@ impl SessionManager {
                     shared_state_clone.set_latest_persisted_block(block_to_await as i64);
                     let ack = PublishStreamResponse {
                         response: Some(publish_stream_response::Response::Acknowledgement(
-                            BlockAcknowledgement { 
+                            BlockAcknowledgement {
                                 block_number: block_to_await,
                                 block_already_exists: false,
                                 block_root_hash: vec![],
-                             },
+                            },
                         )),
                     };
                     if response_tx_clone.send(Ok(ack)).await.is_err() {
                         warn!(%session_id, block = block_to_await, "Failed to send ACK, client may have disconnected.");
                     }
-                },
+                }
                 _ => {
                     warn!(%session_id, block = block_to_await, "Did not receive persistence ACK for block. Requesting resend.");
                     let resend_req = PublishStreamResponse {
                         response: Some(publish_stream_response::Response::ResendBlock(
-                            ResendBlock { block_number: block_to_await },
+                            ResendBlock {
+                                block_number: block_to_await,
+                            },
                         )),
                     };
                     if response_tx_clone.send(Ok(resend_req)).await.is_err() {
-                         warn!(%session_id, block = block_to_await, "Failed to send ResendBlock, client may have disconnected.");
+                        warn!(%session_id, block = block_to_await, "Failed to send ResendBlock, client may have disconnected.");
                     }
                 }
             }
@@ -240,7 +253,10 @@ impl SessionManager {
     }
 }
 
-fn response_from_code(code: publish_stream_response::end_of_stream::Code, block_number: u64) -> PublishStreamResponse {
+fn response_from_code(
+    code: publish_stream_response::end_of_stream::Code,
+    block_number: u64,
+) -> PublishStreamResponse {
     PublishStreamResponse {
         response: Some(publish_stream_response::Response::EndStream(
             publish_stream_response::EndOfStream {

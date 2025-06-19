@@ -1,1 +1,1 @@
-// Placeholder for the subscribe plugin logic 
+// Placeholder for the subscribe plugin logic

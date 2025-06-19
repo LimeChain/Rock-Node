@@ -29,8 +29,16 @@ impl BlockNodeService for StatusServiceImpl {
         // The proto uses uint64, but our reader uses i64 with -1 for "not found".
         // We convert -1 to 0 for the response, as 0 is a safe default for an empty DB.
         let response = ServerStatusResponse {
-            first_available_block: if earliest_block < 0 { 0 } else { earliest_block as u64 },
-            last_available_block: if latest_block < 0 { 0 } else { latest_block as u64 },
+            first_available_block: if earliest_block < 0 {
+                0
+            } else {
+                earliest_block as u64
+            },
+            last_available_block: if latest_block < 0 {
+                0
+            } else {
+                latest_block as u64
+            },
 
             // TODO: Implement logic for state snapshot availability.
             only_latest_state: false,
@@ -41,21 +49,21 @@ impl BlockNodeService for StatusServiceImpl {
 
         // --- Record Metrics ---
         let duration = start_time.elapsed().as_secs_f64();
-        
+
         self.metrics
             .server_status_request_duration_seconds
             .with_label_values(&["success"])
             .observe(duration);
-            
+
         self.metrics
             .server_status_requests_total
             .with_label_values(&["success"])
             .inc();
-            
+
         self.metrics
             .server_status_earliest_available_block
             .set(earliest_block);
-            
+
         self.metrics
             .server_status_latest_available_block
             .set(latest_block);

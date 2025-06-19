@@ -28,11 +28,8 @@ impl BlockStreamPublishService for PublishServiceImpl {
         let mut inbound_stream = request.into_inner();
         let (response_tx, response_rx) = mpsc::channel(16);
 
-        let mut session_manager = SessionManager::new(
-            self.context.clone(),
-            self.shared_state.clone(),
-            response_tx,
-        );
+        let mut session_manager =
+            SessionManager::new(self.context.clone(), self.shared_state.clone(), response_tx);
         let session_id = session_manager.id;
         info!(%session_id, "New publisher connection. Spawning handler task.");
 

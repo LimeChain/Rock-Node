@@ -28,4 +28,4 @@ impl CapabilityRegistry {
         let lock = self.registered.lock().await;
         lock.contains(&capability)
     }
-} 
+}

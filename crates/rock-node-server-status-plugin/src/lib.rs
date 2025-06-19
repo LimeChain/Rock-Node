@@ -1,14 +1,11 @@
 mod service;
 
 use rock_node_core::{
-    app_context::AppContext,
-    service_provider::{BlockReaderProvider},
-    error::Result,
-    plugin::Plugin,
+    app_context::AppContext, error::Result, plugin::Plugin, service_provider::BlockReaderProvider,
 };
 use rock_node_protobufs::org::hiero::block::api::block_node_service_server::BlockNodeServiceServer;
 use service::StatusServiceImpl;
-use std::{any::TypeId};
+use std::any::TypeId;
 use tracing::{error, info, warn};
 
 #[derive(Debug, Default)]
@@ -58,18 +55,22 @@ impl Plugin for StatusPlugin {
                     info!("Successfully retrieved BlockReaderProvider handle.");
                     provider_handle.get_service()
                 } else {
-                    return Err(anyhow::anyhow!("FATAL: Failed to downcast BlockReaderProvider.").into());
+                    return Err(
+                        anyhow::anyhow!("FATAL: Failed to downcast BlockReaderProvider.").into(),
+                    );
                 }
             } else {
-                warn!("BlockReaderProvider not found. The service will not be able to serve blocks.");
+                warn!(
+                    "BlockReaderProvider not found. The service will not be able to serve blocks."
+                );
                 return Ok(());
             }
         };
 
         let listen_address = format!("{}:{}", config.grpc_address, config.grpc_port);
-        
+
         // Pass the metrics registry to the service implementation
-        let service = StatusServiceImpl { 
+        let service = StatusServiceImpl {
             block_reader,
             metrics: context.metrics.clone(),
         };
