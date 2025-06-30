@@ -31,6 +31,16 @@ pub struct MetricsRegistry {
     pub publish_items_processed_total: IntCounter,
     pub publish_persistence_duration_seconds: HistogramVec,
     pub publish_responses_sent_total: CounterVec,
+
+    // --- Persistence Plugin Metrics ---
+    pub persistence_writes_total: CounterVec,
+    pub persistence_write_duration_seconds: HistogramVec,
+    pub persistence_reads_total: CounterVec,
+    pub persistence_read_duration_seconds: HistogramVec,
+    pub persistence_archival_cycles_total: IntCounter,
+    pub persistence_archival_cycle_duration_seconds: HistogramVec,
+    pub persistence_hot_tier_block_count: IntGauge,
+    pub persistence_cold_tier_block_count: IntGauge,
 }
 
 impl MetricsRegistry {
@@ -145,6 +155,74 @@ impl MetricsRegistry {
         )?;
         registry.register(Box::new(publish_responses_sent_total.clone()))?;
 
+        let persistence_writes_total = CounterVec::new(
+            Opts::new(
+                "rocknode_persistence_writes_total",
+                "Total number of block writes, by type (live, batch).",
+            ),
+            &["type"],
+        )?;
+        registry.register(Box::new(persistence_writes_total.clone()))?;
+
+        let persistence_write_duration_seconds = HistogramVec::new(
+            Opts::new(
+                "rocknode_persistence_write_duration_seconds",
+                "Duration of block writes, by type.",
+            )
+            .into(),
+            &["type"],
+        )?;
+        registry.register(Box::new(persistence_write_duration_seconds.clone()))?;
+
+        let persistence_reads_total = CounterVec::new(
+            Opts::new(
+                "rocknode_persistence_reads_total",
+                "Total number of block reads, by tier (hot, cold, not_found).",
+            ),
+            &["tier"],
+        )?;
+        registry.register(Box::new(persistence_reads_total.clone()))?;
+
+        let persistence_read_duration_seconds = HistogramVec::new(
+            Opts::new(
+                "rocknode_persistence_read_duration_seconds",
+                "Duration of block reads, by tier.",
+            )
+            .into(),
+            &["tier"],
+        )?;
+        registry.register(Box::new(persistence_read_duration_seconds.clone()))?;
+
+        let persistence_archival_cycles_total = IntCounter::with_opts(Opts::new(
+            "rocknode_persistence_archival_cycles_total",
+            "Total number of hot-to-cold archival cycles completed.",
+        ))?;
+        registry.register(Box::new(persistence_archival_cycles_total.clone()))?;
+
+        let persistence_archival_cycle_duration_seconds = HistogramVec::new(
+            Opts::new(
+                "rocknode_persistence_archival_cycle_duration_seconds",
+                "Duration of the hot-to-cold archival cycle.",
+            )
+            .into(),
+            &[], // No labels needed for this one
+        )?;
+        registry.register(Box::new(
+            persistence_archival_cycle_duration_seconds.clone(),
+        ))?;
+
+        let persistence_hot_tier_block_count = IntGauge::with_opts(Opts::new(
+            "rocknode_persistence_hot_tier_block_count",
+            "The current number of blocks in the hot tier storage.",
+        ))?;
+        registry.register(Box::new(persistence_hot_tier_block_count.clone()))?;
+
+        let persistence_cold_tier_block_count = IntGauge::with_opts(Opts::new(
+            "rocknode_persistence_cold_tier_block_count",
+            "The current number of blocks indexed in the cold tier storage.",
+        ))?;
+        registry.register(Box::new(persistence_cold_tier_block_count.clone()))?;
+
         Ok(Self {
             registry,
             blocks_acknowledged,
@@ -160,6 +238,14 @@ impl MetricsRegistry {
             publish_items_processed_total,
             publish_persistence_duration_seconds,
             publish_responses_sent_total,
+            persistence_writes_total,
+            persistence_write_duration_seconds,
+            persistence_reads_total,
+            persistence_read_duration_seconds,
+            persistence_archival_cycles_total,
+            persistence_archival_cycle_duration_seconds,
+            persistence_hot_tier_block_count,
+            persistence_cold_tier_block_count,
         })
     }
 

@@ -37,17 +37,19 @@ impl HotTier {
             None => Ok(None),
         }
     }
-    
+
     pub fn get_earliest_block_number(&self) -> Result<Option<u64>> {
         let cf = self
             .db
             .cf_handle(CF_HOT_BLOCKS)
             .ok_or_else(|| anyhow!("Could not get handle for CF: {}", CF_HOT_BLOCKS))?;
-        
+
         let mut iter = self.db.iterator_cf(cf, IteratorMode::Start);
-        
+
         if let Some(Ok((key_bytes, _))) = iter.next() {
-             let key_array: [u8; 8] = key_bytes.as_ref().try_into()
+            let key_array: [u8; 8] = key_bytes
+                .as_ref()
+                .try_into()
                 .map_err(|_| anyhow!("Invalid key length in hot_blocks CF"))?;
             Ok(Some(u64::from_be_bytes(key_array)))
         } else {

@@ -85,7 +85,6 @@ impl PersistencePlugin {
     }
 }
 
-
 impl Plugin for PersistencePlugin {
     fn name(&self) -> &'static str {
         "persistence-plugin"
@@ -105,15 +104,19 @@ impl Plugin for PersistencePlugin {
         let db_manager = db_provider.get_manager();
         let db_handle = db_manager.db_handle();
         let config_arc = Arc::new(context.config.plugins.persistence_service.clone());
+        let metrics_arc = context.metrics.clone();
 
         let state_manager = Arc::new(state::StateManager::new(db_handle.clone()));
         let hot_tier = Arc::new(hot_tier::HotTier::new(db_handle.clone()));
         let cold_writer = Arc::new(cold_storage::writer::ColdWriter::new(config_arc.clone()));
-        
+
         info!("Building cold storage index...");
-        let cold_reader = Arc::new(cold_storage::reader::ColdReader::new(config_arc.clone()));
+        let cold_reader = Arc::new(cold_storage::reader::ColdReader::new(
+            config_arc.clone(),
+            metrics_arc.clone(),
+        ));
         cold_reader.scan_and_build_index()?;
-        
+
         if state_manager.get_true_earliest_persisted()?.is_none() {
             info!("Determining true earliest block number for the first time...");
             let earliest_cold = cold_reader.get_earliest_indexed_block()?;
@@ -140,15 +143,23 @@ impl Plugin for PersistencePlugin {
             cold_writer,
             state_manager.clone(),
             cold_reader.clone(),
+            metrics_arc.clone(),
         ));
 
-        let service = service::PersistenceService::new(hot_tier, cold_reader, archiver, state_manager);
+        let service = service::PersistenceService::new(
+            hot_tier,
+            cold_reader,
+            archiver,
+            state_manager,
+            metrics_arc,
+        );
         let service_arc = Arc::new(service.clone());
         self.service = Some(service);
 
         {
             let mut providers = context.service_providers.write().unwrap();
-            let reader_provider = BlockReaderProvider::new(service_arc.clone() as Arc<dyn BlockReader>);
+            let reader_provider =
+                BlockReaderProvider::new(service_arc.clone() as Arc<dyn BlockReader>);
             providers.insert(
                 TypeId::of::<BlockReaderProvider>(),
                 Arc::new(reader_provider),

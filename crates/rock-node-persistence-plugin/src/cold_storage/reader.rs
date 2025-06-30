@@ -1,6 +1,6 @@
 use anyhow::Result;
 use dashmap::DashMap;
-use rock_node_core::config::PersistenceServiceConfig;
+use rock_node_core::{config::PersistenceServiceConfig, metrics::MetricsRegistry};
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
@@ -28,13 +28,15 @@ struct ArchiveLocation {
 pub struct ColdReader {
     config: Arc<PersistenceServiceConfig>,
     index: Arc<DashMap<u64, ArchiveLocation>>,
+    metrics: Arc<MetricsRegistry>,
 }
 
 impl ColdReader {
-    pub fn new(config: Arc<PersistenceServiceConfig>) -> Self {
+    pub fn new(config: Arc<PersistenceServiceConfig>, metrics: Arc<MetricsRegistry>) -> Self {
         Self {
             config,
             index: Arc::new(DashMap::new()),
+            metrics,
         }
     }
 
@@ -58,9 +60,13 @@ impl ColdReader {
                 }
             }
         }
+        let total_indexed = self.index.len();
+        self.metrics
+            .persistence_cold_tier_block_count
+            .set(total_indexed as i64);
         info!(
             "Cold storage scan complete. Indexed {} blocks.",
-            self.index.len()
+            total_indexed
         );
         Ok(())
     }
@@ -81,9 +87,13 @@ impl ColdReader {
             self.index
                 .insert(u64::from_be(record.block_number), location);
         }
+
+        self.metrics
+            .persistence_cold_tier_block_count
+            .set(self.index.len() as i64);
         Ok(())
     }
-    
+
     pub fn get_earliest_indexed_block(&self) -> Result<Option<u64>> {
         Ok(self.index.iter().map(|item| *item.key()).min())
     }

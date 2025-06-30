@@ -57,7 +57,9 @@ impl Plugin for PublishPlugin {
                     let block_reader: Arc<dyn BlockReader> = provider_handle.get_service(); // .get_reader() is the correct method name from the core trait file
 
                     // FIX: Handle the Result<Option<u64>> correctly.
-                    let block_number_for_state = match block_reader.get_latest_persisted_block_number() {
+                    let block_number_for_state = match block_reader
+                        .get_latest_persisted_block_number()
+                    {
                         Ok(Some(num)) => num as i64,
                         Ok(None) => -1, // Use -1 as the sentinel for "no blocks" in our state
                         Err(e) => {
@@ -65,7 +67,7 @@ impl Plugin for PublishPlugin {
                             -1
                         }
                     };
-                    
+
                     shared_state.set_latest_persisted_block(block_number_for_state);
 
                     // FIX: Use the processed value for logging.

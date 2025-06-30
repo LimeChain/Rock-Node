@@ -38,19 +38,23 @@ impl BlockAccessService for BlockAccessServiceImpl {
         debug!("Processing getBlock request: {:?}", inner_request);
 
         // Step 1: Determine which block number to fetch.
-        let (block_number_to_fetch, request_type) = match self.get_target_block_number(&inner_request) {
-            Ok((num, req_type)) => (num, req_type),
-            Err(response) => {
-                // If parsing the request fails, record metrics and exit early.
-                return self.record_metrics(response, start_time, "invalid");
-            }
-        };
+        let (block_number_to_fetch, request_type) =
+            match self.get_target_block_number(&inner_request) {
+                Ok((num, req_type)) => (num, req_type),
+                Err(response) => {
+                    // If parsing the request fails, record metrics and exit early.
+                    return self.record_metrics(response, start_time, "invalid");
+                }
+            };
 
         // Step 2: Try to read the block from the persistence layer.
         let block_read_result = match self.block_reader.read_block(block_number_to_fetch) {
             Ok(result) => result,
             Err(e) => {
-                error!("Database error fetching block #{}: {}", block_number_to_fetch, e);
+                error!(
+                    "Database error fetching block #{}: {}",
+                    block_number_to_fetch, e
+                );
                 let response = BlockResponse {
                     status: block_response::Code::Unknown as i32,
                     block: None,
@@ -72,7 +76,10 @@ impl BlockAccessService for BlockAccessServiceImpl {
 
 impl BlockAccessServiceImpl {
     /// Helper to parse the request and determine the target block number.
-    fn get_target_block_number(&self, request: &BlockRequest) -> Result<(u64, &'static str), BlockResponse> {
+    fn get_target_block_number(
+        &self,
+        request: &BlockRequest,
+    ) -> Result<(u64, &'static str), BlockResponse> {
         match &request.block_specifier {
             Some(spec) => match spec {
                 rock_node_protobufs::org::hiero::block::api::block_request::BlockSpecifier::BlockNumber(num) => {
@@ -110,25 +117,37 @@ impl BlockAccessServiceImpl {
             Ok(Some(num)) => Ok(num),
             Ok(None) => {
                 debug!("DB is empty; cannot get latest block.");
-                Err(BlockResponse { status: block_response::Code::NotFound as i32, block: None })
-            },
+                Err(BlockResponse {
+                    status: block_response::Code::NotFound as i32,
+                    block: None,
+                })
+            }
             Err(e) => {
                 error!("Failed to get latest block number: {}", e);
-                Err(BlockResponse { status: block_response::Code::Unknown as i32, block: None })
+                Err(BlockResponse {
+                    status: block_response::Code::Unknown as i32,
+                    block: None,
+                })
             }
         }
     }
-    
+
     /// Helper to process block bytes that were successfully read from storage.
     fn handle_found_block(&self, block_number: u64, block_bytes: &[u8]) -> BlockResponse {
         if block_bytes.is_empty() {
             warn!("Block #{} found but content is empty.", block_number);
-            return BlockResponse { status: block_response::Code::Unknown as i32, block: None };
+            return BlockResponse {
+                status: block_response::Code::Unknown as i32,
+                block: None,
+            };
         }
-        
+
         match Block::decode(block_bytes) {
             Ok(block) => {
-                debug!("Successfully decoded block #{}, returning SUCCESS.", block_number);
+                debug!(
+                    "Successfully decoded block #{}, returning SUCCESS.",
+                    block_number
+                );
                 BlockResponse {
                     status: block_response::Code::Success as i32,
                     block: Some(block),
@@ -136,7 +155,10 @@ impl BlockAccessServiceImpl {
             }
             Err(e) => {
                 error!("Failed to decode block #{}: {}", block_number, e);
-                BlockResponse { status: block_response::Code::Unknown as i32, block: None }
+                BlockResponse {
+                    status: block_response::Code::Unknown as i32,
+                    block: None,
+                }
             }
         }
     }
@@ -144,24 +166,44 @@ impl BlockAccessServiceImpl {
     /// Helper to determine why a block was not found.
     fn handle_not_found_block(&self, block_number: u64) -> BlockResponse {
         // Unpack the range to determine if it's NotFound vs NotAvailable
-        let earliest = self.block_reader.get_earliest_persisted_block_number().ok().flatten();
-        let latest = self.block_reader.get_latest_persisted_block_number().ok().flatten();
+        let earliest = self
+            .block_reader
+            .get_earliest_persisted_block_number()
+            .ok()
+            .flatten();
+        let latest = self
+            .block_reader
+            .get_latest_persisted_block_number()
+            .ok()
+            .flatten();
 
         let status_code = if let (Some(e), Some(l)) = (earliest, latest) {
             if block_number < e || block_number > l {
-                debug!("Block #{} is outside of this node's range [{} - {}].", block_number, e, l);
+                debug!(
+                    "Block #{} is outside of this node's range [{} - {}].",
+                    block_number, e, l
+                );
                 block_response::Code::NotAvailable
             } else {
-                warn!("Block #{} not found but is within range [{} - {}].", block_number, e, l);
+                warn!(
+                    "Block #{} not found but is within range [{} - {}].",
+                    block_number, e, l
+                );
                 block_response::Code::NotFound
             }
         } else {
             // If we can't determine the range, it's simply not found.
-            debug!("Block #{} not found and node range is not available.", block_number);
+            debug!(
+                "Block #{} not found and node range is not available.",
+                block_number
+            );
             block_response::Code::NotFound
         };
-        
-        BlockResponse { status: status_code as i32, block: None }
+
+        BlockResponse {
+            status: status_code as i32,
+            block: None,
+        }
     }
 
     fn record_metrics(
@@ -184,14 +226,14 @@ impl BlockAccessServiceImpl {
             .block_access_requests_total
             .with_label_values(&[status_label, request_type])
             .inc();
-            
+
         if status_enum == block_response::Code::Success && request_type == "latest" {
             if let Some(ref block) = response.block {
-                 if let Some(item) = block.items.first() {
-                     if let Some(rock_node_protobufs::com::hedera::hapi::block::stream::block_item::Item::BlockHeader(h)) = &item.item {
+                if let Some(item) = block.items.first() {
+                    if let Some(rock_node_protobufs::com::hedera::hapi::block::stream::block_item::Item::BlockHeader(h)) = &item.item {
                          self.metrics.block_access_latest_available_block.set(h.number as i64);
                      }
-                 }
+                }
             }
         }
 
@@ -270,7 +312,7 @@ mod tests {
             metrics: Arc::new(MetricsRegistry::new().unwrap()),
         }
     }
-    
+
     fn create_mock_block() -> Block {
         Block {
             items: vec![BlockItem {
@@ -304,8 +346,10 @@ mod tests {
         assert_eq!(response.status, block_response::Code::Success as i32);
         // The mock block has number 200, so we create a new one for assertion
         let mut expected_block = create_mock_block();
-        if let Some(rock_node_protobufs::com::hedera::hapi::block::stream::block_item::Item::BlockHeader(h)) = 
-            expected_block.items.get_mut(0).unwrap().item.as_mut() {
+        if let Some(
+            rock_node_protobufs::com::hedera::hapi::block::stream::block_item::Item::BlockHeader(h),
+        ) = expected_block.items.get_mut(0).unwrap().item.as_mut()
+        {
             h.number = 150;
         }
         assert!(response.block.is_some());
