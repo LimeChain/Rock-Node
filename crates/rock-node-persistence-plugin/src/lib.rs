@@ -85,6 +85,7 @@ impl PersistencePlugin {
     }
 }
 
+
 impl Plugin for PersistencePlugin {
     fn name(&self) -> &'static str {
         "persistence-plugin"
@@ -113,8 +114,6 @@ impl Plugin for PersistencePlugin {
         let cold_reader = Arc::new(cold_storage::reader::ColdReader::new(config_arc.clone()));
         cold_reader.scan_and_build_index()?;
         
-        // FIX: Determine and set the true earliest block number on startup.
-        // This is a critical one-time calculation to solve the inaccurate earliest block problem.
         if state_manager.get_true_earliest_persisted()?.is_none() {
             info!("Determining true earliest block number for the first time...");
             let earliest_cold = cold_reader.get_earliest_indexed_block()?;
@@ -135,15 +134,15 @@ impl Plugin for PersistencePlugin {
             }
         }
 
-
         let archiver = Arc::new(cold_storage::archiver::Archiver::new(
             config_arc,
             hot_tier.clone(),
             cold_writer,
             state_manager.clone(),
+            cold_reader.clone(),
         ));
-        let service =
-            service::PersistenceService::new(hot_tier, cold_reader, archiver, state_manager);
+
+        let service = service::PersistenceService::new(hot_tier, cold_reader, archiver, state_manager);
         let service_arc = Arc::new(service.clone());
         self.service = Some(service);
 

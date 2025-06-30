@@ -4,7 +4,7 @@ use rock_node_core::config::PersistenceServiceConfig;
 use rock_node_protobufs::com::hedera::hapi::block::stream::{block_item, Block};
 use std::fs::OpenOptions;
 use std::io::{BufWriter, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use zstd;
 
@@ -27,12 +27,12 @@ impl ColdWriter {
         Self { config }
     }
 
-    pub fn write_archive(&self, blocks: &[Block]) -> Result<()> {
+    pub fn write_archive(&self, blocks: &[Block]) -> Result<PathBuf> {
         if blocks.is_empty() {
-            return Ok(());
+            // This case should ideally not be hit, but returning an error is safe.
+            return Err(anyhow!("Cannot write an archive for an empty block slice."));
         }
 
-        // CORRECTION: Use helper function to safely access the block number.
         let first_num = get_block_number(blocks.first().unwrap())?;
         let last_num = get_block_number(blocks.last().unwrap())?;
 
@@ -50,10 +50,10 @@ impl ColdWriter {
 
         let final_data_path = base_path.join(data_filename);
         let final_index_path = base_path.join(index_filename);
-        std::fs::rename(temp_data_path, final_data_path)?;
-        std::fs::rename(temp_index_path, final_index_path)?;
+        std::fs::rename(&temp_data_path, final_data_path)?;
+        std::fs::rename(&temp_index_path, &final_index_path)?;
 
-        Ok(())
+        Ok(final_index_path)
     }
 
     fn write_temp_files(
@@ -75,12 +75,9 @@ impl ColdWriter {
 
         let mut data_writer = BufWriter::new(data_file);
         let mut index_writer = BufWriter::new(index_file);
-
-        // CORRECTION: Explicitly type `current_offset` as u64.
         let mut current_offset: u64 = 0;
 
         for block in blocks {
-            // CORRECTION: Use helper function to safely access the block number.
             let block_number = get_block_number(block)?;
             let compressed_bytes = zstd::encode_all(block.encode_to_vec().as_slice(), 0)?;
             let length = compressed_bytes.len() as u32;
@@ -113,7 +110,6 @@ impl ColdWriter {
     }
 }
 
-/// Helper function to safely access the block number from a Block's first item.
 fn get_block_number(block: &Block) -> Result<u64> {
     if let Some(first_item) = block.items.first() {
         if let Some(block_item::Item::BlockHeader(header)) = &first_item.item {

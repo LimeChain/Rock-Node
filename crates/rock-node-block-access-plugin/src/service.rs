@@ -27,8 +27,6 @@ fn code_to_string(code: block_response::Code) -> &'static str {
     }
 }
 
-// FIX: I've refactored the main get_block method to be much cleaner and to handle
-// the new return types correctly at each stage.
 #[tonic::async_trait]
 impl BlockAccessService for BlockAccessServiceImpl {
     async fn get_block(
@@ -40,7 +38,6 @@ impl BlockAccessService for BlockAccessServiceImpl {
         debug!("Processing getBlock request: {:?}", inner_request);
 
         // Step 1: Determine which block number to fetch.
-        // This now correctly handles all cases and returns a Result<u64, BlockResponse>.
         let (block_number_to_fetch, request_type) = match self.get_target_block_number(&inner_request) {
             Ok((num, req_type)) => (num, req_type),
             Err(response) => {
@@ -209,7 +206,6 @@ mod tests {
     use rock_node_core::block_reader::BlockReader;
     use rock_node_protobufs::{
         com::hedera::hapi::block::stream::BlockItem,
-        com::hedera::hapi::block::stream::output::BlockHeader,
         org::hiero::block::api::block_request::BlockSpecifier,
     };
     use std::collections::HashMap;
@@ -236,7 +232,6 @@ mod tests {
         }
     }
 
-    // FIX: Update the mock to implement the new, correct trait signatures.
     impl BlockReader for MockBlockReader {
         fn read_block(&self, block_number: u64) -> Result<Option<Vec<u8>>> {
             if self.force_db_error {
@@ -293,12 +288,11 @@ mod tests {
         create_mock_block().encode_to_vec()
     }
 
-    // ... The rest of the tests remain the same and should pass with the new implementation ...
     #[tokio::test]
     async fn test_get_block_by_number_success() {
         let mut reader = MockBlockReader::new(100, 200);
         let mock_block_bytes = create_mock_block_bytes();
-        reader.insert_block(150, mock_block_bytes.clone()); // Use a different number to be clear
+        reader.insert_block(150, mock_block_bytes.clone());
         let service = create_test_service(reader);
 
         let request = Request::new(BlockRequest {
@@ -314,7 +308,6 @@ mod tests {
             expected_block.items.get_mut(0).unwrap().item.as_mut() {
             h.number = 150;
         }
-        //This is a bit ugly, but needed to make the test pass since the mock is generic
         assert!(response.block.is_some());
     }
 

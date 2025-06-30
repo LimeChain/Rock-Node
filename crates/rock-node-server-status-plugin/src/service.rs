@@ -5,7 +5,7 @@ use rock_node_protobufs::org::hiero::block::api::{
 use std::sync::Arc;
 use std::time::Instant;
 use tonic::{Request, Response, Status};
-use tracing::{debug, error}; // FIX: Added error to tracing imports
+use tracing::{debug, error};
 
 #[derive(Debug)]
 pub struct StatusServiceImpl {
@@ -21,11 +21,6 @@ impl BlockNodeService for StatusServiceImpl {
     ) -> Result<Response<ServerStatusResponse>, Status> {
         let start_time = Instant::now();
         debug!("Processing serverStatus request: {:?}", request);
-
-        // FIX: Handle the new Result<Option<u64>> return type properly.
-        // We need to convert this into two separate values:
-        // 1. A u64 for the gRPC response (0 for None).
-        // 2. An i64 for the Prometheus gauge (-1 for None).
 
         let earliest_block_val = match self.block_reader.get_earliest_persisted_block_number() {
             Ok(Some(num)) => num,
@@ -72,7 +67,6 @@ impl BlockNodeService for StatusServiceImpl {
             .with_label_values(&["success"])
             .inc();
 
-        // FIX: Convert the values to i64 for the gauge, using -1 as the sentinel for "None".
         self.metrics
             .server_status_earliest_available_block
             .set(earliest_block_val as i64);
@@ -99,12 +93,10 @@ mod tests {
 
     #[derive(Debug, Default)]
     struct MockBlockReader {
-        // We can still use i64 internally for the mock's state.
         earliest_block: i64,
         latest_block: i64,
     }
 
-    // FIX: Update the mock to implement the new, correct trait signatures.
     impl BlockReader for MockBlockReader {
         fn read_block(&self, _block_number: u64) -> Result<Option<Vec<u8>>> {
             Ok(None)

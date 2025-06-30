@@ -38,7 +38,6 @@ impl HotTier {
         }
     }
     
-    // FIX: New method to find the first block number in the hot tier.
     pub fn get_earliest_block_number(&self) -> Result<Option<u64>> {
         let cf = self
             .db

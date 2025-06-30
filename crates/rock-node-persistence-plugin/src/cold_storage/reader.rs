@@ -6,10 +6,9 @@ use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
-use tracing::info;
+use tracing::{info, warn};
 use zstd;
 
-// Must match the writer's IndexRecord
 #[repr(C, packed)]
 #[derive(Clone, Copy)]
 struct IndexRecord {
@@ -25,7 +24,6 @@ struct ArchiveLocation {
     length: u32,
 }
 
-/// Scans and reads from cold storage archives.
 #[derive(Debug, Clone)]
 pub struct ColdReader {
     config: Arc<PersistenceServiceConfig>,
@@ -55,7 +53,9 @@ impl ColdReader {
             let entry = entry?;
             let path = entry.path();
             if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("rbi") {
-                self.load_index_file(&path)?;
+                if let Err(e) = self.load_index_file(&path) {
+                    warn!("Failed to load index file '{:?}': {}. Skipping.", path, e);
+                }
             }
         }
         info!(
@@ -65,7 +65,8 @@ impl ColdReader {
         Ok(())
     }
 
-    fn load_index_file(&self, index_path: &Path) -> Result<()> {
+    pub fn load_index_file(&self, index_path: &Path) -> Result<()> {
+        info!("Loading new cold storage index file: {:?}", index_path);
         let mut file = File::open(index_path)?;
         let mut buffer = vec![0; std::mem::size_of::<IndexRecord>()];
         let data_path = index_path.with_extension("rba");
@@ -83,7 +84,6 @@ impl ColdReader {
         Ok(())
     }
     
-    // FIX: New method to get the earliest block number from the in-memory index.
     pub fn get_earliest_indexed_block(&self) -> Result<Option<u64>> {
         Ok(self.index.iter().map(|item| *item.key()).min())
     }

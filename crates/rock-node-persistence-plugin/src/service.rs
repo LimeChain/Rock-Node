@@ -8,7 +8,7 @@ use rock_node_core::{block_reader::BlockReader, block_writer::BlockWriter};
 use rock_node_protobufs::com::hedera::hapi::block::stream::{block_item, Block};
 use rocksdb::WriteBatch;
 use std::sync::Arc;
-use tracing::info;
+use tracing::{info, warn};
 
 #[derive(Debug, Clone)]
 pub struct PersistenceService {
@@ -34,25 +34,19 @@ impl PersistenceService {
     }
 }
 
-// CHANGED: Implementing the updated BlockReader trait.
 impl BlockReader for PersistenceService {
     fn get_latest_persisted_block_number(&self) -> Result<Option<u64>> {
         self.state.get_latest_persisted()
     }
 
-    // FIX: This now correctly reads the true earliest block number from the dedicated metadata key.
     fn get_earliest_persisted_block_number(&self) -> Result<Option<u64>> {
         self.state.get_true_earliest_persisted()
     }
 
-    // FIX: Implemented the full router logic to check hot tier first, then cold tier.
     fn read_block(&self, block_number: u64) -> Result<Option<Vec<u8>>> {
-        // 1. Try to read from the high-performance hot tier first.
         if let Some(block_bytes) = self.hot_tier.read_block(block_number)? {
             return Ok(Some(block_bytes));
         }
-
-        // 2. If not found in hot, delegate the lookup to the cold storage reader.
         self.cold_reader.read_block(block_number)
     }
 
@@ -66,45 +60,54 @@ impl BlockWriter for PersistenceService {
         let block_number = get_block_number(block)?;
         let mut batch = WriteBatch::default();
 
-        // FIX: Check if the true earliest needs to be initialized.
         if self.state.get_true_earliest_persisted()?.is_none() {
              self.state.set_true_earliest_persisted(block_number, &mut batch)?;
         }
 
-        // Check if this new block extends the contiguous chain.
         let is_contiguous = match self.get_highest_contiguous_block_number() {
-            // Special case for empty DB, any starting block is okay for contiguous counter.
             Ok(0) if self.get_latest_persisted_block_number()?.is_none() => true,
             Ok(current_contiguous) => block_number == current_contiguous + 1,
             Err(_) => false,
         };
 
         if is_contiguous {
-            self.state
-                .set_highest_contiguous(block_number, &mut batch)?;
+            self.state.set_highest_contiguous(block_number, &mut batch)?;
         }
 
-        self.hot_tier
-            .add_block_to_batch(block, block_number, &mut batch)?;
+        self.hot_tier.add_block_to_batch(block, block_number, &mut batch)?;
         self.state.set_latest_persisted(block_number, &mut batch)?;
-        self.state
-            .initialize_earliest_hot(block_number, &mut batch)?;
+        self.state.initialize_earliest_hot(block_number, &mut batch)?;
 
         self.hot_tier.commit_batch(batch)?;
-        
         self.archiver.run_archival_cycle()?;
 
         Ok(())
     }
 
     fn write_block_batch(&self, blocks: &[Block]) -> Result<()> {
-        info!(
-            "Writing historical batch of {} blocks directly to cold storage.",
-            blocks.len()
-        );
-        // This archival path should also update the "true_earliest_persisted" metadata.
-        // For now, focusing on the main fixes. This is a V2 improvement consideration.
-        self.archiver.cold_writer.write_archive(blocks)
+        if blocks.is_empty() {
+            return Ok(());
+        }
+
+        info!("Writing historical batch of {} blocks directly to cold storage.", blocks.len());
+
+        // Step 1: Write the archive and get the path of the new index file.
+        let new_index_path = self.archiver.cold_writer.write_archive(blocks)?;
+
+        // Step 2: Immediately load the new index into the reader's in-memory map.
+        if let Err(e) = self.cold_reader.load_index_file(&new_index_path) {
+            warn!("CRITICAL: Failed to live-load new index file for historical batch {:?}: {}. A restart may be required to see these blocks.", new_index_path, e);
+        } else {
+            info!("Cold reader index successfully updated for historical batch.");
+        }
+
+        // Step 3: Update the node's true earliest block metadata if this batch is older.
+        let batch_earliest = get_block_number(blocks.first().unwrap())?;
+        self.state.update_true_earliest_if_less(batch_earliest)?;
+        info!("Checked/updated true earliest block number with historical batch.");
+        
+        // Step 4: Return Ok(()) to satisfy the trait contract.
+        Ok(())
     }
 }
 
