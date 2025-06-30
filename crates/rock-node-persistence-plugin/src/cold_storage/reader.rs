@@ -11,6 +11,7 @@ use zstd;
 
 // Must match the writer's IndexRecord
 #[repr(C, packed)]
+#[derive(Clone, Copy)]
 struct IndexRecord {
     block_number: u64,
     offset: u64,
@@ -28,7 +29,6 @@ struct ArchiveLocation {
 #[derive(Debug, Clone)]
 pub struct ColdReader {
     config: Arc<PersistenceServiceConfig>,
-    // The in-memory index for O(1) lookups: block_number -> location info
     index: Arc<DashMap<u64, ArchiveLocation>>,
 }
 
@@ -40,8 +40,6 @@ impl ColdReader {
         }
     }
 
-    /// Scans the cold storage directory for .rbi files and populates the in-memory index.
-    /// This should be called once on startup.
     pub fn scan_and_build_index(&self) -> Result<()> {
         info!(
             "Scanning for cold storage archives in '{}'...",
@@ -69,11 +67,11 @@ impl ColdReader {
 
     fn load_index_file(&self, index_path: &Path) -> Result<()> {
         let mut file = File::open(index_path)?;
-        let mut buffer = [0u8; std::mem::size_of::<IndexRecord>()];
+        let mut buffer = vec![0; std::mem::size_of::<IndexRecord>()];
         let data_path = index_path.with_extension("rba");
 
         while file.read_exact(&mut buffer).is_ok() {
-            let record: IndexRecord = unsafe { std::mem::transmute(buffer) };
+            let record: IndexRecord = unsafe { std::ptr::read(buffer.as_ptr() as *const _) };
             let location = ArchiveLocation {
                 archive_path: data_path.clone(),
                 offset: u64::from_be(record.offset),
@@ -84,8 +82,12 @@ impl ColdReader {
         }
         Ok(())
     }
+    
+    // FIX: New method to get the earliest block number from the in-memory index.
+    pub fn get_earliest_indexed_block(&self) -> Result<Option<u64>> {
+        Ok(self.index.iter().map(|item| *item.key()).min())
+    }
 
-    /// Reads a single block from the cold tier.
     pub fn read_block(&self, block_number: u64) -> Result<Option<Vec<u8>>> {
         if let Some(location) = self.index.get(&block_number) {
             let mut file = File::open(&location.archive_path)?;

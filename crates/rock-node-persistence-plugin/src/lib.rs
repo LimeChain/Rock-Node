@@ -17,7 +17,7 @@ use rock_node_core::{
     BlockReaderProvider,
 };
 use rock_node_protobufs::com::hedera::hapi::block::stream::Block;
-use std::{any::TypeId, sync::Arc};
+use std::{any::TypeId, cmp::min, sync::Arc};
 use tokio::sync::mpsc::Receiver;
 use tracing::{info, warn};
 use uuid::Uuid;
@@ -93,26 +93,49 @@ impl Plugin for PersistencePlugin {
     fn initialize(&mut self, context: AppContext) -> CoreResult<()> {
         info!("Initializing new tiered PersistencePlugin...");
 
-        // Look for the PROVIDER, not the manager directly.
         let db_provider = context
             .service_providers
             .read()
             .unwrap()
             .get(&TypeId::of::<DatabaseManagerProvider>())
             .and_then(|any| any.downcast_ref::<DatabaseManagerProvider>().cloned())
-            .ok_or_else(|| anyhow::anyhow!("DatabaseManagerProvider not found in AppContext! It must be initialized first."))?;
+            .ok_or_else(|| anyhow::anyhow!("DatabaseManagerProvider not found!"))?;
 
-        // Now, get the actual manager from the provider.
         let db_manager = db_provider.get_manager();
-
         let db_handle = db_manager.db_handle();
         let config_arc = Arc::new(context.config.plugins.persistence_service.clone());
 
         let state_manager = Arc::new(state::StateManager::new(db_handle.clone()));
         let hot_tier = Arc::new(hot_tier::HotTier::new(db_handle.clone()));
         let cold_writer = Arc::new(cold_storage::writer::ColdWriter::new(config_arc.clone()));
+        
+        info!("Building cold storage index...");
         let cold_reader = Arc::new(cold_storage::reader::ColdReader::new(config_arc.clone()));
         cold_reader.scan_and_build_index()?;
+        
+        // FIX: Determine and set the true earliest block number on startup.
+        // This is a critical one-time calculation to solve the inaccurate earliest block problem.
+        if state_manager.get_true_earliest_persisted()?.is_none() {
+            info!("Determining true earliest block number for the first time...");
+            let earliest_cold = cold_reader.get_earliest_indexed_block()?;
+            let earliest_hot = hot_tier.get_earliest_block_number()?;
+
+            let true_earliest = match (earliest_cold, earliest_hot) {
+                (Some(c), Some(h)) => Some(min(c, h)),
+                (Some(c), None) => Some(c),
+                (None, Some(h)) => Some(h),
+                (None, None) => None,
+            };
+
+            if let Some(earliest) = true_earliest {
+                state_manager.initialize_true_earliest_persisted(earliest)?;
+                info!("Set true earliest persisted block to #{}", earliest);
+            } else {
+                info!("No existing blocks found in hot or cold storage.");
+            }
+        }
+
+
         let archiver = Arc::new(cold_storage::archiver::Archiver::new(
             config_arc,
             hot_tier.clone(),
@@ -126,8 +149,7 @@ impl Plugin for PersistencePlugin {
 
         {
             let mut providers = context.service_providers.write().unwrap();
-            let reader_provider =
-                BlockReaderProvider::new(service_arc.clone() as Arc<dyn BlockReader>);
+            let reader_provider = BlockReaderProvider::new(service_arc.clone() as Arc<dyn BlockReader>);
             providers.insert(
                 TypeId::of::<BlockReaderProvider>(),
                 Arc::new(reader_provider),

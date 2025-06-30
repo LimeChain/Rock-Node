@@ -28,16 +28,22 @@ impl Archiver {
         }
     }
 
+    // CHANGED: Logic now handles Option<u64> instead of i64.
     pub fn run_archival_cycle(&self) -> Result<()> {
-        let latest_hot = self.state.get_latest_persisted()?; // is i64
-        let earliest_hot = self.state.get_earliest_hot()?; // is i64
+        let latest_hot_opt = self.state.get_latest_persisted()?;
+        let earliest_hot_opt = self.state.get_earliest_hot()?;
 
-        if earliest_hot < 0 || latest_hot <= earliest_hot {
-            return Ok(()); // Nothing to archive
+        // Use a `let...else` block for cleaner guard clauses.
+        let (latest_hot_u64, earliest_hot_u64) =
+            if let (Some(latest), Some(earliest)) = (latest_hot_opt, earliest_hot_opt) {
+                (latest, earliest)
+            } else {
+                return Ok(()); // Nothing to archive if either boundary is unknown.
+            };
+
+        if latest_hot_u64 <= earliest_hot_u64 {
+            return Ok(()); // Or if hot tier is empty/has one block.
         }
-
-        let latest_hot_u64 = latest_hot as u64;
-        let earliest_hot_u64 = earliest_hot as u64;
 
         let current_block_count = latest_hot_u64.saturating_sub(earliest_hot_u64) + 1;
 
