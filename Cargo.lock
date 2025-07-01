@@ -1262,6 +1262,8 @@ dependencies = [
  "anyhow",
  "dashmap",
  "prometheus",
+ "rock-node-protobufs",
+ "rocksdb",
  "serde",
  "thiserror",
  "tokio",
@@ -1286,6 +1288,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "bincode",
+ "dashmap",
  "prost",
  "rock-node-core",
  "rock-node-protobufs",
@@ -1294,6 +1297,7 @@ dependencies = [
  "tokio",
  "tracing",
  "uuid",
+ "zstd",
 ]
 
 [[package]]
@@ -2181,6 +2185,24 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6f42320e61fe2cfd34354ecb597f86f413484a798ba44a8ca1165c58d42da6c1"
 dependencies = [
  "bitflags",
+]
+
+[[package]]
+name = "zstd"
+version = "0.13.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e91ee311a569c327171651566e07972200e76fcfe2242a4fa446149a3881c08a"
+dependencies = [
+ "zstd-safe",
+]
+
+[[package]]
+name = "zstd-safe"
+version = "7.2.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8f49c4d5f0abb602a93fb8736af2a4f4dd9512e36f7f570d66e65ff867ed3b9d"
+dependencies = [
+ "zstd-sys",
 ]
 
 [[package]]

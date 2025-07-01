@@ -3,7 +3,7 @@
 # =========================================
 [core]
 log_level = "INFO"
-database_path = "data/" # Use a local 'data' directory for development
+database_path = "data/database"
 
 # =========================================
 # Plugin-Specific Configurations
@@ -23,13 +23,18 @@ database_path = "data/" # Use a local 'data' directory for development
     [plugins.persistence_service]
     enabled = true
 
-    # The file system path where the RocksDB database will be stored.
-    # The application must have write permissions to this directory.
-    storage_path = "data/persistence"
+    # The sub-directory for cold storage archive files.
+    cold_storage_path = "data/cold_storage"
 
     # The number of recent blocks to keep in the 'hot' RocksDB tier.
-    # Older blocks will be deleted (and archived to cold storage).
-    hot_storage_block_count = 1000
+    hot_storage_block_count = 100
+
+    # The number of blocks to bundle into a single cold storage archive file.
+    archive_batch_size = 100
+
+    # Add a placeholder for the future state service
+    [plugins.state_service]
+    enabled = false
 
     [plugins.subscribe_service]
     enabled = true

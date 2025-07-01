@@ -5,7 +5,7 @@ use rock_node_protobufs::org::hiero::block::api::{
 use std::sync::Arc;
 use std::time::Instant;
 use tonic::{Request, Response, Status};
-use tracing::debug;
+use tracing::{debug, error};
 
 #[derive(Debug)]
 pub struct StatusServiceImpl {
@@ -22,28 +22,35 @@ impl BlockNodeService for StatusServiceImpl {
         let start_time = Instant::now();
         debug!("Processing serverStatus request: {:?}", request);
 
-        // Get the block range from the persistence service.
-        let earliest_block = self.block_reader.get_earliest_persisted_block_number();
-        let latest_block = self.block_reader.get_latest_persisted_block_number();
+        let earliest_block_val = match self.block_reader.get_earliest_persisted_block_number() {
+            Ok(Some(num)) => num,
+            Ok(None) => 0, // Default to 0 for the response if no blocks exist.
+            Err(e) => {
+                error!("Failed to get earliest persisted block number: {}", e);
+                // Return an internal error to the gRPC client.
+                return Err(Status::internal(format!(
+                    "Database error while fetching earliest block: {}",
+                    e
+                )));
+            }
+        };
 
-        // The proto uses uint64, but our reader uses i64 with -1 for "not found".
-        // We convert -1 to 0 for the response, as 0 is a safe default for an empty DB.
+        let latest_block_val = match self.block_reader.get_latest_persisted_block_number() {
+            Ok(Some(num)) => num,
+            Ok(None) => 0,
+            Err(e) => {
+                error!("Failed to get latest persisted block number: {}", e);
+                return Err(Status::internal(format!(
+                    "Database error while fetching latest block: {}",
+                    e
+                )));
+            }
+        };
+
         let response = ServerStatusResponse {
-            first_available_block: if earliest_block < 0 {
-                0
-            } else {
-                earliest_block as u64
-            },
-            last_available_block: if latest_block < 0 {
-                0
-            } else {
-                latest_block as u64
-            },
-
-            // TODO: Implement logic for state snapshot availability.
+            first_available_block: earliest_block_val,
+            last_available_block: latest_block_val,
             only_latest_state: false,
-
-            // TODO: Populate version information from the AppContext or build-time variables.
             version_information: None,
         };
 
@@ -62,11 +69,11 @@ impl BlockNodeService for StatusServiceImpl {
 
         self.metrics
             .server_status_earliest_available_block
-            .set(earliest_block);
+            .set(earliest_block_val as i64);
 
         self.metrics
             .server_status_latest_available_block
-            .set(latest_block);
+            .set(latest_block_val as i64);
 
         Ok(Response::new(response))
     }
@@ -84,8 +91,6 @@ mod tests {
     use rock_node_protobufs::org::hiero::block::api::ServerStatusRequest;
     use std::sync::Arc;
 
-    // A mock implementation of the BlockReader trait for testing the status service.
-    // It only needs to store and return the earliest and latest block numbers.
     #[derive(Debug, Default)]
     struct MockBlockReader {
         earliest_block: i64,
@@ -93,35 +98,43 @@ mod tests {
     }
 
     impl BlockReader for MockBlockReader {
-        // This method is not used by the StatusServiceImpl, so we provide a default implementation.
         fn read_block(&self, _block_number: u64) -> Result<Option<Vec<u8>>> {
             Ok(None)
         }
 
-        fn get_earliest_persisted_block_number(&self) -> i64 {
-            self.earliest_block
+        fn get_earliest_persisted_block_number(&self) -> Result<Option<u64>> {
+            if self.earliest_block < 0 {
+                Ok(None)
+            } else {
+                Ok(Some(self.earliest_block as u64))
+            }
         }
 
-        fn get_latest_persisted_block_number(&self) -> i64 {
-            self.latest_block
+        fn get_latest_persisted_block_number(&self) -> Result<Option<u64>> {
+            if self.latest_block < 0 {
+                Ok(None)
+            } else {
+                Ok(Some(self.latest_block as u64))
+            }
+        }
+
+        fn get_highest_contiguous_block_number(&self) -> Result<u64> {
+            if self.latest_block < 0 {
+                return Ok(0);
+            }
+            Ok(self.latest_block as u64)
         }
     }
 
-    // Helper to create the service with its dependencies for testing.
     fn create_test_service(reader: MockBlockReader) -> StatusServiceImpl {
         StatusServiceImpl {
             block_reader: Arc::new(reader),
-            // Use the actual public constructor for MetricsRegistry.
-            // .unwrap() is acceptable in tests as a failure here indicates a setup problem.
             metrics: Arc::new(MetricsRegistry::new().unwrap()),
         }
     }
 
     #[tokio::test]
     async fn test_server_status_with_populated_range() {
-        // STATUS-01 & METRICS-01: Test with a normal, populated block range.
-        // This test also implicitly verifies the metrics calls, as the same values
-        // are used for both the response and the metrics gauges.
         let reader = MockBlockReader {
             earliest_block: 100,
             latest_block: 5000,
@@ -137,8 +150,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_server_status_with_empty_db() {
-        // STATUS-02: Test when the database is empty.
-        // The block reader uses -1 as a sentinel value for an empty DB.
         let reader = MockBlockReader {
             earliest_block: -1,
             latest_block: -1,
@@ -148,14 +159,12 @@ mod tests {
         let request = Request::new(ServerStatusRequest {});
         let response = service.server_status(request).await.unwrap().into_inner();
 
-        // The service should convert the -1 sentinel value to 0 for the proto response.
         assert_eq!(response.first_available_block, 0);
         assert_eq!(response.last_available_block, 0);
     }
 
     #[tokio::test]
     async fn test_server_status_with_single_block() {
-        // STATUS-03: Test when only one block exists in the database.
         let reader = MockBlockReader {
             earliest_block: 1,
             latest_block: 1,

@@ -3,9 +3,10 @@ use std::fmt::Debug;
 use std::sync::Arc;
 
 pub trait BlockReader: Debug + Send + Sync + 'static {
-    fn get_latest_persisted_block_number(&self) -> i64;
-    fn get_earliest_persisted_block_number(&self) -> i64;
+    fn get_latest_persisted_block_number(&self) -> Result<Option<u64>>;
+    fn get_earliest_persisted_block_number(&self) -> Result<Option<u64>>;
     fn read_block(&self, block_number: u64) -> Result<Option<Vec<u8>>>;
+    fn get_highest_contiguous_block_number(&self) -> Result<u64>;
 }
 
 #[derive(Clone, Debug)]
@@ -18,7 +19,6 @@ impl BlockReaderProvider {
         Self { reader }
     }
 
-    /// This is the method the compiler was looking for.
     pub fn get_reader(&self) -> Arc<dyn BlockReader> {
         self.reader.clone()
     }
