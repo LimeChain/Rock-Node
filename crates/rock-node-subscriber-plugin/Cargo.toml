@@ -1,0 +1,27 @@
+[package]
+name = "rock-node-subscriber-plugin"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# Required for the plugin system and core types
+rock-node-core = { path = "../rock-node-core" }
+rock-node-protobufs = { path = "../rock-node-protobufs" }
+
+# Async runtime and utilities
+tokio = { version = "1", features = ["full"] }
+tokio-stream = "0.1"
+futures-util = "0.3"
+
+# gRPC library
+tonic = "0.13.1"
+
+# For structured logging
+tracing = "0.1"
+
+# For easy error handling
+anyhow = "1"
+thiserror = "1.0"
+
+# For unique session IDs
+uuid = { version = "1", features = ["v4"] }

@@ -1229,7 +1229,7 @@ dependencies = [
  "rock-node-persistence-plugin",
  "rock-node-publish-plugin",
  "rock-node-server-status-plugin",
- "rock-node-subscribe-plugin",
+ "rock-node-subscriber-plugin",
  "rock-node-verifier-plugin",
  "serde",
  "serde_json",
@@ -1344,10 +1344,19 @@ dependencies = [
 ]
 
 [[package]]
-name = "rock-node-subscribe-plugin"
+name = "rock-node-subscriber-plugin"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
+ "futures-util",
  "rock-node-core",
+ "rock-node-protobufs",
+ "thiserror",
+ "tokio",
+ "tokio-stream",
+ "tonic",
+ "tracing",
+ "uuid",
 ]
 
 [[package]]

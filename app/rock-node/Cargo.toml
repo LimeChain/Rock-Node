@@ -12,7 +12,7 @@ rock-node-persistence-plugin = { path = "../../crates/rock-node-persistence-plug
 rock-node-verifier-plugin = { path = "../../crates/rock-node-verifier-plugin" }
 rock-node-observability-plugin = { path = "../../crates/rock-node-observability-plugin" }
 rock-node-publish-plugin = { path = "../../crates/rock-node-publish-plugin" }
-rock-node-subscribe-plugin = { path = "../../crates/rock-node-subscribe-plugin" }
+rock-node-subscriber-plugin = { path = "../../crates/rock-node-subscriber-plugin" }
 rock-node-block-access-plugin = { path = "../../crates/rock-node-block-access-plugin" }
 rock-node-server-status-plugin = { path = "../../crates/rock-node-server-status-plugin" }
 

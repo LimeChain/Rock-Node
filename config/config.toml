@@ -36,10 +36,13 @@ database_path = "data/database"
     [plugins.state_service]
     enabled = false
 
-    [plugins.subscribe_service]
+    [plugins.subscriber_service]
     enabled = true
-    grpc_port = 6890
-    max_concurrent_streams = 250 
+    grpc_port = 6895
+    grpc_address = "0.0.0.0"
+    max_concurrent_streams = 100
+    live_stream_queue_size = 250
+    max_future_block_lookahead = 250
 
     [plugins.verification_service]
     enabled = false

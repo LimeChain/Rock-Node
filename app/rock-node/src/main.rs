@@ -11,6 +11,7 @@ use rock_node_persistence_plugin::PersistencePlugin;
 use rock_node_publish_plugin::PublishPlugin;
 use rock_node_server_status_plugin::StatusPlugin;
 use rock_node_verifier_plugin::VerifierPlugin;
+use rock_node_subscriber_plugin::SubscriberPlugin;
 use std::{
     any::{Any, TypeId},
     collections::HashMap,
@@ -126,6 +127,7 @@ async fn main() -> Result<()> {
     }
 
     plugins.push(Box::new(PublishPlugin::new()));
+    plugins.push(Box::new(SubscriberPlugin::new()));
     plugins.push(Box::new(BlockAccessPlugin::new()));
     plugins.push(Box::new(StatusPlugin::new()));
     plugins.push(Box::new(ObservabilityPlugin::new()));
