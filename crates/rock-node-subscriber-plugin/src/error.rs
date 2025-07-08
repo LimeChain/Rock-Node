@@ -1,6 +1,7 @@
 use rock_node_protobufs::org::hiero::block::api::subscribe_stream_response::Code;
 use thiserror::Error;
 
+#[allow(dead_code)]
 #[derive(Error, Debug)]
 pub enum SubscriberError {
     #[error("Validation failed: {0}")]
