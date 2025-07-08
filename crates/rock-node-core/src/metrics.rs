@@ -42,10 +42,10 @@ pub struct MetricsRegistry {
     pub persistence_hot_tier_block_count: IntGauge,
     pub persistence_cold_tier_block_count: IntGauge,
 
-        // --- Subscriber Plugin Metrics ---
-        pub subscriber_active_sessions: IntGauge,
-        pub subscriber_blocks_sent_total: CounterVec,
-        pub subscriber_sessions_total: CounterVec,
+    // --- Subscriber Plugin Metrics ---
+    pub subscriber_active_sessions: IntGauge,
+    pub subscriber_blocks_sent_total: CounterVec,
+    pub subscriber_sessions_total: CounterVec,
 }
 
 impl MetricsRegistry {

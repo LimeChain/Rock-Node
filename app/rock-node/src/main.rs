@@ -10,8 +10,8 @@ use rock_node_observability_plugin::ObservabilityPlugin;
 use rock_node_persistence_plugin::PersistencePlugin;
 use rock_node_publish_plugin::PublishPlugin;
 use rock_node_server_status_plugin::StatusPlugin;
-use rock_node_verifier_plugin::VerifierPlugin;
 use rock_node_subscriber_plugin::SubscriberPlugin;
+use rock_node_verifier_plugin::VerifierPlugin;
 use std::{
     any::{Any, TypeId},
     collections::HashMap,

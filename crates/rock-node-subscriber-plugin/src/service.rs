@@ -32,7 +32,11 @@ impl BlockStreamSubscribeService for SubscriberServiceImpl {
     ) -> Result<Response<Self::subscribeBlockStreamStream>, Status> {
         let remote_addr = request.remote_addr();
         let request = request.into_inner();
-        info!(?request, ?remote_addr, "Received new subscribeBlockStream request.");
+        info!(
+            ?request,
+            ?remote_addr,
+            "Received new subscribeBlockStream request."
+        );
 
         let (tx, rx) = mpsc::channel(16);
 
