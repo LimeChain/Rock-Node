@@ -16,12 +16,12 @@ pub struct CoreConfig {
 pub struct PluginConfigs {
     pub observability: ObservabilityConfig,
     pub persistence_service: PersistenceServiceConfig,
-    pub subscribe_service: SubscribeServiceConfig,
     pub publish_service: PublishServiceConfig,
     pub verification_service: VerificationServiceConfig,
     pub block_access_service: BlockAccessServiceConfig,
     pub server_status_service: ServerStatusServiceConfig,
     pub state_service: StateServiceConfig,
+    pub subscriber_service: SubscriberServiceConfig,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -52,10 +52,13 @@ pub struct PublishServiceConfig {
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
-pub struct SubscribeServiceConfig {
+pub struct SubscriberServiceConfig {
     pub enabled: bool,
+    pub grpc_address: String,
     pub grpc_port: u16,
     pub max_concurrent_streams: usize,
+    pub live_stream_queue_size: usize,
+    pub max_future_block_lookahead: u64,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]

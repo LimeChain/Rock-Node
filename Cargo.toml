@@ -8,7 +8,7 @@ members = [
     "crates/rock-node-verifier-plugin",
     "crates/rock-node-observability-plugin",
     "crates/rock-node-publish-plugin",
-    "crates/rock-node-subscribe-plugin"
+    "crates/rock-node-subscriber-plugin"
 ]
 
 [workspace.package]

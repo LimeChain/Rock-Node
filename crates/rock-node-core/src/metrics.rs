@@ -41,11 +41,15 @@ pub struct MetricsRegistry {
     pub persistence_archival_cycle_duration_seconds: HistogramVec,
     pub persistence_hot_tier_block_count: IntGauge,
     pub persistence_cold_tier_block_count: IntGauge,
+
+    // --- Subscriber Plugin Metrics ---
+    pub subscriber_active_sessions: IntGauge,
+    pub subscriber_blocks_sent_total: CounterVec,
+    pub subscriber_sessions_total: CounterVec,
 }
 
 impl MetricsRegistry {
     /// Creates a new `MetricsRegistry` and registers all the defined metrics.
-    /// This should be called once at application startup.
     pub fn new() -> Result<Self, prometheus::Error> {
         let registry = Registry::new();
 
@@ -223,6 +227,31 @@ impl MetricsRegistry {
         ))?;
         registry.register(Box::new(persistence_cold_tier_block_count.clone()))?;
 
+        // --- Subscriber Plugin Metrics Initialization ---
+        let subscriber_active_sessions = IntGauge::with_opts(Opts::new(
+            "rocknode_subscriber_active_sessions",
+            "Number of currently active gRPC subscriber sessions.",
+        ))?;
+        registry.register(Box::new(subscriber_active_sessions.clone()))?;
+
+        let subscriber_blocks_sent_total = CounterVec::new(
+            Opts::new(
+                "rocknode_subscriber_blocks_sent_total",
+                "Total number of blocks sent to subscribers, by type (historical, live).",
+            ),
+            &["type"],
+        )?;
+        registry.register(Box::new(subscriber_blocks_sent_total.clone()))?;
+
+        let subscriber_sessions_total = CounterVec::new(
+            Opts::new(
+                "rocknode_subscriber_sessions_total",
+                "Total number of subscriber sessions, labeled by the final outcome.",
+            ),
+            &["outcome"], // E.g., 'completed', 'client_disconnect', 'invalid_request'
+        )?;
+        registry.register(Box::new(subscriber_sessions_total.clone()))?;
+
         Ok(Self {
             registry,
             blocks_acknowledged,
@@ -246,6 +275,9 @@ impl MetricsRegistry {
             persistence_archival_cycle_duration_seconds,
             persistence_hot_tier_block_count,
             persistence_cold_tier_block_count,
+            subscriber_active_sessions,
+            subscriber_blocks_sent_total,
+            subscriber_sessions_total,
         })
     }
 

@@ -1,0 +1,175 @@
+{
+    "__inputs": [],
+    "__requires": [
+      {
+        "type": "grafana",
+        "id": "grafana",
+        "name": "Grafana",
+        "version": "10.0.0"
+      },
+      {
+        "type": "datasource",
+        "id": "prometheus",
+        "name": "Prometheus",
+        "version": "1.0.0"
+      }
+    ],
+    "annotations": {
+      "list": [
+        {
+          "builtIn": 1,
+          "datasource": {
+            "type": "grafana",
+            "uid": "-- Grafana --"
+          },
+          "enable": true,
+          "hide": true,
+          "iconColor": "rgba(0, 211, 255, 1)",
+          "name": "Annotations & Alerts",
+          "type": "dashboard"
+        }
+      ]
+    },
+    "editable": true,
+    "fiscalYearStartMonth": 0,
+    "graphTooltip": 0,
+    "id": null,
+    "links": [],
+    "panels": [
+      {
+        "id": 1,
+        "title": "Active Subscriber Sessions",
+        "type": "stat",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "rocknode-prometheus"
+        },
+        "gridPos": { "h": 8, "w": 8, "x": 0, "y": 0 },
+        "options": {
+          "colorMode": "value",
+          "graphMode": "area",
+          "justifyMode": "auto",
+          "orientation": "auto",
+          "reduceOptions": {
+            "calcs": [ "lastNotNull" ],
+            "fields": "",
+            "values": false
+          },
+          "textMode": "auto"
+        },
+        "targets": [
+          {
+            "datasource": { "type": "prometheus", "uid": "rocknode-prometheus" },
+            "editorMode": "builder",
+            "expr": "rocknode_subscriber_active_sessions",
+            "legendFormat": "Active Sessions",
+            "range": true,
+            "refId": "A"
+          }
+        ]
+      },
+      {
+        "id": 2,
+        "title": "Total Sessions by Outcome (Last 1h)",
+        "type": "piechart",
+        "datasource": { "type": "prometheus", "uid": "rocknode-prometheus" },
+        "gridPos": { "h": 8, "w": 8, "x": 8, "y": 0 },
+        "options": {
+          "displayLabels": [ "name", "percent" ],
+          "legend": {
+            "displayMode": "list",
+            "placement": "right"
+          },
+          "pieType": "donut",
+          "reduceOptions": { "calcs": [ "sum" ], "fields": "", "values": false }
+        },
+        "targets": [
+          {
+            "datasource": { "type": "prometheus", "uid": "rocknode-prometheus" },
+            "editorMode": "builder",
+            "expr": "sum(increase(rocknode_subscriber_sessions_total[1h])) by (outcome)",
+            "legendFormat": "{{outcome}}",
+            "range": false,
+            "refId": "A"
+          }
+        ]
+      },
+      {
+        "id": 3,
+        "title": "Block Streaming Rate",
+        "type": "timeseries",
+        "datasource": { "type": "prometheus", "uid": "rocknode-prometheus" },
+        "gridPos": { "h": 16, "w": 24, "x": 0, "y": 8 },
+        "options": {
+          "legend": {
+            "calcs": [],
+            "displayMode": "list",
+            "placement": "bottom",
+            "showLegend": true
+          },
+          "tooltip": {
+            "mode": "multi",
+            "sort": "none"
+          }
+        },
+        "fieldConfig": {
+          "defaults": {
+            "color": { "mode": "palette-classic" },
+            "custom": {
+              "axisCenteredZero": false,
+              "axisColorMode": "text",
+              "axisLabel": "",
+              "axisPlacement": "auto",
+              "barAlignment": 0,
+              "drawStyle": "line",
+              "fillOpacity": 10,
+              "gradientMode": "opacity",
+              "lineInterpolation": "linear",
+              "lineWidth": 2,
+              "pointSize": 5,
+              "showPoints": "auto",
+              "spanNulls": false,
+              "stacking": { "group": "A", "mode": "none" },
+              "thresholdsStyle": { "mode": "off" }
+            },
+            "mappings": [],
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [ { "color": "green", "value": null } ]
+            },
+            "unit": "Bps"
+          }
+        },
+        "targets": [
+          {
+            "datasource": { "type": "prometheus", "uid": "rocknode-prometheus" },
+            "editorMode": "builder",
+            "expr": "sum(rate(rocknode_subscriber_blocks_sent_total[$__rate_interval])) by (type)",
+            "legendFormat": "{{type}}",
+            "range": true,
+            "refId": "A"
+          }
+        ]
+      }
+    ],
+    "refresh": "10s",
+    "schemaVersion": 38,
+    "style": "dark",
+    "tags": [
+      "rock-node"
+    ],
+    "templating": {
+      "list": []
+    },
+    "time": {
+      "from": "now-1h",
+      "to": "now"
+    },
+    "timepicker": {},
+    "timezone": "browser",
+    "title": "Rock Node - Subscriber Plugin",
+    "uid": "rock-node-subscriber-v1",
+    "version": 1,
+    "weekStart": ""
+  }
+  

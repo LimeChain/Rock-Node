@@ -1,0 +1,446 @@
+use crate::error::SubscriberError;
+use futures_util::FutureExt;
+use prost::Message;
+use rock_node_core::{
+    app_context::AppContext, block_reader::BlockReader, service_provider::BlockReaderProvider,
+};
+use rock_node_protobufs::com::hedera::hapi::block::stream::Block;
+use rock_node_protobufs::org::hiero::block::api::{
+    subscribe_stream_response::{Code, Response as ResponseType},
+    BlockItemSet, SubscribeStreamRequest, SubscribeStreamResponse,
+};
+use std::{any::TypeId, sync::Arc, time::Duration};
+use tokio::sync::mpsc;
+use tonic::Status;
+use tracing::{debug, info, warn};
+use uuid::Uuid;
+
+pub struct SubscriberSession {
+    pub id: Uuid,
+    context: Arc<AppContext>,
+    request: SubscribeStreamRequest,
+    response_tx: mpsc::Sender<Result<SubscribeStreamResponse, Status>>,
+    block_reader: Arc<dyn BlockReader>,
+}
+
+// --- Main implementation is unchanged ---
+
+impl SubscriberSession {
+    pub fn new(
+        context: Arc<AppContext>,
+        request: SubscribeStreamRequest,
+        response_tx: mpsc::Sender<Result<SubscribeStreamResponse, Status>>,
+    ) -> Self {
+        let block_reader = context
+            .service_providers
+            .read()
+            .unwrap()
+            .get(&TypeId::of::<BlockReaderProvider>())
+            .and_then(|p| p.downcast_ref::<BlockReaderProvider>())
+            .map(|p_concrete| p_concrete.get_service())
+            .expect("BlockReaderProvider not found in service providers!");
+
+        Self {
+            id: Uuid::new_v4(),
+            context,
+            request,
+            response_tx,
+            block_reader,
+        }
+    }
+
+    pub async fn run(&mut self) {
+        self.context.metrics.subscriber_active_sessions.inc();
+        let _drop_guard = DropGuard::new(self.context.metrics.subscriber_active_sessions.clone());
+
+        let result = self.execute_stream().await;
+        self.finalize_stream(result).await;
+    }
+
+    async fn execute_stream(&mut self) -> Result<(), SubscriberError> {
+        let mut next_block_to_send = self.validate_request().await?;
+        let is_finite_stream = self.request.end_block_number != u64::MAX;
+
+        loop {
+            if is_finite_stream && next_block_to_send > self.request.end_block_number {
+                return Ok(());
+            }
+
+            match self.block_reader.read_block(next_block_to_send) {
+                Ok(Some(block_bytes)) => {
+                    self.send_block(&block_bytes).await?;
+                    self.context
+                        .metrics
+                        .subscriber_blocks_sent_total
+                        .with_label_values(&["historical"])
+                        .inc();
+                    next_block_to_send += 1;
+                    continue;
+                }
+                Ok(None) => {}
+                Err(e) => return Err(SubscriberError::Persistence(e)),
+            }
+
+            self.wait_for_new_block(next_block_to_send).await?;
+        }
+    }
+
+    async fn wait_for_new_block(&self, block_number_needed: u64) -> Result<(), SubscriberError> {
+        let mut broadcast_rx = self.context.tx_block_persisted.subscribe();
+        let timeout_duration = Duration::from_secs(60);
+
+        debug!(session_id = %self.id, "Waiting for block #{} or newer...", block_number_needed);
+        loop {
+            match tokio::time::timeout(timeout_duration, broadcast_rx.recv().fuse()).await {
+                Ok(Ok(event)) => {
+                    if event.block_number >= block_number_needed {
+                        self.context
+                            .metrics
+                            .subscriber_blocks_sent_total
+                            .with_label_values(&["live"])
+                            .inc();
+                        return Ok(());
+                    }
+                }
+                Ok(Err(tokio::sync::broadcast::error::RecvError::Lagged(_))) => {
+                    warn!(session_id = %self.id, "Subscriber lagged behind event bus. Forcing persistence check.");
+                    return Ok(());
+                }
+                Ok(Err(tokio::sync::broadcast::error::RecvError::Closed)) => {
+                    return Err(SubscriberError::Internal(
+                        "Broadcast channel closed".to_string(),
+                    ));
+                }
+                Err(_) => {
+                    return Err(SubscriberError::TimeoutWaitingForBlock(block_number_needed));
+                }
+            }
+        }
+    }
+
+    async fn validate_request(&self) -> Result<u64, SubscriberError> {
+        let req_start = self.request.start_block_number;
+        let req_end = self.request.end_block_number;
+        let earliest = self.block_reader.get_earliest_persisted_block_number()?;
+        let start_block = match req_start {
+            u64::MAX => earliest.unwrap_or(0),
+            literal_start => literal_start,
+        };
+        if req_end != u64::MAX && start_block > req_end {
+            return Err(SubscriberError::Validation(
+                format!("..."),
+                Code::ReadStreamInvalidEndBlockNumber,
+            ));
+        }
+        if let Some(earliest_num) = earliest {
+            if start_block < earliest_num {
+                return Err(SubscriberError::Validation(
+                    format!("..."),
+                    Code::ReadStreamInvalidStartBlockNumber,
+                ));
+            }
+        }
+        Ok(start_block)
+    }
+
+    async fn send_block(&self, block_bytes: &[u8]) -> Result<(), SubscriberError> {
+        let item_set = BlockItemSet {
+            block_items: Block::decode(block_bytes)
+                .map_err(|e| SubscriberError::Persistence(e.into()))?
+                .items,
+        };
+        let response = SubscribeStreamResponse {
+            response: Some(ResponseType::BlockItems(item_set)),
+        };
+        if self.response_tx.send(Ok(response)).await.is_err() {
+            Err(SubscriberError::ClientDisconnected)
+        } else {
+            Ok(())
+        }
+    }
+
+    async fn finalize_stream(&self, result: Result<(), SubscriberError>) {
+        let (final_code, outcome_label) = match result {
+            Ok(()) => (Code::ReadStreamSuccess, "completed"),
+            Err(e) => (e.to_status_code(), e.to_metric_label()),
+        };
+        self.context
+            .metrics
+            .subscriber_sessions_total
+            .with_label_values(&[outcome_label])
+            .inc();
+        self.send_final_status(final_code).await;
+    }
+
+    async fn send_final_status(&self, code: Code) {
+        if let Code::ReadStreamUnknown = code {
+            return;
+        }
+        info!(session_id = %self.id, "SENDING FINAL STATUS: {:?}", code);
+        let response = SubscribeStreamResponse {
+            response: Some(ResponseType::Status(code.into())),
+        };
+        if self.response_tx.send(Ok(response)).await.is_err() {
+            debug!(session_id = %self.id, "Client disconnected before final status could be sent.");
+        }
+    }
+}
+
+struct DropGuard {
+    gauge: prometheus::IntGauge,
+}
+impl DropGuard {
+    fn new(gauge: prometheus::IntGauge) -> Self {
+        Self { gauge }
+    }
+}
+impl Drop for DropGuard {
+    fn drop(&mut self) {
+        self.gauge.dec();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rock_node_core::{
+        config::{
+            BlockAccessServiceConfig, Config, CoreConfig, ObservabilityConfig,
+            PersistenceServiceConfig, PluginConfigs, PublishServiceConfig,
+            ServerStatusServiceConfig, StateServiceConfig, SubscriberServiceConfig,
+            VerificationServiceConfig,
+        },
+        events::BlockPersisted,
+        AppContext, BlockReaderProvider, CapabilityRegistry, MetricsRegistry,
+    };
+    use rock_node_protobufs::com::hedera::hapi::block::stream::BlockItem;
+    use std::{any::Any, collections::HashMap, sync::RwLock};
+    use tokio::sync::broadcast;
+
+    // FIX: Redesigned mock to use interior mutability.
+    #[derive(Debug, Default)]
+    struct MockBlockReader {
+        blocks: RwLock<HashMap<u64, Vec<u8>>>,
+        earliest: RwLock<Option<u64>>,
+        latest: RwLock<Option<u64>>,
+    }
+
+    // The trait is implemented for the struct itself.
+    impl BlockReader for MockBlockReader {
+        fn get_latest_persisted_block_number(&self) -> anyhow::Result<Option<u64>> {
+            Ok(*self.latest.read().unwrap())
+        }
+        fn get_earliest_persisted_block_number(&self) -> anyhow::Result<Option<u64>> {
+            Ok(*self.earliest.read().unwrap())
+        }
+        fn read_block(&self, block_number: u64) -> anyhow::Result<Option<Vec<u8>>> {
+            Ok(self.blocks.read().unwrap().get(&block_number).cloned())
+        }
+        fn get_highest_contiguous_block_number(&self) -> anyhow::Result<u64> {
+            Ok(self.latest.read().unwrap().unwrap_or(0))
+        }
+    }
+
+    impl MockBlockReader {
+        // `add_block` now takes `&self` because it modifies the interior state.
+        fn add_block(&self, num: u64) {
+            let mut earliest = self.earliest.write().unwrap();
+            if earliest.is_none() {
+                *earliest = Some(num);
+            }
+            *self.latest.write().unwrap() = Some(num);
+
+            let block = Block {
+                items: vec![BlockItem { item: None }],
+            };
+            let mut bytes = Vec::new();
+            block.encode(&mut bytes).unwrap();
+            self.blocks.write().unwrap().insert(num, bytes);
+        }
+    }
+
+    fn create_test_context(
+        reader: Arc<dyn BlockReader>,
+    ) -> (Arc<AppContext>, broadcast::Sender<BlockPersisted>) {
+        let config = Config {
+            core: CoreConfig {
+                log_level: "debug".to_string(),
+                database_path: "".to_string(),
+            },
+            plugins: PluginConfigs {
+                observability: ObservabilityConfig {
+                    enabled: false,
+                    listen_address: "".to_string(),
+                },
+                persistence_service: PersistenceServiceConfig {
+                    enabled: false,
+                    cold_storage_path: "".to_string(),
+                    hot_storage_block_count: 0,
+                    archive_batch_size: 0,
+                },
+                publish_service: PublishServiceConfig {
+                    enabled: false,
+                    grpc_address: "".to_string(),
+                    grpc_port: 0,
+                    max_concurrent_streams: 0,
+                },
+                verification_service: VerificationServiceConfig { enabled: false },
+                block_access_service: BlockAccessServiceConfig {
+                    enabled: false,
+                    grpc_address: "".to_string(),
+                    grpc_port: 0,
+                },
+                server_status_service: ServerStatusServiceConfig {
+                    enabled: false,
+                    grpc_address: "".to_string(),
+                    grpc_port: 0,
+                },
+                state_service: StateServiceConfig { enabled: false },
+                subscriber_service: SubscriberServiceConfig {
+                    enabled: true,
+                    grpc_address: "".to_string(),
+                    grpc_port: 0,
+                    max_concurrent_streams: 10,
+                    live_stream_queue_size: 10,
+                    max_future_block_lookahead: 100,
+                },
+            },
+        };
+
+        let service_providers = Arc::new(RwLock::new(HashMap::new()));
+        let provider = Arc::new(BlockReaderProvider::new(reader));
+        service_providers.write().unwrap().insert(
+            TypeId::of::<BlockReaderProvider>(),
+            provider as Arc<dyn Any + Send + Sync>,
+        );
+
+        let (tx_persisted, _) = broadcast::channel(16);
+
+        (
+            Arc::new(AppContext {
+                config: Arc::new(config),
+                metrics: Arc::new(MetricsRegistry::new().unwrap()),
+                capability_registry: Arc::new(CapabilityRegistry::new()),
+                service_providers,
+                block_data_cache: Arc::new(Default::default()),
+                tx_block_items_received: tokio::sync::mpsc::channel(1).0,
+                tx_block_verified: tokio::sync::mpsc::channel(1).0,
+                tx_block_persisted: tx_persisted.clone(),
+            }),
+            tx_persisted,
+        )
+    }
+
+    #[tokio::test]
+    async fn test_finite_historical_stream() {
+        let reader = MockBlockReader::default();
+        for i in 0..=20 {
+            reader.add_block(i);
+        }
+        let context = create_test_context(Arc::new(reader)).0;
+
+        let request = SubscribeStreamRequest {
+            start_block_number: 5,
+            end_block_number: 10,
+        };
+        let (tx, mut rx) = mpsc::channel(16);
+        let mut session = SubscriberSession::new(context, request, tx);
+        tokio::spawn(async move {
+            session.run().await;
+        });
+
+        let mut block_count = 0;
+        for _ in 5..=10 {
+            let msg = rx.recv().await.unwrap().unwrap();
+            if let Some(ResponseType::BlockItems(_)) = msg.response {
+                block_count += 1;
+            }
+        }
+
+        let final_msg = rx.recv().await.unwrap().unwrap();
+        assert_eq!(block_count, 6);
+        assert_eq!(
+            final_msg.response,
+            Some(ResponseType::Status(Code::ReadStreamSuccess.into()))
+        );
+    }
+
+    #[tokio::test]
+    async fn test_historical_to_live_to_finite_end() {
+        // FIX: The reader itself is now thread-safe and doesn't need an outer lock.
+        let reader = Arc::new(MockBlockReader::default());
+        for i in 0..=10 {
+            reader.add_block(i);
+        }
+        let (context, tx_persisted) = create_test_context(reader.clone());
+
+        let request = SubscribeStreamRequest {
+            start_block_number: 5,
+            end_block_number: 15,
+        };
+        let (tx, mut rx) = mpsc::channel(32);
+        let mut session = SubscriberSession::new(context, request, tx);
+
+        tokio::spawn(async move {
+            session.run().await;
+        });
+
+        for i in 5..=10 {
+            let msg = rx.recv().await.unwrap().unwrap();
+            assert!(
+                matches!(msg.response, Some(ResponseType::BlockItems(_))),
+                "Expected block {}, got {:?}",
+                i,
+                msg
+            );
+        }
+
+        for i in 11..=15 {
+            // Update the mock reader before sending the event.
+            reader.add_block(i);
+            tx_persisted
+                .send(BlockPersisted {
+                    block_number: i,
+                    cache_key: Uuid::new_v4(),
+                })
+                .unwrap();
+            let msg = rx.recv().await.unwrap().unwrap();
+            assert!(
+                matches!(msg.response, Some(ResponseType::BlockItems(_))),
+                "Expected block {}, got {:?}",
+                i,
+                msg
+            );
+        }
+
+        let final_msg = rx.recv().await.unwrap().unwrap();
+        assert_eq!(
+            final_msg.response,
+            Some(ResponseType::Status(Code::ReadStreamSuccess.into()))
+        );
+    }
+
+    #[tokio::test]
+    async fn test_invalid_range_start_after_end() {
+        let reader = Arc::new(MockBlockReader::default());
+        let context = create_test_context(reader).0;
+        let request = SubscribeStreamRequest {
+            start_block_number: 10,
+            end_block_number: 5,
+        };
+        let (tx, mut rx) = mpsc::channel(16);
+        let mut session = SubscriberSession::new(context, request, tx);
+
+        tokio::spawn(async move {
+            session.run().await;
+        });
+
+        let final_msg = rx.recv().await.unwrap().unwrap();
+        assert_eq!(
+            final_msg.response,
+            Some(ResponseType::Status(
+                Code::ReadStreamInvalidEndBlockNumber.into()
+            ))
+        );
+    }
+}
