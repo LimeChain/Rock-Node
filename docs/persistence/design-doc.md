@@ -1,12 +1,23 @@
 # Rock Node Persistence Plugin Design
 
 ## Table of Contents
+
 1. [Introduction](#1-introduction)
+   - [1.1 Purpose](#11-purpose)
+   - [1.2 Scope](#12-scope)
 2. [High-Level Architecture](#2-high-level-architecture)
 3. [Detailed Component Design](#3-detailed-component-design)
+   - [3.1 Component Responsibilities](#31-component-responsibilities)
 4. [Key Data Flows](#4-key-data-flows)
+   - [4.1 Live Block Write Flow](#41-live-block-write-flow)
+   - [4.2 Block Read Flow](#42-block-read-flow)
+   - [4.3 Archival Flow](#43-archival-flow)
 5. [Data Model: Tiered Storage](#5-data-model-tiered-storage)
-6. [Future-Proofing and Scalability](#6-future-proofing-and-scalability)
+   - [5.1 Hot Tier (RocksDB)](#51-hot-tier-rocksdb)
+   - [5.2 Cold Tier (Memory-Mapped Indexed Files)](#52-cold-tier-memory-mapped-indexed-files)
+6. [Scalability Features and Future Improvements](#6-scalability-features-and-future-improvements)
+   - [6.1 Implemented Scalability Features](#61-implemented-scalability-features)
+   - [6.2 Future Improvements](#62-future-improvements)
 
 ---
 
@@ -43,7 +54,7 @@ graph TD
         "]
 
         HotStorage("<b>Hot Tier</b><br/>[RocksDB]<br/>Fast KV store for recent blocks.")
-        ColdStorage("<b>Cold Tier</b><br/>[Indexed Files]<br/>Dense archive for historical blocks.")
+        ColdStorage("<b>Cold Tier</b><br/>[Memory-Mapped Indexed Files]<br/>Dense archive for historical blocks.")
         
         subgraph "Example Consumer Plugins"
             BlockAccessSvc("Block Access Service")
@@ -53,7 +64,7 @@ graph TD
 
         CoreMessaging -- "1. Publishes 'BlockVerified' event" --> PersistencePlugin
         PersistencePlugin -- "2. Writes block to" --> HotStorage
-        PersistencePlugin -- "3. Archives old blocks to" --> ColdStorage
+        PersistencePlugin -- "3. Archives old blocks to (async)" --> ColdStorage
         
         BlockAccessSvc -- "4. Uses BlockReader to read any block" --> PersistencePlugin
         StatusSvc -- "5. Uses BlockReader to get block range" --> PersistencePlugin
@@ -67,7 +78,7 @@ graph TD
 
 ## 3. Detailed Component Design (C4 Level 3)
 
-The plugin is a composite of several specialized components, each managing a distinct aspect of the storage system. The `PersistenceService` acts as the public-facing façade, orchestrating the internal components.
+The plugin is a composite of several specialized components, each managing a distinct aspect of the storage system. The PersistenceService acts as the public-facing façade, orchestrating the internal components.
 
 ```mermaid
 graph TD
@@ -81,26 +92,26 @@ graph TD
         direction TB
 
         subgraph "Service Facade"
-            PersistenceService("<b>PersistenceService</b><br/>[service.rs]<br/>Implements BlockReader/BlockWriter traits. Routes calls to internal components.")
+            PersistenceService("<b>PersistenceService</b><br/>[service.rs]<br/>Implements BlockReader/BlockWriter traits. Routes calls.")
         end
 
         subgraph "Internal Components"
-            StateManager("<b>StateManager</b><br/>[state.rs]<br/>Manages metadata (watermarks, etc.) in a dedicated RocksDB Column Family.")
-            HotTier("<b>HotTier</b><br/>[hot_tier.rs]<br/>Handles all reads and writes of recent blocks to the 'hot_blocks' RocksDB Column Family.")
-            ColdWriter("<b>ColdWriter</b><br/>[cold_storage/writer.rs]<br/>Creates new cold storage archive files (.rba, .rbi) from a batch of blocks.")
-            ColdReader("<b>ColdReader</b><br/>[cold_storage/reader.rs]<br/>Maintains an in-memory index of all cold storage blocks and reads data from archive files.")
-            Archiver("<b>Archiver</b><br/>[cold_storage/archiver.rs]<br/>Manages data lifecycle. Moves blocks from HotTier to Cold Storage and updates the ColdReader's index.")
+            StateManager("<b>StateManager</b><br/>[state.rs]<br/>Manages metadata (watermarks, etc.) in a dedicated RocksDB CF.")
+            HotTier("<b>HotTier</b><br/>[hot_tier.rs]<br/>Handles all reads and writes of recent blocks to the 'hot_blocks' RocksDB CF.")
+            ColdWriter("<b>ColdWriter</b><br/>[cold_storage/writer.rs]<br/>Creates new cold storage archive files (.rba, .rbi).")
+            ColdReader("<b>ColdReader</b><br/>[cold_storage/reader.rs]<br/>Manages memory-mapped index files for fast, low-RAM reads from cold storage.")
+            Archiver("<b>Archiver Task</b><br/>[cold_storage/archiver.rs]<br/><b>(Async Background Task)</b><br/>Manages data lifecycle. Moves blocks from Hot to Cold storage.")
         end
         
         %% Flows
         CoreMessaging -- "1. Consumes 'BlockVerified'" --> PersistenceService
         PersistenceService -- "2. Writes live block via" --> HotTier
         PersistenceService -- "3. Updates metadata via" --> StateManager
-        PersistenceService -- "4. Triggers" --> Archiver
+        PersistenceService -- "4. Notifies (async)" --> Archiver
         
         Archiver -- "5. Reads batch from" --> HotTier
         Archiver -- "6. Writes batch via" --> ColdWriter
-        Archiver -- "7. Updates index in" --> ColdReader
+        Archiver -- "7. Notifies ColdReader to load new index" --> ColdReader
         Archiver -- "8. Deletes from" --> HotTier
         
         subgraph "Consumer Plugins (via AppContext)"
@@ -117,23 +128,29 @@ graph TD
 
 ### 3.1 Component Responsibilities
 
-#### PersistenceService (`service.rs`)
-The public entry point for the plugin. It implements the `BlockReader` and `BlockWriter` traits defined in `rock-node-core`. It acts as a router, delegating all read, write, and archival operations to the appropriate specialized component.
+#### PersistenceService (service.rs)
 
-#### StateManager (`state.rs`)
-The single source of truth for all storage metadata. It uses a dedicated metadata Column Family in RocksDB to atomically track crucial watermarks like `latest_persisted_block`, `earliest_hot_block`, and the `true_earliest_persisted` block for the entire node.
+The public entry point for the plugin. It implements the `BlockReader` and `BlockWriter` traits. It is responsible for writes to the hot tier and for routing read requests to the appropriate tier.
 
-#### HotTier (`hot_tier.rs`)
-The specialist for managing the `hot_blocks` Column Family in RocksDB. It provides an API to read, write, and delete recent block data. All writes are performed via atomic `WriteBatch` operations.
+#### StateManager (state.rs)
 
-#### ColdWriter (`cold_storage/writer.rs`)
-Responsible for creating the cold storage archive files. It takes a batch of blocks, compresses them with zstd into a `.rba` (Rock Block Archive) data file, and creates a corresponding `.rbi` (Rock Block Index) file. It uses a write-to-temp → fsync → atomic rename pattern to ensure durability against crashes.
+The single source of truth for all storage metadata. It uses a dedicated metadata Column Family in RocksDB to atomically track crucial watermarks like `latest_persisted_block` and `earliest_hot_block`.
 
-#### ColdReader (`cold_storage/reader.rs`)
-The specialist for reading from cold storage. On startup, it scans the cold storage directory and builds an in-memory `DashMap` of every historical block's location for O(1) lookups. It exposes a method that allows the Archiver to load new index files in real-time.
+#### HotTier (hot_tier.rs)
 
-#### Archiver (`cold_storage/archiver.rs`)
-The background process that manages the data lifecycle. It is triggered after every live block write. It checks if the number of blocks in the hot tier exceeds a configured threshold. If it does, the Archiver coordinates reading a batch from the HotTier, commanding the ColdWriter to archive it, and upon success, commanding the ColdReader to load the new index before finally commanding the HotTier to delete the now-archived blocks.
+The specialist for managing the `hot_blocks` Column Family in RocksDB. It provides an API to read, write, and delete recent block data. It is configured with a specific block cache size to ensure a predictable RAM footprint.
+
+#### ColdWriter (cold_storage/writer.rs)
+
+Responsible for creating the cold storage archive files. It takes a batch of blocks, compresses them with zstd into a `.rba` data file, and creates a corresponding `.rbi` index file.
+
+#### ColdReader (cold_storage/reader.rs)
+
+The specialist for reading from cold storage. On startup, it scans the cold storage directory and memory-maps the index (`.rbi`) files. This approach delegates memory management to the OS's virtual memory system, providing fast lookups with a minimal application RAM footprint.
+
+#### Archiver (cold_storage/archiver.rs)
+
+An asynchronous background task (`tokio::task`) that manages the data lifecycle. It is triggered by notifications from the PersistenceService after a write and also runs on a periodic schedule. It orchestrates moving blocks from the HotTier to Cold Storage.
 
 ---
 
@@ -141,35 +158,30 @@ The background process that manages the data lifecycle. It is triggered after ev
 
 ### 4.1 Live Block Write Flow
 
-1. The `PersistencePlugin` task receives a `BlockVerified` event from the message bus.
+1. The PersistencePlugin task receives a `BlockVerified` event from the message bus.
 2. It calls `PersistenceService::write_block()`.
-3. A `WriteBatch` is created.
-4. The service calls `HotTier::add_block_to_batch()` to add the block write operation.
-5. It calls `StateManager` methods to add metadata updates (e.g., `set_latest_persisted`, `initialize_earliest_hot`) to the same `WriteBatch`.
-6. The `WriteBatch` is atomically committed to RocksDB.
-7. The service calls `Archiver::run_archival_cycle()` to check if data needs to be moved to cold storage.
+3. A `WriteBatch` is created for RocksDB.
+4. The service adds the new block and metadata updates to the `WriteBatch`.
+5. The `WriteBatch` is atomically committed to RocksDB.
+6. The service sends a lightweight notification to the Archiver task, signaling that new data has arrived. This call is non-blocking and returns immediately.
 
 ### 4.2 Block Read Flow
 
 1. An external plugin calls `PersistenceService::read_block(N)`.
-2. The service first calls `HotTier::read_block(N)`.
-3. If the block is found, its bytes are returned immediately. The flow ends.
-4. If the HotTier returns `None`, the service delegates the call to `ColdReader::read_block(N)`.
-5. The ColdReader performs an O(1) lookup in its in-memory index for block N.
-6. If a location is found, it opens the corresponding `.rba` file, seeks to the exact byte offset, reads the specified number of bytes, decompresses them, and returns the block data.
-7. If no location is found, it returns `None`.
+2. The service first calls `HotTier::read_block(N)`. If the block is in RocksDB (and likely in its RAM cache), it's returned immediately.
+3. If the HotTier returns `None`, the service delegates the call to `ColdReader::read_block(N)`.
+4. The ColdReader identifies which memory-mapped index file should contain the block's metadata based on filename conventions.
+5. It calculates the position of the `IndexRecord` within the memory-mapped slice and reads the block's location (offset and length) in the corresponding `.rba` data file.
+6. It opens the `.rba` file, seeks to the offset, reads the compressed bytes, decompresses them, and returns the block data.
 
 ### 4.3 Archival Flow
 
-1. The `Archiver::run_archival_cycle()` method is called.
-2. It checks the `earliest_hot` and `latest_persisted` watermarks from the StateManager to calculate the number of blocks in the hot tier.
-3. If `hot_block_count > hot_storage_block_count + archive_batch_size`, the process continues.
-4. The Archiver calls `HotTier::read_block_batch()` to get the oldest batch of blocks.
-5. It passes this batch to `ColdWriter::write_archive()`.
-6. The ColdWriter creates the new `.rba` and `.rbi` files and returns the path to the new `.rbi` file.
-7. The Archiver immediately calls `ColdReader::load_index_file()` with the new path, updating the in-memory index in real-time.
-8. The Archiver creates a new `WriteBatch`, calling `HotTier::add_delete_to_batch()` for each archived block and `StateManager::set_earliest_hot()` to move the watermark forward.
-9. The deletion batch is committed to RocksDB.
+1. The Archiver's background task wakes up, either from a notification or a periodic timer.
+2. It checks the watermarks from the StateManager to determine if the number of blocks in the hot tier exceeds the configured threshold.
+3. If an archival cycle is needed, the Archiver reads the oldest batch of blocks from the HotTier.
+4. It commands the ColdWriter to create new `.rba` and `.rbi` files for the batch.
+5. Upon success, the Archiver commands the ColdReader to load and memory-map the new index file.
+6. Finally, the Archiver creates and commits a `WriteBatch` to RocksDB to delete the archived blocks from the HotTier and update the `earliest_hot` watermark.
 
 ---
 
@@ -179,58 +191,52 @@ The background process that manages the data lifecycle. It is triggered after ev
 
 **Engine:** RocksDB, an embedded, high-performance key-value store.
 
-**Purpose:** Low-latency storage for the most recent blocks, which are queried most frequently.
+**Purpose:** Low-latency storage for the most recent blocks. Its RAM usage is controlled by an explicitly configured LRU block cache.
 
 **Column Families:**
 
-- **`metadata`**: Stores global watermarks and state for the plugin.
-  - **Keys**: Constant byte slices (e.g., `b"latest_persisted"`)
-  - **Values**: `u64` integers
+- **metadata:** Stores global watermarks and state for the plugin.
+- **hot_blocks:** Stores the actual block data.
 
-- **`hot_blocks`**: Stores the actual block data.
-  - **Key**: `u64` block number, encoded as big-endian bytes for correct key ordering
-  - **Value**: A bincode-serialized `StoredBlock` struct, which contains the Protobuf-encoded block bytes
+**Key:** `u64` block number, encoded as big-endian bytes.
 
-### 5.2 Cold Tier (Indexed Flat Files)
+**Value:** Bincode-serialized `StoredBlock` struct.
+
+### 5.2 Cold Tier (Memory-Mapped Indexed Files)
 
 **Purpose:** Cost-effective, high-density, long-term archival of immutable historical blocks.
 
-**Structure:** For each chunk of blocks (e.g., 10,000 blocks), two files are created:
+**Structure:** For each chunk of blocks, two files are created:
 
-- **Data File** (`blocks-0...9999.rba`): A single file containing the concatenated, zstd-compressed Protobuf bytes of each block in the chunk, one after another.
+- **Data File** (`blocks-0...9999.rba`): Concatenated, zstd-compressed block data.
+- **Index File** (`blocks-0...9999.rbi`): A binary file containing a sequential list of `IndexRecord` structs. This file is memory-mapped by the ColdReader for fast access.
 
-- **Index File** (`blocks-0...9999.rbi`): A binary file containing a tightly packed, sequential list of `IndexRecord` structs.
-
-**IndexRecord Struct:** A `repr(C, packed)` struct containing the `block_number`, its byte offset within the corresponding `.rba` file, and its compressed length. This fixed-size record (20 bytes: `u64`+`u64`+`u32`) allows for extremely fast lookups by seeking directly to `(block_number % chunk_size) * 20` in the index file.
+**IndexRecord Struct:** A `repr(C, packed)` struct (20 bytes) containing the `block_number`, its byte offset within the `.rba` file, and its compressed length. This fixed-size layout allows for direct calculation of a record's position within the memory-mapped file.
 
 ---
 
-## 6. Future-Proofing and Scalability Improvements
+## 6. Scalability Features and Future Improvements
 
-### 6.1 Asynchronous Archival
+### 6.1 Implemented Scalability Features
 
-**Problem:** The current Archiver runs synchronously within the `write_block` call, which can introduce latency spikes.
+The following key scalability improvements have been implemented in the plugin.
 
-**Recommended Solution:** Decouple the Archiver into its own dedicated `tokio::task`. This task can be triggered periodically (e.g., every 30 seconds) to check if an archival cycle is needed, transforming the process into an asynchronous background task and ensuring consistently low write latency.
+#### 6.1.1 Asynchronous Archival
 
-### 6.2 Managing Large In-Memory Indexes
+The Archiver has been decoupled from the synchronous write path and runs in its own dedicated `tokio::task`. This ensures that the process of moving data from the hot to the cold tier does not introduce latency spikes into the live block ingestion flow, resulting in consistently low write latency.
 
-**Problem:** The ColdReader's in-memory `DashMap` of all historical block locations has an unbounded memory footprint.
+#### 6.1.2 Memory-Efficient Cold Index
 
-**Recommended Solution:** Replace the heap-allocated map with memory-mapped (mmap) files using a crate like `memmap2`. The OS virtual memory manager would then be responsible for paging index data from disk into RAM on demand. This would dramatically reduce the node's baseline RAM usage and improve startup time, as the process would no longer need to read and parse all index files into the heap.
+The ColdReader's index is no longer held on the application heap. Instead, it uses memory-mapped (`mmap`) files. The operating system's virtual memory manager is responsible for paging index data from disk into RAM on demand. This design provides extremely fast lookups with a minimal and stable application RAM footprint, regardless of the size of the blockchain history.
 
-### 6.3 Data Compaction and Deep Archival
+### 6.2 Future Improvements
+
+#### 6.2.1 Data Compaction and Deep Archival
 
 **Problem:** Over many years, the number of individual cold storage chunk files could become very large, making filesystem management unwieldy. Furthermore, the zstd compression is optimized for a balance of speed and ratio; deeper archival could prioritize ratio over speed.
 
 **Recommended Solution:** Introduce a "deep archival" background task. This task would run infrequently (e.g., nightly or weekly) and could:
 
-- **Compact Chunks**: Take older, smaller archive chunks (e.g., 100 files of 10,000 blocks each) and merge them into a single, larger chunk file (e.g., one file for 1,000,000 blocks) to reduce inode usage.
-
-- **Re-compress**: Use a slower but higher-compression algorithm (like xz) for very old data that is accessed infrequently.
-
-- **Offload to Cloud**: For a cloud-native deployment, this task could be responsible for moving block archives older than a certain age (e.g., 1 year) to cheaper object storage like Amazon S3 Glacier. The ColdReader would need to be enhanced with a client to retrieve these blocks on demand.
-
----
-
-*This document serves as the canonical technical reference for the Rock Node Persistence Plugin implementation and maintenance.*
+- **Compact Chunks:** Take older, smaller archive chunks (e.g., 100 files of 10,000 blocks each) and merge them into a single, larger chunk file (e.g., one file for 1,000,000 blocks) to reduce inode usage.
+- **Re-compress:** Use a slower but higher-compression algorithm (like xz) for very old data that is accessed infrequently.
+- **Offload to Cloud:** For a cloud-native deployment, this task could be responsible for moving block archives older than a certain age (e.g., 1 year) to cheaper object storage like Amazon S3 Glacier. The ColdReader would need to be enhanced with a client to retrieve these blocks on demand.

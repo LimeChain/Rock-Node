@@ -1,5 +1,3 @@
-// File: rock-node-workspace/crates/rock-node-verifier-plugin/src/lib.rs
-
 use std::time::Duration;
 
 use rock_node_core::{
@@ -18,7 +16,6 @@ pub struct VerifierPlugin {
 }
 
 impl VerifierPlugin {
-    // It receives the "read" end of the channel at creation.
     pub fn new(rx_block_items_received: Receiver<BlockItemsReceived>) -> Self {
         Self {
             context: None,

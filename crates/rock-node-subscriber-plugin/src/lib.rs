@@ -10,7 +10,6 @@ mod error;
 mod service;
 mod session;
 
-// Publicly export the plugin struct so it can be imported in `main.rs`
 pub struct SubscriberPlugin {
     context: Option<Arc<AppContext>>,
 }

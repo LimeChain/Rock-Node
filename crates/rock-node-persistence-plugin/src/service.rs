@@ -128,7 +128,9 @@ impl BlockWriter for PersistenceService {
             .initialize_earliest_hot(block_number, &mut batch)?;
 
         self.hot_tier.commit_batch(batch)?;
-        self.archiver.run_archival_cycle()?;
+
+        // Instead of running the cycle synchronously, just notify the background task.
+        self.archiver.notify_check();
 
         timer.observe_duration();
         self.metrics

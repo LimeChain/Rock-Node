@@ -22,17 +22,10 @@ database_path = "data/database"
 
     [plugins.persistence_service]
     enabled = true
-
-    # The sub-directory for cold storage archive files.
     cold_storage_path = "data/cold_storage"
-
-    # The number of recent blocks to keep in the 'hot' RocksDB tier.
     hot_storage_block_count = 100
-
-    # The number of blocks to bundle into a single cold storage archive file.
     archive_batch_size = 100
 
-    # Add a placeholder for the future state service
     [plugins.state_service]
     enabled = false
 
