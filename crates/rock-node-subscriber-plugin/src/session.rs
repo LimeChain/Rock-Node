@@ -23,8 +23,6 @@ pub struct SubscriberSession {
     block_reader: Arc<dyn BlockReader>,
 }
 
-// --- Main implementation is unchanged ---
-
 impl SubscriberSession {
     pub fn new(
         context: Arc<AppContext>,
@@ -217,7 +215,6 @@ mod tests {
     use std::{any::Any, collections::HashMap, sync::RwLock};
     use tokio::sync::broadcast;
 
-    // FIX: Redesigned mock to use interior mutability.
     #[derive(Debug, Default)]
     struct MockBlockReader {
         blocks: RwLock<HashMap<u64, Vec<u8>>>,
@@ -225,7 +222,6 @@ mod tests {
         latest: RwLock<Option<u64>>,
     }
 
-    // The trait is implemented for the struct itself.
     impl BlockReader for MockBlockReader {
         fn get_latest_persisted_block_number(&self) -> anyhow::Result<Option<u64>> {
             Ok(*self.latest.read().unwrap())
@@ -242,7 +238,6 @@ mod tests {
     }
 
     impl MockBlockReader {
-        // `add_block` now takes `&self` because it modifies the interior state.
         fn add_block(&self, num: u64) {
             let mut earliest = self.earliest.write().unwrap();
             if earliest.is_none() {
@@ -367,7 +362,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_historical_to_live_to_finite_end() {
-        // FIX: The reader itself is now thread-safe and doesn't need an outer lock.
         let reader = Arc::new(MockBlockReader::default());
         for i in 0..=10 {
             reader.add_block(i);
@@ -396,7 +390,6 @@ mod tests {
         }
 
         for i in 11..=15 {
-            // Update the mock reader before sending the event.
             reader.add_block(i);
             tx_persisted
                 .send(BlockPersisted {

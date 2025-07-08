@@ -58,11 +58,9 @@ impl Plugin for ObservabilityPlugin {
 
         info!("Starting Observability HTTP server...");
 
-        // Create the axum router with both the /livez and /metrics endpoints.
         let app = Router::new()
             .route("/livez", get(health_check))
             .route("/metrics", get(get_metrics))
-            // This line provides the Arc<MetricsRegistry> to our handlers as shared state.
             .with_state(context.metrics);
 
         let listen_address = config.listen_address.clone();
@@ -79,7 +77,6 @@ impl Plugin for ObservabilityPlugin {
                 })
                 .unwrap();
 
-            // Use `into_make_service` for compatibility with latest axum/hyper versions.
             axum::serve(listener, app.into_make_service())
                 .await
                 .unwrap();

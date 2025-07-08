@@ -38,7 +38,7 @@ fn main() -> Result<()> {
         temp_consensus_node_dir.join("hapi/hedera-protobuf-java-api/src/main/proto");
 
     if !consensus_node_proto_src.exists() {
-        println!("cargo:warning=Cloning hiero-consensus-node repository...");
+        println!("cargo:info=Cloning hiero-consensus-node repository...");
         let repo_url = "https://github.com/hiero-ledger/hiero-consensus-node.git";
         let cn_tag_hash = "efb0134e921b32ed6302da9c93874d65492e876f";
         run_command(
@@ -88,7 +88,7 @@ fn main() -> Result<()> {
     }
 
     println!(
-        "cargo:warning=Compiling {} protobuf definitions from unified directory...",
+        "cargo:info=Compiling {} protobuf definitions from unified directory...",
         all_protos.len()
     );
     tonic_build::configure()

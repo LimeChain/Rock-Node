@@ -7,7 +7,7 @@ use state::SharedState;
 use std::any::TypeId;
 use std::sync::Arc;
 use std::time::Duration;
-use tracing::{error, info, warn}; // FIX: Added error import
+use tracing::{error, info, warn};
 
 mod service;
 mod session_manager;
@@ -54,9 +54,8 @@ impl Plugin for PublishPlugin {
             let key = TypeId::of::<BlockReaderProvider>();
             if let Some(provider_any) = providers.get(&key) {
                 if let Some(provider_handle) = provider_any.downcast_ref::<BlockReaderProvider>() {
-                    let block_reader: Arc<dyn BlockReader> = provider_handle.get_service(); // .get_reader() is the correct method name from the core trait file
+                    let block_reader: Arc<dyn BlockReader> = provider_handle.get_service();
 
-                    // FIX: Handle the Result<Option<u64>> correctly.
                     let block_number_for_state = match block_reader
                         .get_latest_persisted_block_number()
                     {
@@ -70,7 +69,6 @@ impl Plugin for PublishPlugin {
 
                     shared_state.set_latest_persisted_block(block_number_for_state);
 
-                    // FIX: Use the processed value for logging.
                     info!(
                         "Successfully retrieved BlockReader. Latest persisted block is: {}",
                         block_number_for_state

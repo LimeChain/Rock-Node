@@ -4,6 +4,7 @@ mod service;
 mod state;
 
 use crate::service::PersistenceService;
+use anyhow::anyhow;
 use prost::Message;
 use rock_node_core::{
     app_context::AppContext,
@@ -17,8 +18,8 @@ use rock_node_core::{
     BlockReaderProvider,
 };
 use rock_node_protobufs::com::hedera::hapi::block::stream::Block;
-use std::{any::TypeId, cmp::min, sync::Arc};
-use tokio::sync::mpsc::Receiver;
+use std::{any::TypeId, cmp::min, sync::Arc, time::Duration};
+use tokio::{sync::mpsc::Receiver, time::sleep};
 use tracing::{info, warn};
 use uuid::Uuid;
 
@@ -99,7 +100,7 @@ impl Plugin for PersistencePlugin {
             .unwrap()
             .get(&TypeId::of::<DatabaseManagerProvider>())
             .and_then(|any| any.downcast_ref::<DatabaseManagerProvider>().cloned())
-            .ok_or_else(|| anyhow::anyhow!("DatabaseManagerProvider not found!"))?;
+            .ok_or_else(|| anyhow!("DatabaseManagerProvider not found!"))?;
 
         let db_manager = db_provider.get_manager();
         let db_handle = db_manager.db_handle();
@@ -149,12 +150,34 @@ impl Plugin for PersistencePlugin {
         let service = service::PersistenceService::new(
             hot_tier,
             cold_reader,
-            archiver,
+            archiver.clone(), // Clone the Arc for the service
             state_manager,
             metrics_arc,
         );
         let service_arc = Arc::new(service.clone());
         self.service = Some(service);
+
+        // Spawn the dedicated background archiver task.
+        tokio::spawn(async move {
+            info!("Starting background Archiver task.");
+            // As per the design doc, a periodic check is recommended.
+            let archival_check_interval = Duration::from_secs(30);
+
+            loop {
+                tokio::select! {
+                    _ = archiver.trigger.notified() => {
+                        info!("Archiver triggered by write notification.");
+                    }
+                    _ = sleep(archival_check_interval) => {
+                        info!("Archiver triggered by periodic 30s check.");
+                    }
+                }
+
+                if let Err(e) = archiver.run_archival_cycle() {
+                    warn!("Error during background archival cycle: {}", e);
+                }
+            }
+        });
 
         {
             let mut providers = context.service_providers.write().unwrap();

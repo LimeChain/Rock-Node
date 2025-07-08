@@ -7,9 +7,10 @@ use anyhow::Result;
 use rock_node_core::{config::PersistenceServiceConfig, metrics::MetricsRegistry};
 use rocksdb::WriteBatch;
 use std::sync::Arc;
+use tokio::sync::Notify;
 use tracing::{info, warn};
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct Archiver {
     pub config: Arc<PersistenceServiceConfig>,
     pub hot_tier: Arc<HotTier>,
@@ -17,6 +18,7 @@ pub struct Archiver {
     pub state: Arc<StateManager>,
     pub cold_reader: Arc<ColdReader>,
     pub metrics: Arc<MetricsRegistry>,
+    pub trigger: Notify,
 }
 
 impl Archiver {
@@ -35,7 +37,13 @@ impl Archiver {
             state,
             cold_reader,
             metrics,
+            trigger: Notify::new(),
         }
+    }
+
+    /// Wakes up the archiver task. This is cheap and can be called frequently.
+    pub fn notify_check(&self) {
+        self.trigger.notify_one();
     }
 
     pub fn run_archival_cycle(&self) -> Result<()> {
@@ -46,6 +54,7 @@ impl Archiver {
             if let (Some(latest), Some(earliest)) = (latest_hot_opt, earliest_hot_opt) {
                 (latest, earliest)
             } else {
+                // Not enough data to archive, which is normal.
                 return Ok(());
             };
 
@@ -61,6 +70,7 @@ impl Archiver {
         if current_block_count
             < self.config.hot_storage_block_count + self.config.archive_batch_size
         {
+            // Not enough blocks to trigger an archival run.
             return Ok(());
         }
 
