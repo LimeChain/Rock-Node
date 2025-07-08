@@ -23,5 +23,11 @@ tracing = "0.1"
 anyhow = "1"
 thiserror = "1.0"
 
+# For protobuf decoding
+prost = "0.13.5"
+
 # For unique session IDs
 uuid = { version = "1", features = ["v4"] }
+
+# Metrics
+prometheus = { version = "0.13", features = ["process"] }

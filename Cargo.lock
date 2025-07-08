@@ -1349,6 +1349,8 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "futures-util",
+ "prometheus",
+ "prost",
  "rock-node-core",
  "rock-node-protobufs",
  "thiserror",
