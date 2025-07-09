@@ -51,6 +51,8 @@ All tests were conducted within identical Docker container configurations on the
 
 ### Software & Tool Versions
 
+- **Java Block Node:** 0.13.0
+- **Rust Block Node:** 0.1.0
 - **Docker:** v28.3.0, build 38b7060
 - **Java Version (JDK):** v21.0.5 (e.g., OpenJDK 21)
 - **Rust Version (rustc):** v1.87.0 (e.g., 1.78.0)
@@ -67,12 +69,12 @@ Before initiating the main workload, each application was started in its contain
 
 ### 3.2 Block Production & Consumption Test
 
-This test measures the performance of the core data processing pipeline over an approximate 10-minute workload.
+This test measures the performance of the core data processing pipeline over an approximate 20-minute workload.
 
 1. **Test Start:** The application container is started, and the timer begins.
-2. **Block Production:** A consensus node client connects to the application and publishes blocks continuously for 10 minutes.
+2. **Block Production:** A consensus node client connects to the application and publishes blocks continuously for 2 minutes.
 3. **Block Consumption:** Around the 2 minute of this flow, a consumer client connects and begins fetching blocks sequentially from block 0 to 100,000.
-4. **Test End:** The test concludes at the 10th minute.
+4. **Test End:** The test concludes at the 20ieth minute.
 
 **Metrics Collected:**
 
@@ -89,7 +91,7 @@ This test measures the performance of the core data processing pipeline over an 
 
 **Metrics Collected:**
 
-- **Response Time (avg, p95, p99):** The average, 95th percentile, and 99th percentile latency for each endpoint.
+- **Response Time (avg, p99):** The average and 99th percentile latency for each endpoint.
 
 ---
 
@@ -101,10 +103,8 @@ This table shows the resource consumption of each implementation shortly after s
 
 | Resource | Java Implementation | Rust Implementation | Notes |
 |----------|-------------------|-------------------|-------|
-| CPU Usage (avg) | [FILL_HERE] % | [FILL_HERE] % | [FILL_HERE] |
-| Memory Usage | [FILL_HERE] MB | [FILL_HERE] MB | [FILL_HERE] |
-| Disk Read | [FILL_HERE] MB | [FILL_HERE] MB | [FILL_HERE] |
-| Disk Write | [FILL_HERE] MB | [FILL_HERE] MB | [FILL_HERE] |
+| CPU Usage (avg) | 90 % | [FILL_HERE] % | [FILL_HERE] |
+| Memory Usage | 1.06 GB | [FILL_HERE] MB | [FILL_HERE] |
 
 ### 4.2 Block Production & Consumption Test
 
@@ -112,11 +112,10 @@ This table shows the performance and resource consumption during the full worklo
 
 | Metric | Java Implementation | Rust Implementation | Notes |
 |--------|-------------------|-------------------|-------|
-| Total Execution Time | [FILL_HERE] s | [FILL_HERE] s | [FILL_HERE] |
-| CPU Usage (avg) | [FILL_HERE] % | [FILL_HERE] % | [FILL_HERE] |
-| CPU Peak | [FILL_HERE] % | [FILL_HERE] % | [FILL_HERE] |
-| Memory Usage (avg) | [FILL_HERE] MB | [FILL_HERE] MB | [FILL_HERE] |
-| Memory Peak | [FILL_HERE] MB | [FILL_HERE] MB | [FILL_HERE] |
+| CPU Usage (avg) | 46.5 % | [FILL_HERE] % | [FILL_HERE] |
+| CPU Peak | 122.94 % | [FILL_HERE] % | [FILL_HERE] |
+| Memory Usage (avg) | 2.10GB | [FILL_HERE] MB | [FILL_HERE] |
+| Memory Peak | 3.28GB | [FILL_HERE] MB | [FILL_HERE] |
 
 ### 4.3 gRPC Endpoint Latency
 
@@ -124,25 +123,23 @@ This table shows the performance and resource consumption during the full worklo
 
 | Metric | Java Implementation | Rust Implementation | Notes |
 |--------|-------------------|-------------------|-------|
-| Avg. Response Time | [FILL_HERE] ms | [FILL_HERE] ms | [FILL_HERE] |
-| p95 Response Time | [FILL_HERE] ms | [FILL_HERE] ms | [FILL_HERE] |
-| p99 Response Time | [FILL_HERE] ms | [FILL_HERE] ms | [FILL_HERE] |
+| Avg. Response Time | 40.27 ms | [FILL_HERE] ms | [FILL_HERE] |
+| p99 Response Time | 178.69 ms | [FILL_HERE] ms | [FILL_HERE] |
 
 #### serverStatus Latency
 
 | Metric | Java Implementation | Rust Implementation | Notes |
 |--------|-------------------|-------------------|-------|
-| Avg. Response Time | [FILL_HERE] ms | [FILL_HERE] ms | [FILL_HERE] |
-| p95 Response Time | [FILL_HERE] ms | [FILL_HERE] ms | [FILL_HERE] |
-| p99 Response Time | [FILL_HERE] ms | [FILL_HERE] ms | [FILL_HERE] |
+| Avg. Response Time | 8.39 ms | [FILL_HERE] ms | [FILL_HERE] |
+| p99 Response Time | 30.04 ms | [FILL_HERE] ms | [FILL_HERE] |
 
 ### 4.4 Final Disk Space Usage
 
-This table shows the total disk space consumed by each application's persisted files at the conclusion of the test.
+This table shows the total disk space consumed by each application's persisted files at the conclusion of the test. Around 587 blocks
 
 | Metric | Java Implementation | Rust Implementation | Notes |
 |--------|-------------------|-------------------|-------|
-| Total Disk Space | [FILL_HERE] MB/GB | [FILL_HERE] MB/GB | [FILL_HERE] |
+| Total Disk Space | 16,2 MB | [FILL_HERE] MB/GB | [FILL_HERE] |
 
 ---
 
