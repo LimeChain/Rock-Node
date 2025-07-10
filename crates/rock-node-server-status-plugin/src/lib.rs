@@ -1,8 +1,6 @@
 mod service;
 
-use rock_node_core::{
-    app_context::AppContext, error::Result, plugin::Plugin, service_provider::BlockReaderProvider,
-};
+use rock_node_core::{app_context::AppContext, error::Result, plugin::Plugin, BlockReaderProvider};
 use rock_node_protobufs::org::hiero::block::api::block_node_service_server::BlockNodeServiceServer;
 use service::StatusServiceImpl;
 use std::any::TypeId;
@@ -31,7 +29,7 @@ impl Plugin for StatusPlugin {
     }
 
     fn start(&mut self) -> Result<()> {
-        info!("Starting StatusPlugin...");
+        info!("Starting Server Status Plugin...");
         let context = self
             .context
             .as_ref()
@@ -41,7 +39,7 @@ impl Plugin for StatusPlugin {
         // Ensure the plugin is enabled in config before starting the server
         let config = &context.config.plugins.server_status_service;
         if !config.enabled {
-            info!("StatusPlugin is disabled. Skipping start.");
+            info!("Server StatusPlugin is disabled. Skipping start.");
             return Ok(());
         }
 
@@ -53,7 +51,7 @@ impl Plugin for StatusPlugin {
             if let Some(provider_any) = providers.get(&key) {
                 if let Some(provider_handle) = provider_any.downcast_ref::<BlockReaderProvider>() {
                     info!("Successfully retrieved BlockReaderProvider handle.");
-                    provider_handle.get_service()
+                    provider_handle.get_reader()
                 } else {
                     return Err(
                         anyhow::anyhow!("FATAL: Failed to downcast BlockReaderProvider.").into(),

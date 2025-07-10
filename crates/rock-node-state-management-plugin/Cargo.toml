@@ -1,0 +1,26 @@
+[package]
+name = "rock-node-state-management-plugin"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# The application's core types and traits
+rock-node-core = { path = "../rock-node-core" }
+
+# The generated protobuf structs
+rock-node-protobufs = { path = "../rock-node-protobufs" }
+
+# For the async runtime and channels
+tokio = { version = "1", features = ["sync", "rt"] }
+
+# For ergonomic error handling
+anyhow = "1"
+
+# For structured logging
+tracing = "0.1"
+
+# The protobuf serialization/deserialization library
+prost = "0.13.5"
+
+# Add the RocksDB dependency
+rocksdb = "0.22"

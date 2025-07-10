@@ -205,7 +205,7 @@ mod tests {
         config::{
             BlockAccessServiceConfig, Config, CoreConfig, ObservabilityConfig,
             PersistenceServiceConfig, PluginConfigs, PublishServiceConfig,
-            ServerStatusServiceConfig, StateServiceConfig, SubscriberServiceConfig,
+            ServerStatusServiceConfig, StateManagementServiceConfig, SubscriberServiceConfig,
             VerificationServiceConfig,
         },
         events::BlockPersisted,
@@ -290,7 +290,7 @@ mod tests {
                     grpc_address: "".to_string(),
                     grpc_port: 0,
                 },
-                state_service: StateServiceConfig { enabled: false },
+                state_management_service: StateManagementServiceConfig { enabled: false },
                 subscriber_service: SubscriberServiceConfig {
                     enabled: true,
                     grpc_address: "".to_string(),

@@ -1,5 +1,3 @@
-// In crates/rock-node-core/src/service_provider.rs
-
 use crate::block_reader::BlockReader;
 use std::sync::Arc;
 

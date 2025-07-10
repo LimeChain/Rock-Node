@@ -8,7 +8,7 @@ use rock_node_core::{config::PersistenceServiceConfig, metrics::MetricsRegistry}
 use rocksdb::WriteBatch;
 use std::sync::Arc;
 use tokio::sync::Notify;
-use tracing::{info, warn};
+use tracing::{trace, warn};
 
 #[derive(Debug)]
 pub struct Archiver {
@@ -80,7 +80,7 @@ impl Archiver {
             .with_label_values(&[])
             .start_timer();
 
-        info!(
+        trace!(
             "Hot tier count ({}) exceeds trigger, starting archival...",
             current_block_count
         );
@@ -89,13 +89,13 @@ impl Archiver {
         let blocks_to_archive = self
             .hot_tier
             .read_block_batch(earliest_hot_u64, num_to_archive)?;
-        info!(
+        trace!(
             "Read {} blocks from hot tier for archival.",
             blocks_to_archive.len()
         );
 
         let new_index_path = self.cold_writer.write_archive(&blocks_to_archive)?;
-        info!(
+        trace!(
             "Successfully wrote blocks to cold archive: {:?}",
             new_index_path.file_name().unwrap_or_default()
         );
@@ -103,7 +103,7 @@ impl Archiver {
         if let Err(e) = self.cold_reader.load_index_file(&new_index_path) {
             warn!("CRITICAL: Failed to live-load new index file {:?}: {}. A restart may be required to see these blocks.", new_index_path, e);
         } else {
-            info!("Cold reader index successfully updated in real-time.");
+            trace!("Cold reader index successfully updated in real-time.");
         }
 
         let end_block_to_archive = earliest_hot_u64 + num_to_archive;
@@ -116,7 +116,7 @@ impl Archiver {
             .set_earliest_hot(end_block_to_archive, &mut batch)?;
 
         self.hot_tier.commit_batch(batch)?;
-        info!(
+        trace!(
             "Archival cycle complete. New earliest hot block is #{}.",
             end_block_to_archive
         );

@@ -26,8 +26,8 @@ database_path = "data/database"
     hot_storage_block_count = 100
     archive_batch_size = 100
 
-    [plugins.state_service]
-    enabled = false
+    [plugins.state_management_service]
+    enabled = true
 
     [plugins.subscriber_service]
     enabled = true

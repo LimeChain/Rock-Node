@@ -12,9 +12,10 @@ pub mod events;
 pub mod metrics;
 pub mod plugin;
 pub mod service_provider;
+pub mod state_reader;
 
-// Re-export the most important public types for easy access by other crates.
 pub use app_context::AppContext;
+pub use block_reader::{BlockReader, BlockReaderProvider};
 pub use cache::BlockDataCache;
 pub use capability::{Capability, CapabilityRegistry};
 pub use config::Config;
@@ -24,4 +25,4 @@ pub use error::{Error, Result};
 pub use events::{BlockData, BlockItemsReceived, BlockPersisted, BlockVerified};
 pub use metrics::MetricsRegistry;
 pub use plugin::Plugin;
-pub use service_provider::BlockReaderProvider;
+pub use state_reader::{StateReader, StateReaderProvider};

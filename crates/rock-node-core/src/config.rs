@@ -20,7 +20,7 @@ pub struct PluginConfigs {
     pub verification_service: VerificationServiceConfig,
     pub block_access_service: BlockAccessServiceConfig,
     pub server_status_service: ServerStatusServiceConfig,
-    pub state_service: StateServiceConfig,
+    pub state_management_service: StateManagementServiceConfig,
     pub subscriber_service: SubscriberServiceConfig,
 }
 
@@ -39,7 +39,7 @@ pub struct PersistenceServiceConfig {
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
-pub struct StateServiceConfig {
+pub struct StateManagementServiceConfig {
     pub enabled: bool,
 }
 
