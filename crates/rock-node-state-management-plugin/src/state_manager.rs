@@ -1,19 +1,19 @@
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Context, Result};
 use prost::Message;
 use rock_node_core::{
+    block_reader::BlockReader,
     database::{DatabaseManager, CF_METADATA, CF_STATE_DATA, STATE_LAST_PROCESSED_BLOCK},
     events::BlockPersisted,
     state_reader::StateReader,
     BlockDataCache,
 };
-// Corrected Protobuf import paths based on your successful fix.
 use rock_node_protobufs::com::hedera::hapi::block::stream::{
     block_item::Item as BlockItemType,
     output::{state_change::ChangeOperation, MapChangeKey, StateChange},
     Block,
 };
 use std::sync::Arc;
-use tracing::{debug, error, instrument, warn};
+use tracing::{instrument, warn};
 
 /// Manages the application of state changes to the database and provides
 /// a read-only interface to the resulting state.
@@ -21,12 +21,22 @@ use tracing::{debug, error, instrument, warn};
 pub struct StateManager {
     db_manager: Arc<DatabaseManager>,
     cache: Arc<BlockDataCache>,
+    // Add a handle to the block reader for the catch-up logic.
+    block_reader: Arc<dyn BlockReader>,
 }
 
 impl StateManager {
     /// Creates a new `StateManager`.
-    pub fn new(db_manager: Arc<DatabaseManager>, cache: Arc<BlockDataCache>) -> Self {
-        Self { db_manager, cache }
+    pub fn new(
+        db_manager: Arc<DatabaseManager>,
+        cache: Arc<BlockDataCache>,
+        block_reader: Arc<dyn BlockReader>,
+    ) -> Self {
+        Self {
+            db_manager,
+            cache,
+            block_reader,
+        }
     }
 
     /// Retrieves the last block number that was successfully processed by this plugin.
@@ -35,99 +45,88 @@ impl StateManager {
         let cf_metadata = db
             .cf_handle(CF_METADATA)
             .context("Failed to get CF_METADATA handle")?;
-
-        let value = db
+        Ok(db
             .get_cf(&cf_metadata, STATE_LAST_PROCESSED_BLOCK)?
-            .map(|db_vec| {
-                let mut bytes = [0u8; 8];
-                bytes.copy_from_slice(&db_vec);
-                u64::from_be_bytes(bytes)
-            });
-
-        Ok(value)
+            .map(|v| u64::from_be_bytes(v.try_into().unwrap())))
     }
 
-    /// The core transaction for processing a persisted block.
+    /// Processes a block coming from the live event stream (and its cache entry).
     #[instrument(skip_all, fields(block_number = event.block_number))]
-    pub fn apply_state_from_block(&self, event: BlockPersisted) -> Result<()> {
-        let block_data = self.cache.get(&event.cache_key).ok_or_else(|| {
-            anyhow::anyhow!("Block data not found in cache for key {}", event.cache_key)
+    pub async fn apply_state_from_block_event(&self, event: BlockPersisted) -> Result<()> {
+        let block_bytes = self
+            .cache
+            .get(&event.cache_key)
+            .map(|d| d.contents)
+            .ok_or_else(|| anyhow!("Block data not found in cache for key {}", event.cache_key))?;
+
+        self.apply_state_changes(event.block_number, &block_bytes)
+            .await?;
+
+        // Only mark for removal if we consumed from the cache.
+        self.cache.mark_for_removal(event.cache_key).await;
+
+        Ok(())
+    }
+
+    /// Processes a block fetched directly from storage during a catch-up.
+    #[instrument(skip_all, fields(block_number))]
+    pub async fn apply_state_from_storage(&self, block_number: u64) -> Result<()> {
+        let block_bytes = self.block_reader.read_block(block_number)?.ok_or_else(|| {
+            anyhow!(
+                "Block #{} not found in persistence for catch-up.",
+                block_number
+            )
         })?;
 
-        let block =
-            Block::decode(&*block_data.contents).context("Failed to deserialize Block protobuf")?;
+        self.apply_state_changes(block_number, &block_bytes).await
+    }
+
+    /// The generic, core logic for applying state changes from a block's raw bytes.
+    async fn apply_state_changes(&self, block_number: u64, block_bytes: &[u8]) -> Result<()> {
+        let block = Block::decode(block_bytes).context("Failed to deserialize Block protobuf")?;
 
         let db = self.db_manager.db_handle();
         let cf_state = db
             .cf_handle(CF_STATE_DATA)
-            .context("Failed to get CF_STATE_DATA handle")?;
-        let cf_metadata = db
-            .cf_handle(CF_METADATA)
-            .context("Failed to get CF_METADATA handle")?;
+            .context("CF_STATE_DATA not found")?;
+        let cf_metadata = db.cf_handle(CF_METADATA).context("CF_METADATA not found")?;
 
         let mut batch = rocksdb::WriteBatch::default();
-        let mut changes_found = 0;
-
-        for block_item in block.items {
-            if let Some(BlockItemType::StateChanges(state_changes_set)) = block_item.item {
-                for state_change in state_changes_set.state_changes {
-                    // Pass the ColumnFamily handle by reference.
-                    self.apply_single_state_change(&mut batch, &cf_state, state_change)?;
-                    changes_found += 1;
+        for item in block.items {
+            if let Some(BlockItemType::StateChanges(set)) = item.item {
+                for change in set.state_changes {
+                    self.apply_single_state_change(&mut batch, &cf_state, change)?;
                 }
             }
         }
 
-        if changes_found > 0 {
-            debug!(
-                "Extracted {} state changes for block {}.",
-                changes_found, event.block_number
-            );
-        }
-
         batch.put_cf(
-            &cf_metadata, // Pass the handle by reference
+            &cf_metadata,
             STATE_LAST_PROCESSED_BLOCK,
-            &event.block_number.to_be_bytes(),
+            &block_number.to_be_bytes(),
         );
-
-        db.write(batch)
-            .context("Failed to write state batch to RocksDB")?;
-
-        self.cache.remove(&event.cache_key);
-
-        Ok(())
+        db.write(batch).context("Failed to write state batch")
     }
 
     /// Dispatches a single `StateChange` operation to the RocksDB `WriteBatch`.
     fn apply_single_state_change(
         &self,
         batch: &mut rocksdb::WriteBatch,
-        cf: &rocksdb::ColumnFamily, // Corrected Type: Direct reference
+        cf: &rocksdb::ColumnFamily,
         change: StateChange,
     ) -> Result<()> {
-        if let Some(operation) = change.change_operation {
-            match operation {
+        if let Some(op) = change.change_operation {
+            match op {
                 ChangeOperation::MapUpdate(update) => {
-                    let key = self
-                        .construct_db_key(change.state_id, &update.key)
-                        .context("Failed to construct DB key for MapUpdate")?;
-                    let value = update.value.context("MapUpdateChange is missing a value")?;
-                    let value_bytes = value.encode_to_vec();
-                    batch.put_cf(cf, &key, &value_bytes);
+                    let key = self.construct_db_key(change.state_id, &update.key)?;
+                    let val = update.value.context("MapUpdateChange is missing value")?;
+                    batch.put_cf(cf, &key, &val.encode_to_vec());
                 }
                 ChangeOperation::MapDelete(deletion) => {
-                    let key = self
-                        .construct_db_key(change.state_id, &deletion.key)
-                        .context("Failed to construct DB key for MapDelete")?;
+                    let key = self.construct_db_key(change.state_id, &deletion.key)?;
                     batch.delete_cf(cf, &key);
                 }
-                _ => {
-                    warn!(
-                        "Unhandled StateChange operation type: {:?}",
-                        std::any::type_name_of_val(&operation)
-                    );
-                }
+                _ => warn!("Unhandled StateChange operation: {:?}", op),
             }
         }
         Ok(())
@@ -135,42 +134,21 @@ impl StateManager {
 
     /// Creates a composite database key from the state ID and the specific entity key.
     fn construct_db_key(&self, state_id: u32, map_key: &Option<MapChangeKey>) -> Result<Vec<u8>> {
-        // FIX: Serialize the entire MapChangeKey struct, not just the oneof part.
         let entity_key_bytes = map_key
             .as_ref()
             .map(|k| k.encode_to_vec())
             .context("MapChangeKey is missing")?;
-
-        let mut final_key = state_id.to_be_bytes().to_vec();
-        final_key.extend(entity_key_bytes);
-
-        Ok(final_key)
+        Ok([state_id.to_be_bytes().as_slice(), &entity_key_bytes].concat())
     }
 }
 
-// Implement the public read-only trait for the StateManager.
 impl StateReader for StateManager {
     #[instrument(skip(self), fields(key_len = key.len()))]
     fn get_state_value(&self, key: &[u8]) -> Result<Option<Vec<u8>>> {
         let db = self.db_manager.db_handle();
         let cf = db
             .cf_handle(CF_STATE_DATA)
-            .context("Failed to get CF_STATE_DATA handle for read")?;
-
-        match db.get_cf(&cf, key) {
-            // Pass by reference
-            Ok(Some(value)) => {
-                debug!("State key found.");
-                Ok(Some(value))
-            }
-            Ok(None) => {
-                debug!("State key not found.");
-                Ok(None)
-            }
-            Err(e) => {
-                error!("Failed to read from state database: {}", e);
-                Err(e.into())
-            }
-        }
+            .context("CF_STATE_DATA not found")?;
+        Ok(db.get_cf(&cf, key)?)
     }
 }

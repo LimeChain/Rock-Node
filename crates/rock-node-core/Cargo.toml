@@ -19,3 +19,4 @@ dashmap = "5.5"
 
 # Metrics
 prometheus = { version = "0.13", features = ["process"] }
+tracing = "0.1"

@@ -1,15 +1,13 @@
 use crate::state_manager::StateManager;
 use anyhow::{Context, Result};
 use rock_node_core::{
-    database_provider::DatabaseManagerProvider, state_reader::StateReaderProvider, AppContext,
-    Plugin,
+    block_reader::BlockReaderProvider, database_provider::DatabaseManagerProvider,
+    state_reader::StateReaderProvider, AppContext, Plugin,
 };
 use std::any::TypeId;
 use std::sync::Arc;
-use tokio::sync::broadcast;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
-/// The main plugin struct that integrates the StateManager into the application.
 pub struct StateManagementPlugin {
     app_context: Option<AppContext>,
     state_manager: Option<Arc<StateManager>>,
@@ -43,126 +41,107 @@ impl Plugin for StateManagementPlugin {
 impl StateManagementPlugin {
     fn init_internal(&mut self, context: AppContext) -> Result<()> {
         info!("Initializing State Management Plugin...");
+        let providers = context.service_providers.read().unwrap();
 
-        let db_provider = {
-            let providers = context.service_providers.read().unwrap();
-            providers
-                .get(&TypeId::of::<DatabaseManagerProvider>())
-                .and_then(|p| p.downcast_ref::<DatabaseManagerProvider>())
-                .cloned()
-                .context("DatabaseManagerProvider not found in AppContext")?
-        };
+        let db_provider = providers
+            .get(&TypeId::of::<DatabaseManagerProvider>())
+            .and_then(|p| p.downcast_ref::<DatabaseManagerProvider>())
+            .cloned()
+            .context("DatabaseManagerProvider not found")?;
+
+        // Fetch the BlockReaderProvider to use for catch-up logic.
+        let block_reader_provider = providers
+            .get(&TypeId::of::<BlockReaderProvider>())
+            .and_then(|p| p.downcast_ref::<BlockReaderProvider>())
+            .cloned()
+            .context("BlockReaderProvider not found")?;
 
         let db_manager = db_provider.get_manager();
+        let block_reader = block_reader_provider.get_reader();
         let cache = context.block_data_cache.clone();
 
-        let state_manager = Arc::new(StateManager::new(db_manager, cache));
+        let state_manager = Arc::new(StateManager::new(db_manager, cache, block_reader));
         self.state_manager = Some(state_manager.clone());
 
-        {
-            let provider = StateReaderProvider::new(state_manager);
-            let mut providers = context.service_providers.write().unwrap();
-            providers.insert(TypeId::of::<StateReaderProvider>(), Arc::new(provider));
-        }
+        let reader_provider = StateReaderProvider::new(state_manager);
+        drop(providers); // Drop read lock
+        context.service_providers.write().unwrap().insert(
+            TypeId::of::<StateReaderProvider>(),
+            Arc::new(reader_provider),
+        );
 
         info!("StateReaderProvider registered successfully.");
-
         self.app_context = Some(context);
         Ok(())
     }
 
     fn start_internal(&mut self) -> Result<()> {
-        info!("Starting State Management Plugin event loop...");
         let context = self
             .app_context
             .clone()
-            .context("AppContext not initialized before start")?;
+            .context("AppContext not initialized")?;
         let state_manager = self
             .state_manager
             .clone()
-            .context("StateManager not initialized before start")?;
+            .context("StateManager not initialized")?;
 
         tokio::spawn(async move {
-            // FIX: The state is now an Option to explicitly handle the uninitialized case.
-            let mut last_processed_block: Option<u64> = match state_manager
-                .get_last_processed_block()
-            {
+            let mut last_processed_block = match state_manager.get_last_processed_block() {
                 Ok(val) => val,
                 Err(e) => {
-                    error!(
-                            "Could not read last processed block from DB: {:?}. Halting state management plugin.",
-                            e
-                        );
+                    error!("Could not read last processed block: {:?}. Halting.", e);
                     return;
                 }
             };
 
-            // FIX: More precise logging based on the actual initial state.
-            if let Some(last_block) = last_processed_block {
-                info!(
-                    "State management plugin initialized. Last processed block: {}. Waiting for block {}.",
-                    last_block,
-                    last_block + 1
-                );
+            if let Some(last) = last_processed_block {
+                info!("Resuming state processing. Last processed block: {}.", last);
             } else {
-                info!("State management plugin initialized with fresh state. Waiting for genesis block 0.");
+                info!("Starting state processing from genesis block 0.");
             }
 
             let mut rx = context.tx_block_persisted.subscribe();
-
             loop {
                 match rx.recv().await {
                     Ok(event) => {
-                        // --- REVISED SEQUENTIAL PROCESSING LOGIC ---
-                        let expected_block = match last_processed_block {
-                            // This is the initial state. We MUST see genesis block 0 first.
-                            None => 0,
-                            // We are in steady state. We expect the next sequential block.
-                            Some(last_block) => last_block + 1,
-                        };
+                        let expected_block = last_processed_block.map_or(0, |n| n + 1);
 
                         if event.block_number < expected_block {
-                            // This is an old/duplicate event. Ignore it.
                             continue;
                         }
 
+                        // If we are behind, trigger the catch-up logic.
                         if event.block_number > expected_block {
-                            // We have missed a block! This is a critical failure for state.
-                            error!(
-                                "CRITICAL: State consistency violation! Expected block {}, but received {}. Halting processing.",
-                                expected_block,
-                                event.block_number
+                            warn!(
+                                "State fell behind. Expected {}, got {}. Attempting to catch up from storage.",
+                                expected_block, event.block_number
                             );
-                            break;
+                            for b in expected_block..event.block_number {
+                                if let Err(e) = state_manager.apply_state_from_storage(b).await {
+                                    error!("Failed to apply state for block #{} from storage: {:?}. Halting.", b, e);
+                                    return; // Halt on catch-up failure.
+                                }
+                            }
                         }
 
-                        // If we reach here, event.block_number == expected_block. Process it.
-                        if let Err(e) = state_manager.apply_state_from_block(event) {
+                        // Process the current event from the cache.
+                        if let Err(e) = state_manager.apply_state_from_block_event(event).await {
                             error!(
-                                "Failed to apply state for block {}: {:?}. Halting state management processing.",
+                                "Failed to apply state for block event {}: {:?}. Halting.",
                                 event.block_number, e
                             );
                             break;
                         }
 
-                        // Update our in-memory state only after successful processing.
                         last_processed_block = Some(event.block_number);
                     }
-                    Err(broadcast::error::RecvError::Lagged(n)) => {
-                        error!(
-                            "State management plugin lagged by {} messages. State is now out of sync. Shutting down.",
-                            n
-                        );
-                        break;
-                    }
-                    Err(broadcast::error::RecvError::Closed) => {
-                        info!("Broadcast channel closed. Shutting down state management plugin event loop.");
+                    Err(e) => {
+                        error!("State plugin event channel error: {:?}. Shutting down.", e);
                         break;
                     }
                 }
             }
         });
-
         Ok(())
     }
 }

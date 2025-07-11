@@ -261,5 +261,5 @@ async fn process_event(event: InboundEvent, context: &AppContext, service: &Pers
             block_number, cache_key
         );
     }
-    context.block_data_cache.remove(&cache_key);
+    context.block_data_cache.mark_for_removal(cache_key).await;
 }

@@ -27,7 +27,7 @@ database_path = "data/database"
     archive_batch_size = 100
 
     [plugins.state_management_service]
-    enabled = true
+    enabled = false
 
     [plugins.subscriber_service]
     enabled = true
