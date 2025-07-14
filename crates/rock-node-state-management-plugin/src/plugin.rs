@@ -1,7 +1,7 @@
 use crate::state_manager::StateManager;
 use anyhow::{Context, Result};
 use rock_node_core::{
-    block_reader::BlockReaderProvider, database_provider::DatabaseManagerProvider,
+    database_provider::DatabaseManagerProvider, service_provider::BlockReaderProvider,
     state_reader::StateReaderProvider, AppContext, Plugin,
 };
 use std::any::TypeId;
@@ -50,14 +50,17 @@ impl StateManagementPlugin {
             .context("DatabaseManagerProvider not found")?;
 
         // Fetch the BlockReaderProvider to use for catch-up logic.
-        let block_reader_provider = providers
+
+        let block_reader = context
+            .service_providers
+            .read()
+            .unwrap()
             .get(&TypeId::of::<BlockReaderProvider>())
             .and_then(|p| p.downcast_ref::<BlockReaderProvider>())
-            .cloned()
-            .context("BlockReaderProvider not found")?;
+            .map(|p_concrete| p_concrete.get_service())
+            .expect("BlockReaderProvider not found in service providers!");
 
         let db_manager = db_provider.get_manager();
-        let block_reader = block_reader_provider.get_reader();
         let cache = context.block_data_cache.clone();
 
         let state_manager = Arc::new(StateManager::new(db_manager, cache, block_reader));

@@ -49,7 +49,7 @@ impl Plugin for BlockAccessPlugin {
             if let Some(provider_any) = providers.get(&key) {
                 if let Some(provider_handle) = provider_any.downcast_ref::<BlockReaderProvider>() {
                     info!("Successfully retrieved BlockReaderProvider handle.");
-                    provider_handle.get_reader()
+                    provider_handle.get_service()
                 } else {
                     return Err(
                         anyhow::anyhow!("FATAL: Failed to downcast BlockReaderProvider.").into(),
