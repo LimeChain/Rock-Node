@@ -8,7 +8,7 @@ use std::fs::File;
 use std::os::unix::fs::FileExt;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use tracing::{debug, info, warn};
+use tracing::{debug, trace, warn};
 use zstd;
 
 lazy_static! {
@@ -86,13 +86,13 @@ impl ColdReader {
     }
 
     pub fn scan_and_build_index(&self) -> Result<()> {
-        info!(
+        trace!(
             "Scanning for cold storage archives in '{}'...",
             self.config.cold_storage_path
         );
         let path = Path::new(&self.config.cold_storage_path);
         if !path.exists() {
-            info!("Cold storage path does not exist, skipping scan.");
+            trace!("Cold storage path does not exist, skipping scan.");
             return Ok(());
         }
 
@@ -113,7 +113,7 @@ impl ColdReader {
         self.metrics
             .persistence_cold_tier_block_count
             .set(total_blocks as i64);
-        info!(
+        trace!(
             "Cold storage scan complete. Managing {} block chunks with a total of {} blocks.",
             self.indices.len(),
             total_blocks
@@ -125,7 +125,7 @@ impl ColdReader {
         let (start_block, end_block) = Self::parse_block_range(index_path)
             .ok_or_else(|| anyhow!("Could not parse block range from {:?}", index_path))?;
 
-        info!(
+        trace!(
             "Memory-mapping new cold storage index file: {:?}",
             index_path
         );

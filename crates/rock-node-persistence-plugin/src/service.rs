@@ -10,7 +10,7 @@ use rock_node_core::{
 use rock_node_protobufs::com::hedera::hapi::block::stream::{block_item, Block};
 use rocksdb::WriteBatch;
 use std::sync::Arc;
-use tracing::{info, warn};
+use tracing::{trace, warn};
 
 #[derive(Debug, Clone)]
 pub struct PersistenceService {
@@ -152,7 +152,7 @@ impl BlockWriter for PersistenceService {
             .with_label_values(&["batch"])
             .start_timer();
 
-        info!(
+        trace!(
             "Writing historical batch of {} blocks directly to cold storage.",
             blocks.len()
         );
@@ -162,12 +162,12 @@ impl BlockWriter for PersistenceService {
         if let Err(e) = self.cold_reader.load_index_file(&new_index_path) {
             warn!("CRITICAL: Failed to live-load new index file for historical batch {:?}: {}. A restart may be required to see these blocks.", new_index_path, e);
         } else {
-            info!("Cold reader index successfully updated for historical batch.");
+            trace!("Cold reader index successfully updated for historical batch.");
         }
 
         let batch_earliest = get_block_number(blocks.first().unwrap())?;
         self.state.update_true_earliest_if_less(batch_earliest)?;
-        info!("Checked/updated true earliest block number with historical batch.");
+        trace!("Checked/updated true earliest block number with historical batch.");
 
         timer.observe_duration();
         self.metrics

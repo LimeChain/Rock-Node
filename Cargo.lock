@@ -1238,6 +1238,7 @@ dependencies = [
  "rock-node-persistence-plugin",
  "rock-node-publish-plugin",
  "rock-node-server-status-plugin",
+ "rock-node-state-management-plugin",
  "rock-node-subscriber-plugin",
  "rock-node-verifier-plugin",
  "serde",
@@ -1276,6 +1277,7 @@ dependencies = [
  "serde",
  "thiserror",
  "tokio",
+ "tracing",
  "uuid",
 ]
 
@@ -1352,6 +1354,19 @@ dependencies = [
  "rock-node-protobufs",
  "tokio",
  "tonic",
+ "tracing",
+]
+
+[[package]]
+name = "rock-node-state-management-plugin"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "prost",
+ "rock-node-core",
+ "rock-node-protobufs",
+ "rocksdb",
+ "tokio",
  "tracing",
 ]
 

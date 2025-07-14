@@ -10,6 +10,7 @@ use rock_node_observability_plugin::ObservabilityPlugin;
 use rock_node_persistence_plugin::PersistencePlugin;
 use rock_node_publish_plugin::PublishPlugin;
 use rock_node_server_status_plugin::StatusPlugin;
+use rock_node_state_management_plugin::StateManagementPlugin;
 use rock_node_subscriber_plugin::SubscriberPlugin;
 use rock_node_verifier_plugin::VerifierPlugin;
 use std::{
@@ -131,6 +132,15 @@ async fn main() -> Result<()> {
     plugins.push(Box::new(BlockAccessPlugin::new()));
     plugins.push(Box::new(StatusPlugin::new()));
     plugins.push(Box::new(ObservabilityPlugin::new()));
+
+    // ---- Conditionally add the new State Plugin ----
+    if app_context.config.plugins.state_management_service.enabled {
+        info!("StateManagementPlugin is ENABLED.");
+        plugins.push(Box::new(StateManagementPlugin::new()));
+    } else {
+        info!("StateManagementPlugin is DISABLED.");
+    }
+    // ---------------------------------------------
 
     // --- Step 7: Initialize and Start Plugins ---
     info!("Initializing plugins...");

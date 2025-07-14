@@ -20,7 +20,7 @@ use rock_node_core::{
 use rock_node_protobufs::com::hedera::hapi::block::stream::Block;
 use std::{any::TypeId, cmp::min, sync::Arc, time::Duration};
 use tokio::{sync::mpsc::Receiver, time::sleep};
-use tracing::{info, warn};
+use tracing::{info, trace, warn};
 use uuid::Uuid;
 
 enum InboundEvent {
@@ -166,10 +166,10 @@ impl Plugin for PersistencePlugin {
             loop {
                 tokio::select! {
                     _ = archiver.trigger.notified() => {
-                        info!("Archiver triggered by write notification.");
+                        trace!("Archiver triggered by write notification.");
                     }
                     _ = sleep(archival_check_interval) => {
-                        info!("Archiver triggered by periodic 30s check.");
+                        trace!("Archiver triggered by periodic 30s check.");
                     }
                 }
 
@@ -199,7 +199,7 @@ impl Plugin for PersistencePlugin {
     }
 
     fn start(&mut self) -> CoreResult<()> {
-        info!("Starting PersistencePlugin event loop...");
+        info!("Starting Persistence Plugin event loop...");
         let context = self.context.as_ref().unwrap().clone();
         let service = self.service.as_ref().unwrap().clone();
         let mut rx_verified = self.rx_block_verified.take().unwrap();
@@ -240,7 +240,7 @@ async fn process_event(event: InboundEvent, context: &AppContext, service: &Pers
                 if let Err(e) = service.write_block(&block_proto) {
                     warn!("[FATAL] Failed to persist block #{}: {}", block_number, e);
                 } else {
-                    info!("Successfully persisted block #{}.", block_number);
+                    trace!("Successfully persisted block #{}.", block_number);
                     let persisted_event = BlockPersisted {
                         block_number,
                         cache_key,
@@ -261,5 +261,5 @@ async fn process_event(event: InboundEvent, context: &AppContext, service: &Pers
             block_number, cache_key
         );
     }
-    context.block_data_cache.remove(&cache_key);
+    context.block_data_cache.mark_for_removal(cache_key).await;
 }

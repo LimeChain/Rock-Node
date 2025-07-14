@@ -15,6 +15,7 @@ Rock Node follows a modular plugin architecture where each component is designed
 - **Configuration Management**: Centralized configuration with environment-specific overrides
 - **Observability**: Comprehensive metrics, logging, and monitoring capabilities
 - **Data Persistence**: Robust block storage with hot and cold tier support
+- **State Management**: Verifiable state maintenance with Merkle tree architecture
 
 ## Core Plugins
 
@@ -76,6 +77,19 @@ The Persistence Plugin is the authoritative source for block data storage and re
 - Data integrity and consistency guarantees
 - Storage lifecycle management
 
+### 🌳 [State Management Plugin](state-managment/design-doc.md)
+**Purpose**: Verifiable state maintenance and management
+
+The State Management Plugin maintains the live, verifiable state of the blockchain ledger. It processes state mutations from verified blocks and maintains a cryptographically verifiable "Forest of Merkle Trees" architecture.
+
+**Key Features**:
+- Forest of Sparse Merkle Trees (SMTs) for verifiable state
+- Atomic and sequential state transitions
+- Durable state persistence with RocksDB
+- Public `StateReader` trait for decoupled state queries
+- Configurable enablement for different deployment scenarios
+- Support for future state proofs and snapshots
+
 ## Supporting Documentation
 
 ### 🔧 [Protobufs Compilation](protobufs/protobufs-compilation.md)
@@ -94,6 +108,7 @@ Rock Node uses a centralized configuration system. Key configuration areas inclu
 - **Plugin Enablement**: Enable/disable specific plugins based on deployment needs
 - **Network Settings**: gRPC listener addresses and ports
 - **Persistence**: Database connection strings and storage paths
+- **State Management**: State processing enablement and RocksDB configuration
 - **Observability**: Metrics endpoints and logging levels
 
 ### Deployment
@@ -116,6 +131,8 @@ Each plugin follows a consistent structure:
 - `service.rs`: gRPC service implementation (if applicable)
 - `state.rs`: Shared state management (if applicable)
 - `error.rs`: Error handling and status mapping
+
+**Note**: The State Management Plugin provides a `StateReader` trait that other plugins can use to query the verifiable state without direct dependencies.
 
 ### Testing
 ```bash

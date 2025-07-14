@@ -6,7 +6,10 @@ use std::sync::Arc;
 // so they can be referenced safely from other crates.
 pub const CF_METADATA: &str = "metadata";
 pub const CF_HOT_BLOCKS: &str = "hot_blocks";
-pub const CF_STATE_DATA: &str = "state_data"; // For the future State Plugin
+pub const CF_STATE_DATA: &str = "state_data"; // For the State Plugin
+
+// A constant for the State Plugin's metadata key to track the last processed block.
+pub const STATE_LAST_PROCESSED_BLOCK: &[u8] = b"state_last_processed_block";
 
 /// Manages the single RocksDB instance and provides access to its Column Families.
 #[derive(Debug)]
