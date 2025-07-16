@@ -9,6 +9,7 @@ use rock_node_core::{
 use rock_node_observability_plugin::ObservabilityPlugin;
 use rock_node_persistence_plugin::PersistencePlugin;
 use rock_node_publish_plugin::PublishPlugin;
+use rock_node_query_plugin::QueryPlugin;
 use rock_node_server_status_plugin::StatusPlugin;
 use rock_node_state_management_plugin::StateManagementPlugin;
 use rock_node_subscriber_plugin::SubscriberPlugin;
@@ -22,9 +23,42 @@ use std::{
 use tokio::sync::{broadcast, mpsc};
 use tracing::info;
 
+fn print_section(name: &str, section: &toml::Value, depth: usize) {
+    let dash_char = if name == "plugins" && depth == 0 {
+        '='
+    } else {
+        '-'
+    };
+    let dash_count = 8 + depth;
+    let dashes = dash_char.to_string().repeat(dash_count);
+    info!("{} {} {}", dashes, name.to_uppercase(), dashes);
+
+    if let toml::Value::Table(t) = section {
+        for (key, value) in t.iter() {
+            if let toml::Value::Table(_) = value {
+                print_section(key, value, depth + 1);
+            } else {
+                info!("{}: {}", key, value);
+            }
+        }
+    }
+
+    info!("{}", "-".repeat(16));
+}
+
+fn print_config(config_value: &toml::Value) {
+    info!("===== Configuration =====");
+
+    if let toml::Value::Table(top) = config_value {
+        for (name, val) in top.iter() {
+            print_section(name, val, 0);
+        }
+    }
+}
+
 const BANNER: &str = r#"
 ██████╗  ██████╗  ██████╗██╗  ██╗    ███╗   ██╗ ██████╗ ██████╗ ███████╗
-██╔══██╗██╔═══██╗██╔════╝██║ ██╔╝    ████╗  ██║██═══██╗██╔══██╗██╔════╝
+██╔══██╗██╔═══██╗██╔════╝██║ ██╔╝    ████╗  ██║██════██╗██╔══██╗██╔════╝
 ██████╔╝██║   ██║██║     █████╔╝     ██╔██╗ ██║██║   ██║██║  ██║█████╗  
 ██╔══██╗██║   ██║██║     ██╔═██╗     ██║╚██╗██║██║   ██║██║  ██║██╔══╝  
 ██║  ██║╚██████╔╝╚██████╗██║  ██╗    ██║ ╚████║╚██████╔╝██████╔╝███████╗
@@ -54,6 +88,8 @@ async fn main() -> Result<()> {
         )
     })?;
 
+    let config_value: toml::Value = config_str.parse::<toml::Value>()?;
+
     let config: Config = toml::from_str(&config_str)?;
     let config = Arc::new(config); // Wrap config in an Arc early
     let default_log_level = &config.core.log_level;
@@ -72,7 +108,8 @@ async fn main() -> Result<()> {
 
     // --- Step 3: Print Banner and Show Config ---
     println!("{}", BANNER);
-    info!("Configuration loaded successfully.\n{:#?}", config);
+    info!("Configuration loaded successfully.");
+    print_config(&config_value);
 
     // --- Step 4: Initialize Core Shared Services ---
     info!("Initializing shared services...");
@@ -137,22 +174,25 @@ async fn main() -> Result<()> {
     if app_context.config.plugins.state_management_service.enabled {
         info!("StateManagementPlugin is ENABLED.");
         plugins.push(Box::new(StateManagementPlugin::new()));
+        // Query Plugin is dependent on the StateManagementPlugin!
+        plugins.push(Box::new(QueryPlugin::new()));
     } else {
         info!("StateManagementPlugin is DISABLED.");
     }
     // ---------------------------------------------
 
     // --- Step 7: Initialize and Start Plugins ---
+    info!("{}", "-".repeat(16));
     info!("Initializing plugins...");
     for plugin in &mut plugins {
         plugin.initialize(app_context.clone())?;
     }
-
+    info!("{}", "-".repeat(16));
     info!("Starting plugins...");
     for plugin in &mut plugins {
         plugin.start()?;
     }
-
+    info!("{}", "-".repeat(16));
     info!("Rock Node running successfully. Press Ctrl+C to shut down.");
     tokio::signal::ctrl_c().await?;
     info!("Shutdown signal received. Exiting.");

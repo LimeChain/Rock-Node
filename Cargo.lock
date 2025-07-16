@@ -1237,6 +1237,7 @@ dependencies = [
  "rock-node-observability-plugin",
  "rock-node-persistence-plugin",
  "rock-node-publish-plugin",
+ "rock-node-query-plugin",
  "rock-node-server-status-plugin",
  "rock-node-state-management-plugin",
  "rock-node-subscriber-plugin",
@@ -1343,6 +1344,21 @@ dependencies = [
  "tonic",
  "tracing",
  "uuid",
+]
+
+[[package]]
+name = "rock-node-query-plugin"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "hex",
+ "prost",
+ "rock-node-core",
+ "rock-node-protobufs",
+ "tokio",
+ "tonic",
+ "tracing",
 ]
 
 [[package]]

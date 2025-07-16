@@ -16,6 +16,7 @@ rock-node-subscriber-plugin = { path = "../../crates/rock-node-subscriber-plugin
 rock-node-block-access-plugin = { path = "../../crates/rock-node-block-access-plugin" }
 rock-node-server-status-plugin = { path = "../../crates/rock-node-server-status-plugin" }
 rock-node-state-management-plugin = { path = "../../crates/rock-node-state-management-plugin" }
+rock-node-query-plugin = { path = "../../crates/rock-node-query-plugin" }
 
 # The async runtime for our application
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal"] }
