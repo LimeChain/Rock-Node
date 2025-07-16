@@ -1,13 +1,16 @@
 use anyhow::Result;
+use hex;
 use prost::Message;
 use rock_node_core::StateReader;
+use rock_node_protobufs::proto::account::StakedId as AccountStakedId;
+use rock_node_protobufs::proto::staking_info::StakedId as InfoStakedId;
 use rock_node_protobufs::{
     com::hedera::hapi::block::stream::output::{
         map_change_key, map_change_value, MapChangeKey, MapChangeValue, StateIdentifier,
     },
     proto::{
-        crypto_get_info_response, CryptoGetInfoQuery, CryptoGetInfoResponse, Duration,
-        ResponseCodeEnum, Timestamp,
+        account_id::Account, crypto_get_info_response, CryptoGetInfoQuery, CryptoGetInfoResponse,
+        Duration, ResponseCodeEnum, StakingInfo, Timestamp,
     },
 };
 use std::sync::Arc;
@@ -84,6 +87,21 @@ impl CryptoQueryHandler {
                     // 6. Map the Account to the AccountInfo
                     let account_info = crypto_get_info_response::AccountInfo {
                         account_id: Some(account.account_id.clone().unwrap()),
+                        contract_account_id: if account.smart_contract {
+                            if !account.alias.is_empty() {
+                                hex::encode(account.alias.clone())
+                            } else {
+                                if let Some(Account::AccountNum(num)) =
+                                    account.account_id.as_ref().unwrap().account
+                                {
+                                    format!("0.0.{}", num)
+                                } else {
+                                    String::new()
+                                }
+                            }
+                        } else {
+                            String::new()
+                        },
                         memo: account.memo,
                         key: account.key,
                         balance: account.tinybar_balance as u64,
@@ -104,9 +122,32 @@ impl CryptoQueryHandler {
                         } else {
                             None
                         },
+                        staking_info: Some(StakingInfo {
+                            staked_to_me: account.staked_to_me,
+                            stake_period_start: if account.stake_period_start > 0 {
+                                Some(Timestamp {
+                                    seconds: account.stake_period_start,
+                                    nanos: 0,
+                                })
+                            } else {
+                                None
+                            },
+                            decline_reward: account.decline_reward,
+                            pending_reward: 0,
+                            staked_id: account.staked_id.map(|id| match id {
+                                AccountStakedId::StakedNodeId(node) => {
+                                    InfoStakedId::StakedNodeId(node)
+                                }
+                                AccountStakedId::StakedAccountId(acc) => {
+                                    InfoStakedId::StakedAccountId(acc)
+                                }
+                            }),
+                        }),
+                        ethereum_nonce: account.ethereum_nonce,
                         owned_nfts: account.number_owned_nfts,
                         max_automatic_token_associations: account.max_auto_associations,
                         alias: account.alias,
+
                         ..Default::default()
                     };
 

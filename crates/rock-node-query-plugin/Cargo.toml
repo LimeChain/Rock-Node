@@ -27,3 +27,4 @@ prost = "0.13.5"
 
 # For async traits
 async-trait = "0.1"
+hex = "0.4.3"
