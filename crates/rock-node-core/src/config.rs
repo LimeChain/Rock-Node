@@ -22,6 +22,7 @@ pub struct PluginConfigs {
     pub server_status_service: ServerStatusServiceConfig,
     pub state_management_service: StateManagementServiceConfig,
     pub subscriber_service: SubscriberServiceConfig,
+    pub query_service: QueryServiceConfig,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -75,6 +76,13 @@ pub struct BlockAccessServiceConfig {
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct ServerStatusServiceConfig {
+    pub enabled: bool,
+    pub grpc_address: String,
+    pub grpc_port: u16,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct QueryServiceConfig {
     pub enabled: bool,
     pub grpc_address: String,
     pub grpc_port: u16,

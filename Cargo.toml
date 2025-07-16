@@ -9,7 +9,8 @@ members = [
     "crates/rock-node-observability-plugin",
     "crates/rock-node-publish-plugin",
     "crates/rock-node-subscriber-plugin",
-    "crates/rock-node-state-management-plugin"
+    "crates/rock-node-state-management-plugin",
+    "crates/rock-node-query-plugin"
 ]
 
 [workspace.package]

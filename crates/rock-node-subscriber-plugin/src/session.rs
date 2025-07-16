@@ -204,7 +204,7 @@ mod tests {
     use rock_node_core::{
         config::{
             BlockAccessServiceConfig, Config, CoreConfig, ObservabilityConfig,
-            PersistenceServiceConfig, PluginConfigs, PublishServiceConfig,
+            PersistenceServiceConfig, PluginConfigs, PublishServiceConfig, QueryServiceConfig,
             ServerStatusServiceConfig, StateManagementServiceConfig, SubscriberServiceConfig,
             VerificationServiceConfig,
         },
@@ -298,6 +298,11 @@ mod tests {
                     max_concurrent_streams: 10,
                     live_stream_queue_size: 10,
                     max_future_block_lookahead: 100,
+                },
+                query_service: QueryServiceConfig {
+                    enabled: false,
+                    grpc_address: "".to_string(),
+                    grpc_port: 0,
                 },
             },
         };

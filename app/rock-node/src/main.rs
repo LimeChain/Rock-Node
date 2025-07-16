@@ -9,6 +9,7 @@ use rock_node_core::{
 use rock_node_observability_plugin::ObservabilityPlugin;
 use rock_node_persistence_plugin::PersistencePlugin;
 use rock_node_publish_plugin::PublishPlugin;
+use rock_node_query_plugin::QueryPlugin;
 use rock_node_server_status_plugin::StatusPlugin;
 use rock_node_state_management_plugin::StateManagementPlugin;
 use rock_node_subscriber_plugin::SubscriberPlugin;
@@ -137,6 +138,8 @@ async fn main() -> Result<()> {
     if app_context.config.plugins.state_management_service.enabled {
         info!("StateManagementPlugin is ENABLED.");
         plugins.push(Box::new(StateManagementPlugin::new()));
+        // Query Plugin is dependent on the StateManagementPlugin!
+        plugins.push(Box::new(QueryPlugin::new()));
     } else {
         info!("StateManagementPlugin is DISABLED.");
     }

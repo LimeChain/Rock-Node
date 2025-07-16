@@ -1,0 +1,29 @@
+[package]
+name = "rock-node-query-plugin"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# The application's core types and traits
+rock-node-core = { path = "../rock-node-core" }
+
+# The generated protobuf structs
+rock-node-protobufs = { path = "../rock-node-protobufs" }
+
+# For the async runtime
+tokio = { version = "1", features = ["rt", "macros"] }
+
+# For the gRPC server implementation
+tonic = "0.13.1"
+
+# For ergonomic error handling
+anyhow = "1"
+
+# For structured logging
+tracing = "0.1"
+
+# The protobuf serialization/deserialization library
+prost = "0.13.5"
+
+# For async traits
+async-trait = "0.1"
