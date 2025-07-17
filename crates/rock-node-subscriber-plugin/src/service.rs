@@ -8,7 +8,7 @@ use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status};
-use tracing::info;
+use tracing::{error, info};
 
 /// Implements the gRPC service for subscribing to block streams.
 #[derive(Debug)]
@@ -40,7 +40,13 @@ impl BlockStreamSubscribeService for SubscriberServiceImpl {
 
         let (tx, rx) = mpsc::channel(16);
 
-        let mut session = SubscriberSession::new(self.context.clone(), request, tx);
+        let mut session = match SubscriberSession::new(self.context.clone(), request, tx) {
+            Ok(session) => session,
+            Err(status) => {
+                error!("Failed to create subscriber session: {}", status);
+                return Err(status);
+            }
+        };
 
         tokio::spawn(async move {
             info!(session_id = %session.id, "Spawning new session handler task.");

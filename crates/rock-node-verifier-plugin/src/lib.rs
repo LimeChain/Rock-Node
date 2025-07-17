@@ -44,7 +44,15 @@ impl Plugin for VerifierPlugin {
 
     fn start(&mut self) -> Result<()> {
         info!("Starting VerifierPlugin...");
-        let context = self.context.as_ref().unwrap().clone();
+        let context = self
+            .context
+            .as_ref()
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "VerifierPlugin not initialized - initialize() must be called before start()"
+                )
+            })?
+            .clone();
 
         // Take ownership of the receiver end of the channel.
         let mut rx = std::mem::replace(

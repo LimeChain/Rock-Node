@@ -39,7 +39,15 @@ impl Plugin for PublishPlugin {
 
     fn start(&mut self) -> Result<()> {
         info!("Starting PublishPlugin gRPC Server...");
-        let context = self.context.as_ref().unwrap().clone();
+        let context = self
+            .context
+            .as_ref()
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "PublishPlugin not initialized - initialize() must be called before start()"
+                )
+            })?
+            .clone();
 
         let config = &context.config.plugins.publish_service;
         if !config.enabled {
@@ -50,7 +58,10 @@ impl Plugin for PublishPlugin {
 
         let shared_state = Arc::new(SharedState::new());
         {
-            let providers = context.service_providers.read().unwrap();
+            let providers = context
+                .service_providers
+                .read()
+                .map_err(|_| anyhow::anyhow!("Failed to acquire read lock on service providers"))?;
             let key = TypeId::of::<BlockReaderProvider>();
             if let Some(provider_any) = providers.get(&key) {
                 if let Some(provider_handle) = provider_any.downcast_ref::<BlockReaderProvider>() {
@@ -90,18 +101,27 @@ impl Plugin for PublishPlugin {
         let server = BlockStreamPublishServiceServer::new(service)
             .max_decoding_message_size(MAX_MESSAGE_SIZE);
 
+        // Parse the address before spawning to handle errors properly
+        let socket_addr = listen_address.parse().map_err(|e| {
+            anyhow::anyhow!(
+                "Failed to parse gRPC listen address '{}': {}",
+                listen_address,
+                e
+            )
+        })?;
+
         tokio::spawn(async move {
-            info!("Publish gRPC service listening on {}", listen_address);
+            info!("Publish gRPC service listening on {}", socket_addr);
 
             if let Err(e) = tonic::transport::Server::builder()
                 .http2_keepalive_interval(Some(Duration::from_secs(30)))
                 .http2_keepalive_timeout(Some(Duration::from_secs(10)))
                 .tcp_nodelay(true)
                 .add_service(server)
-                .serve(listen_address.parse().unwrap())
+                .serve(socket_addr)
                 .await
             {
-                tracing::error!("gRPC server failed: {}", e);
+                error!("Publish gRPC server failed: {}", e);
             }
         });
 

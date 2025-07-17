@@ -165,7 +165,10 @@ impl BlockWriter for PersistenceService {
             trace!("Cold reader index successfully updated for historical batch.");
         }
 
-        let batch_earliest = get_block_number(blocks.first().unwrap())?;
+        let batch_earliest =
+            get_block_number(blocks.first().ok_or_else(|| {
+                anyhow!("Archive batch is empty - cannot determine earliest block")
+            })?)?;
         self.state.update_true_earliest_if_less(batch_earliest)?;
         trace!("Checked/updated true earliest block number with historical batch.");
 

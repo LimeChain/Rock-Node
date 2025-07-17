@@ -84,7 +84,7 @@ fn main() -> Result<()> {
         .collect();
 
     if all_protos.is_empty() {
-        panic!("Build failed: No .proto files found after copy operations.");
+        return Err(anyhow::anyhow!("Build failed: No .proto files found after copy operations. Check that proto files exist in expected locations."));
     }
 
     println!(
@@ -101,7 +101,11 @@ fn main() -> Result<()> {
 fn run_command(command: &mut Command) -> Result<()> {
     let status = command.status()?;
     if !status.success() {
-        panic!("Command failed to execute: {:?}", command);
+        return Err(anyhow::anyhow!(
+            "Command failed with exit status {}: {:?}",
+            status.code().unwrap_or(-1),
+            command
+        ));
     }
     Ok(())
 }

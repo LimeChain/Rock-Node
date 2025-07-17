@@ -28,23 +28,30 @@ impl SubscriberSession {
         context: Arc<AppContext>,
         request: SubscribeStreamRequest,
         response_tx: mpsc::Sender<Result<SubscribeStreamResponse, Status>>,
-    ) -> Self {
-        let block_reader = context
-            .service_providers
-            .read()
-            .unwrap()
-            .get(&TypeId::of::<BlockReaderProvider>())
-            .and_then(|p| p.downcast_ref::<BlockReaderProvider>())
-            .map(|p_concrete| p_concrete.get_service())
-            .expect("BlockReaderProvider not found in service providers!");
+    ) -> Result<Self, Status> {
+        let block_reader = {
+            let providers = context.service_providers.read().map_err(|_| {
+                Status::internal("Failed to acquire read lock on service providers")
+            })?;
 
-        Self {
+            providers
+                .get(&TypeId::of::<BlockReaderProvider>())
+                .and_then(|p| p.downcast_ref::<BlockReaderProvider>())
+                .map(|p_concrete| p_concrete.get_service())
+                .ok_or_else(|| {
+                    Status::internal(
+                        "BlockReaderProvider not found - persistence plugin may not be initialized",
+                    )
+                })?
+        };
+
+        Ok(Self {
             id: Uuid::new_v4(),
             context,
             request,
             response_tx,
             block_reader,
-        }
+        })
     }
 
     pub async fn run(&mut self) {
@@ -344,7 +351,8 @@ mod tests {
             end_block_number: 10,
         };
         let (tx, mut rx) = mpsc::channel(16);
-        let mut session = SubscriberSession::new(context, request, tx);
+        let mut session =
+            SubscriberSession::new(context, request, tx).expect("Failed to create test session");
         tokio::spawn(async move {
             session.run().await;
         });
@@ -378,7 +386,8 @@ mod tests {
             end_block_number: 15,
         };
         let (tx, mut rx) = mpsc::channel(32);
-        let mut session = SubscriberSession::new(context, request, tx);
+        let mut session =
+            SubscriberSession::new(context, request, tx).expect("Failed to create test session");
 
         tokio::spawn(async move {
             session.run().await;
@@ -427,7 +436,8 @@ mod tests {
             end_block_number: 5,
         };
         let (tx, mut rx) = mpsc::channel(16);
-        let mut session = SubscriberSession::new(context, request, tx);
+        let mut session =
+            SubscriberSession::new(context, request, tx).expect("Failed to create test session");
 
         tokio::spawn(async move {
             session.run().await;

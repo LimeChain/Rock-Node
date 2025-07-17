@@ -1,4 +1,3 @@
-use anyhow::Context;
 use axum::{
     body::Body,
     extract::State,
@@ -9,7 +8,7 @@ use axum::{
 };
 use rock_node_core::{app_context::AppContext, error::Result, plugin::Plugin, MetricsRegistry};
 use std::sync::Arc;
-use tracing::info;
+use tracing::{error, info};
 
 #[derive(Debug, Default)]
 pub struct ObservabilityPlugin {
@@ -24,12 +23,21 @@ impl ObservabilityPlugin {
 
 /// Axum handler that serves the Prometheus metrics.
 /// It takes the shared `MetricsRegistry` from the application state.
-async fn get_metrics(State(metrics): State<Arc<MetricsRegistry>>) -> Response<Body> {
-    Response::builder()
+async fn get_metrics(State(metrics): State<Arc<MetricsRegistry>>) -> impl IntoResponse {
+    match Response::builder()
         .status(200)
         .header("Content-Type", prometheus::TEXT_FORMAT)
         .body(Body::from(metrics.gather()))
-        .unwrap()
+    {
+        Ok(response) => response,
+        Err(e) => {
+            error!("Failed to build metrics response: {}", e);
+            Response::builder()
+                .status(500)
+                .body(Body::from("Internal Server Error"))
+                .unwrap_or_else(|_| Response::new(Body::from("Fatal Error")))
+        }
+    }
 }
 
 /// A simple health check handler that returns "OK".
@@ -49,7 +57,10 @@ impl Plugin for ObservabilityPlugin {
     }
 
     fn start(&mut self) -> Result<()> {
-        let context = self.context.as_ref().unwrap().clone();
+        let context = self.context
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("ObservabilityPlugin not initialized - initialize() must be called before start()"))?
+            .clone();
         let config = &context.config.plugins.observability;
         if !config.enabled {
             info!("ObservabilityPlugin is disabled. Skipping start.");
@@ -65,21 +76,36 @@ impl Plugin for ObservabilityPlugin {
 
         let listen_address = config.listen_address.clone();
 
-        tokio::spawn(async move {
-            info!(
-                "Observability server listening on http://{}",
-                listen_address
-            );
-            let listener = tokio::net::TcpListener::bind(&listen_address)
-                .await
-                .with_context(|| {
-                    format!("Failed to bind observability server to {}", listen_address)
-                })
-                .unwrap();
+        // Validate the address format before spawning
+        let _socket_addr: std::net::SocketAddr = listen_address.parse().map_err(|e| {
+            anyhow::anyhow!(
+                "Invalid observability listen address '{}': {}",
+                listen_address,
+                e
+            )
+        })?;
 
-            axum::serve(listener, app.into_make_service())
-                .await
-                .unwrap();
+        tokio::spawn(async move {
+            let listener = match tokio::net::TcpListener::bind(&listen_address).await {
+                Ok(listener) => {
+                    info!(
+                        "Observability server listening on http://{}",
+                        listen_address
+                    );
+                    listener
+                }
+                Err(e) => {
+                    error!(
+                        "Failed to bind observability server to {}: {}",
+                        listen_address, e
+                    );
+                    return;
+                }
+            };
+
+            if let Err(e) = axum::serve(listener, app.into_make_service()).await {
+                error!("Observability server failed: {}", e);
+            }
         });
 
         Ok(())

@@ -1,4 +1,4 @@
-name: Rock Node
+name: E2E Tests
 
 on:
   push:
