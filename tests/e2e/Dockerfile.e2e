@@ -1,0 +1,30 @@
+# Builds both the main app and the test runner for E2E testing.
+
+# ====================================================================================
+# Stage 1: Common Builder
+# ====================================================================================
+FROM rust:1.78.0-bullseye AS builder
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential protobuf-compiler libclang-dev git cmake && \
+    rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+COPY . .
+
+# Use a shared cargo cache for efficiency.
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/app/target \
+    # Build and install the main application binary to a persistent location.
+    cargo install --path app/rock-node --root /dist --locked
+
+# ====================================================================================
+# Stage 2: Final Rock Node Image for Testing
+# ====================================================================================
+FROM gcr.io/distroless/cc-debian12@sha256:b225b1942acac9873950e3982300fc2393f6073c75db7dc1e4825c6116ca3892 AS rock-node-test-image
+
+WORKDIR /app
+USER nonroot
+
+COPY --from=builder --chown=nonroot:nonroot /dist/bin/rock-node /app/rock-node
+ENTRYPOINT ["/app/rock-node"]
