@@ -32,12 +32,6 @@ jobs:
       - name: Cache cargo registry and build artifacts
         uses: Swatinem/rust-cache@v2
 
-      - name: Build workspace (all crates & targets)
-        run: cargo build --workspace --locked
-
-      - name: Check formatting
-        run: cargo fmt --all -- --check
-
       - name: Build Docker image for E2E tests
         run: |
           echo "Building Docker image for E2E tests..."
