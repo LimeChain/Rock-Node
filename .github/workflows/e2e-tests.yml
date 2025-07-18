@@ -32,13 +32,21 @@ jobs:
       - name: Cache cargo registry and build artifacts
         uses: Swatinem/rust-cache@v2
 
-      - name: Build Docker image for E2E tests
-        run: |
-          echo "Building Docker image for E2E tests..."
-          docker build -t rock-node-e2e:latest -f tests/e2e/Dockerfile.e2e .
-          echo "Verifying Docker image was built successfully..."
-          docker image inspect rock-node-e2e:latest
-        
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker image for E2E tests (cached)
+        id: e2e_image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: tests/e2e/Dockerfile.e2e
+          tags: rock-node-e2e:latest
+          push: false
+          load: true
+          cache-from: type=gha,scope=rock-node-e2e
+          cache-to: type=gha,mode=max,scope=rock-node-e2e
+
       - name: Run E2E tests
         run: |
           echo "Running E2E tests..."

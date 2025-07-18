@@ -12,3 +12,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 testcontainers = "0.24"
 rock-node-protobufs = { path = "../../crates/rock-node-protobufs" }
 tonic = { version = "0.13.1", features = ["transport", "codegen"] }
+prost = "0.13.5"
+tokio-stream = "0.1"
+once_cell = "1"
+serial_test = "2"
