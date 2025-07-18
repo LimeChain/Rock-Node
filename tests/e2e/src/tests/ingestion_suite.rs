@@ -17,12 +17,10 @@ async fn test_publish_single_block_successfully() -> Result<()> {
     let ctx = TestContext::new().await?;
     let mut client = ctx.publisher_client().await?;
 
-    // Build a complete block (header + proof)
     let block_bytes = BlockBuilder::new(0).build();
     let block_proto: rock_node_protobufs::com::hedera::hapi::block::stream::Block =
         Message::decode(block_bytes.as_slice())?;
 
-    // Prepare the request stream (single request containing all items).
     let (tx, rx) = mpsc::channel(1);
     tx.send(PublishStreamRequest {
         request: Some(PublishRequest::BlockItems(BlockItemSet {
@@ -31,7 +29,7 @@ async fn test_publish_single_block_successfully() -> Result<()> {
     })
     .await?;
 
-    drop(tx); // close the sender so the server sees stream end
+    drop(tx);
 
     let response_stream = client.publish_block_stream(ReceiverStream::new(rx)).await?;
     let mut responses = response_stream.into_inner();
@@ -51,7 +49,6 @@ async fn test_publish_single_block_successfully() -> Result<()> {
         other => panic!("Expected BlockAcknowledgement, got {:?}", other),
     }
 
-    // Stream should be closed now.
     assert!(responses.next().await.is_none());
     Ok(())
 }
@@ -64,7 +61,6 @@ async fn test_publisher_race_condition() -> Result<()> {
     let mut primary_client = ctx.publisher_client().await?;
     let mut secondary_client = ctx.publisher_client().await?;
 
-    // Build header-only request for block 1
     let header_only = {
         let block_bytes = BlockBuilder::new(0).build();
         let block_proto: rock_node_protobufs::com::hedera::hapi::block::stream::Block =
@@ -78,28 +74,23 @@ async fn test_publisher_race_condition() -> Result<()> {
         })),
     };
 
-    // channels for each publisher
     let (primary_tx, primary_rx) = mpsc::channel(4);
     let (secondary_tx, secondary_rx) = mpsc::channel(4);
 
-    // Primary sends first
     primary_tx.send(header_request.clone()).await?;
     let mut primary_responses = primary_client
         .publish_block_stream(ReceiverStream::new(primary_rx))
         .await?
         .into_inner();
 
-    // Give it a small head-start
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
-    // Secondary sends after
     secondary_tx.send(header_request).await?;
     let mut secondary_responses = secondary_client
         .publish_block_stream(ReceiverStream::new(secondary_rx))
         .await?
         .into_inner();
 
-    // Secondary should immediately get SkipBlock
     let secondary_response = secondary_responses
         .next()
         .await
@@ -132,7 +123,6 @@ async fn test_duplicate_block_rejected() -> Result<()> {
     let ctx = TestContext::new().await?;
     let mut client = ctx.publisher_client().await?;
 
-    // First, publish block #1 successfully
     let block_bytes = BlockBuilder::new(0).build();
     let block_proto: rock_node_protobufs::com::hedera::hapi::block::stream::Block =
         Message::decode(block_bytes.as_slice())?;
@@ -149,7 +139,6 @@ async fn test_duplicate_block_rejected() -> Result<()> {
         .publish_block_stream(ReceiverStream::new(rx1))
         .await?
         .into_inner();
-    // wait for ack
     while let Some(resp) = responses.next().await {
         let resp = resp?;
         if matches!(resp.response, Some(PublishResponse::Acknowledgement(_))) {
@@ -157,7 +146,6 @@ async fn test_duplicate_block_rejected() -> Result<()> {
         }
     }
 
-    // Second, open a new stream that sends just the header for block #1 again.
     let mut client2 = ctx.publisher_client().await?;
     let header_only = vec![block_proto.items[0].clone()];
     let (tx2, rx2) = mpsc::channel(1);
@@ -183,6 +171,49 @@ async fn test_duplicate_block_rejected() -> Result<()> {
             assert_eq!(end.status, EndCode::DuplicateBlock as i32);
         }
         other => panic!("Expected EndStream DuplicateBlock, got {:?}", other),
+    }
+
+    Ok(())
+}
+
+#[tokio::test]
+#[serial]
+async fn test_future_block_rejected() -> Result<()> {
+    let ctx = TestContext::new().await?;
+    let mut client = ctx.publisher_client().await?;
+
+    let block_bytes = BlockBuilder::new(1).build();
+    let block_proto: rock_node_protobufs::com::hedera::hapi::block::stream::Block =
+        Message::decode(block_bytes.as_slice())?;
+
+    let (tx, rx) = mpsc::channel(1);
+    tx.send(PublishStreamRequest {
+        request: Some(PublishRequest::BlockItems(BlockItemSet {
+            block_items: vec![block_proto.items[0].clone()],
+        })),
+    })
+    .await?;
+    drop(tx);
+
+    let mut response_stream = client
+        .publish_block_stream(ReceiverStream::new(rx))
+        .await?
+        .into_inner();
+
+    let response = response_stream
+        .next()
+        .await
+        .expect("Should receive a response for a future block")?;
+
+    match response.response {
+        Some(PublishResponse::EndStream(end)) => {
+            assert_eq!(
+                end.status,
+                EndCode::Behind as i32,
+                "Expected 'Behind' error code"
+            );
+        }
+        other => panic!("Expected EndStream Behind, got {:?}", other),
     }
 
     Ok(())
