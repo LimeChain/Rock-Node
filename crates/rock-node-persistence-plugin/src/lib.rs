@@ -94,12 +94,10 @@ impl Plugin for PersistencePlugin {
     fn initialize(&mut self, context: AppContext) -> CoreResult<()> {
         info!("Initializing new tiered PersistencePlugin...");
 
-        let providers = context
+        let db_provider = context
             .service_providers
             .read()
-            .map_err(|_| anyhow!("Failed to acquire read lock on service providers"))?;
-
-        let db_provider = providers
+            .unwrap()
             .get(&TypeId::of::<DatabaseManagerProvider>())
             .and_then(|any| any.downcast_ref::<DatabaseManagerProvider>().cloned())
             .ok_or_else(|| anyhow!("DatabaseManagerProvider not found!"))?;
@@ -152,7 +150,7 @@ impl Plugin for PersistencePlugin {
         let service = service::PersistenceService::new(
             hot_tier,
             cold_reader,
-            archiver.clone(), // Clone the Arc for the service
+            archiver.clone(),
             state_manager,
             metrics_arc,
         );
@@ -181,7 +179,6 @@ impl Plugin for PersistencePlugin {
             }
         });
 
-        // Store context in self before borrowing from it
         self.context = Some(context.clone());
 
         {
