@@ -121,7 +121,9 @@ async fn main() -> Result<()> {
     ));
 
     {
-        let mut providers = service_providers.write().unwrap();
+        let mut providers = service_providers.write().map_err(|e| {
+            anyhow::anyhow!("Failed to acquire write lock on service providers: {}", e)
+        })?;
         // Create the provider wrapper and store an Arc to IT.
         let db_manager_provider = DatabaseManagerProvider::new(db_manager);
         providers.insert(

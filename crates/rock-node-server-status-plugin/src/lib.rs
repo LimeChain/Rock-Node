@@ -33,7 +33,11 @@ impl Plugin for StatusPlugin {
         let context = self
             .context
             .as_ref()
-            .expect("Plugin must be initialized before starting")
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "StatusPlugin not initialized - initialize() must be called before start()"
+                )
+            })?
             .clone();
 
         // Ensure the plugin is enabled in config before starting the server
@@ -45,7 +49,10 @@ impl Plugin for StatusPlugin {
 
         // Get the BlockReader service provided by the persistence plugin
         let block_reader = {
-            let providers = context.service_providers.read().unwrap();
+            let providers = context
+                .service_providers
+                .read()
+                .map_err(|_| anyhow::anyhow!("Failed to acquire read lock on service providers"))?;
             let key = TypeId::of::<BlockReaderProvider>();
 
             if let Some(provider_any) = providers.get(&key) {
@@ -74,11 +81,20 @@ impl Plugin for StatusPlugin {
         };
         let server = BlockNodeServiceServer::new(service);
 
+        // Parse the address before spawning to handle errors properly
+        let socket_addr = listen_address.parse().map_err(|e| {
+            anyhow::anyhow!(
+                "Failed to parse gRPC listen address '{}': {}",
+                listen_address,
+                e
+            )
+        })?;
+
         tokio::spawn(async move {
-            info!("Status gRPC service listening on {}", listen_address);
+            info!("Status gRPC service listening on {}", socket_addr);
             if let Err(e) = tonic::transport::Server::builder()
                 .add_service(server)
-                .serve(listen_address.parse().unwrap())
+                .serve(socket_addr)
                 .await
             {
                 error!("Status gRPC server failed: {}", e);

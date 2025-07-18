@@ -1,0 +1,55 @@
+name: E2E Tests
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  e2e-tests:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Install dependencies (protoc)
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y protobuf-compiler
+
+      - name: Set up Rust toolchain (stable)
+        uses: dtolnay/rust-toolchain@v1
+        with:
+          toolchain: stable
+          components: "rustfmt"
+
+      - name: Cache cargo registry and build artifacts
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build Docker image for E2E tests
+        run: |
+          echo "Building Docker image for E2E tests..."
+          docker build -t rock-node-e2e:latest -f tests/e2e/Dockerfile.e2e .
+          echo "Verifying Docker image was built successfully..."
+          docker image inspect rock-node-e2e:latest
+        
+      - name: Run E2E tests
+        run: |
+          echo "Running E2E tests..."
+          cd tests/e2e
+          cargo test --locked
+        env:
+          RUST_LOG: info
+
+      - name: Cleanup Docker resources
+        if: always()
+        run: |
+          echo "Cleaning up Docker containers and images..."
+          docker container prune -f || true
+          docker image rm rock-node-e2e:latest || true

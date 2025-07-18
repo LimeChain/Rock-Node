@@ -12,7 +12,7 @@ use rock_node_core::{
     block_writer::BlockWriter,
     capability::Capability,
     database_provider::DatabaseManagerProvider,
-    error::Result as CoreResult,
+    error::{Error as CoreError, Result as CoreResult},
     events::{BlockItemsReceived, BlockPersisted, BlockVerified},
     plugin::Plugin,
     BlockReaderProvider,
@@ -20,7 +20,7 @@ use rock_node_core::{
 use rock_node_protobufs::com::hedera::hapi::block::stream::Block;
 use std::{any::TypeId, cmp::min, sync::Arc, time::Duration};
 use tokio::{sync::mpsc::Receiver, time::sleep};
-use tracing::{info, trace, warn};
+use tracing::{error, info, trace, warn};
 use uuid::Uuid;
 
 enum InboundEvent {
@@ -150,7 +150,7 @@ impl Plugin for PersistencePlugin {
         let service = service::PersistenceService::new(
             hot_tier,
             cold_reader,
-            archiver.clone(), // Clone the Arc for the service
+            archiver.clone(),
             state_manager,
             metrics_arc,
         );
@@ -179,8 +179,13 @@ impl Plugin for PersistencePlugin {
             }
         });
 
+        self.context = Some(context.clone());
+
         {
-            let mut providers = context.service_providers.write().unwrap();
+            let mut providers = context
+                .service_providers
+                .write()
+                .map_err(|_| anyhow!("Failed to acquire write lock on service providers"))?;
             let reader_provider =
                 BlockReaderProvider::new(service_arc.clone() as Arc<dyn BlockReader>);
             providers.insert(
@@ -194,15 +199,28 @@ impl Plugin for PersistencePlugin {
             );
             info!("PersistencePlugin registered providers for BlockReader and BlockWriter.");
         }
-        self.context = Some(context);
         Ok(())
     }
 
     fn start(&mut self) -> CoreResult<()> {
         info!("Starting Persistence Plugin event loop...");
-        let context = self.context.as_ref().unwrap().clone();
-        let service = self.service.as_ref().unwrap().clone();
-        let mut rx_verified = self.rx_block_verified.take().unwrap();
+        let context = self
+            .context
+            .as_ref()
+            .ok_or_else(|| {
+                CoreError::PluginInitialization("PersistencePlugin not initialized".to_string())
+            })?
+            .clone();
+        let service = self
+            .service
+            .as_ref()
+            .ok_or_else(|| {
+                CoreError::PluginInitialization("PersistenceService not initialized".to_string())
+            })?
+            .clone();
+        let mut rx_verified = self.rx_block_verified.take().ok_or_else(|| {
+            CoreError::PluginInitialization("Block verified receiver not set".to_string())
+        })?;
         let rx_items_received_opt = self.rx_block_items_received.take();
         tokio::spawn(async move {
             let use_verified_stream = context
@@ -221,9 +239,12 @@ impl Plugin for PersistencePlugin {
                         process_event(InboundEvent::Unverified(event), &context, &service).await;
                     }
                 } else {
-                    panic!(
-                        "FATAL: PersistencePlugin misconfigured. No verifier and no unverified receiver."
+                    error!(
+                        "FATAL: PersistencePlugin misconfigured. No verifier and no unverified receiver. \
+                        The persistence pipeline cannot function without an event source."
                     );
+                    // Exit the event loop - the plugin is non-functional
+                    return;
                 }
             }
         });

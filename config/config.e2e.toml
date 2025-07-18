@@ -1,0 +1,54 @@
+# This is a dedicated configuration for running End-to-End tests.
+# It enables all services and sets them to listen on localhost for
+# easy access from the test runner.
+
+[core]
+log_level = "info"
+database_path = "/app/data" # Use the path inside the container
+
+[plugins]
+
+[plugins.observability]
+enabled = true
+listen_address = "0.0.0.0:8080"
+
+[plugins.persistence_service]
+enabled = true
+cold_storage_path = "/app/data/cold"
+hot_storage_block_count = 10000
+archive_batch_size = 1000
+
+[plugins.verification_service]
+enabled = true # Keep this enabled to test the full pipeline
+
+[plugins.state_management_service]
+enabled = true
+
+[plugins.publish_service]
+enabled = true
+grpc_address = "0.0.0.0"
+grpc_port = 50051
+max_concurrent_streams = 10
+
+[plugins.subscriber_service]
+enabled = true
+grpc_address = "0.0.0.0"
+grpc_port = 50052
+max_concurrent_streams = 10
+live_stream_queue_size = 100
+max_future_block_lookahead = 100
+
+[plugins.block_access_service]
+enabled = true
+grpc_address = "0.0.0.0"
+grpc_port = 50053
+
+[plugins.server_status_service]
+enabled = true
+grpc_address = "0.0.0.0"
+grpc_port = 50054
+
+[plugins.query_service]
+enabled = true
+grpc_address = "0.0.0.0"
+grpc_port = 50055

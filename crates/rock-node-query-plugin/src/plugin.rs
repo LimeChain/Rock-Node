@@ -31,7 +31,11 @@ impl Plugin for QueryPlugin {
         let context = self
             .context
             .as_ref()
-            .expect("Plugin not initialized")
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "QueryPlugin not initialized - initialize() must be called before start()"
+                )
+            })?
             .clone();
         let config = &context.config.plugins.query_service;
 
@@ -41,7 +45,10 @@ impl Plugin for QueryPlugin {
         }
 
         let state_reader = {
-            let providers = context.service_providers.read().unwrap();
+            let providers = context
+                .service_providers
+                .read()
+                .map_err(|_| anyhow::anyhow!("Failed to acquire read lock on service providers"))?;
             providers
                 .get(&TypeId::of::<StateReaderProvider>())
                 .and_then(|p| p.downcast_ref::<StateReaderProvider>())
@@ -58,15 +65,24 @@ impl Plugin for QueryPlugin {
         let crypto_service = CryptoServiceImpl::new(state_reader);
         let server = CryptoServiceServer::new(crypto_service);
 
+        // Parse the address before spawning to handle errors properly
+        let socket_addr = listen_address.parse().map_err(|e| {
+            anyhow::anyhow!(
+                "Failed to parse gRPC listen address '{}': {}",
+                listen_address,
+                e
+            )
+        })?;
+
         info!(
             "QueryPlugin: CryptoService gRPC listening on {}",
-            listen_address
+            socket_addr
         );
 
         tokio::spawn(async move {
             if let Err(e) = tonic::transport::Server::builder()
                 .add_service(server)
-                .serve(listen_address.parse().unwrap())
+                .serve(socket_addr)
                 .await
             {
                 error!("QueryPlugin gRPC server failed: {}", e);

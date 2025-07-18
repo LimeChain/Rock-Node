@@ -33,7 +33,7 @@ impl Plugin for BlockAccessPlugin {
         let context = self
             .context
             .as_ref()
-            .expect("Plugin must be initialized before starting")
+            .ok_or_else(|| anyhow::anyhow!("BlockAccessPlugin not initialized - initialize() must be called before start()"))?
             .clone();
 
         let config = &context.config.plugins.block_access_service;
@@ -43,7 +43,10 @@ impl Plugin for BlockAccessPlugin {
         }
 
         let block_reader = {
-            let providers = context.service_providers.read().unwrap();
+            let providers = context
+                .service_providers
+                .read()
+                .map_err(|_| anyhow::anyhow!("Failed to acquire read lock on service providers"))?;
             let key = TypeId::of::<BlockReaderProvider>();
 
             if let Some(provider_any) = providers.get(&key) {
@@ -71,14 +74,23 @@ impl Plugin for BlockAccessPlugin {
         };
         let server = BlockAccessServiceServer::new(service);
 
+        // Parse the address before spawning to handle errors properly
+        let socket_addr = listen_address.parse().map_err(|e| {
+            anyhow::anyhow!(
+                "Failed to parse gRPC listen address '{}': {}",
+                listen_address,
+                e
+            )
+        })?;
+
         tokio::spawn(async move {
-            info!("BlockAccess gRPC service listening on {}", listen_address);
+            info!("BlockAccess gRPC service listening on {}", socket_addr);
             if let Err(e) = tonic::transport::Server::builder()
                 .add_service(server)
-                .serve(listen_address.parse().unwrap())
+                .serve(socket_addr)
                 .await
             {
-                error!("gRPC server failed: {}", e);
+                error!("BlockAccess gRPC server failed: {}", e);
             }
         });
 

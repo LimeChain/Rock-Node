@@ -289,7 +289,10 @@ impl MetricsRegistry {
         // Gather metrics from the registry.
         let metric_families = self.registry.gather();
         // Encode them into the buffer.
-        encoder.encode(&metric_families, &mut buffer).unwrap();
+        if let Err(e) = encoder.encode(&metric_families, &mut buffer) {
+            // Log the error but return what we have
+            eprintln!("Failed to encode metrics: {}", e);
+        }
 
         buffer
     }

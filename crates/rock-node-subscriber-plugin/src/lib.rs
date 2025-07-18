@@ -4,7 +4,7 @@ use rock_node_protobufs::org::hiero::block::api::block_stream_subscribe_service_
 use std::sync::Arc;
 use tokio::net::TcpListener;
 use tokio_stream::wrappers::TcpListenerStream;
-use tracing::info;
+use tracing::{error, info};
 
 mod error;
 mod service;
@@ -44,7 +44,11 @@ impl Plugin for SubscriberPlugin {
         let context = self
             .context
             .as_ref()
-            .expect("Plugin should be initialized before starting")
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "SubscriberPlugin not initialized - initialize() must be called before start()"
+                )
+            })?
             .clone();
 
         let config = &context.config.plugins.subscriber_service;
@@ -54,13 +58,31 @@ impl Plugin for SubscriberPlugin {
         }
         let listen_address = format!("{}:{}", config.grpc_address, config.grpc_port);
 
+        // Parse the address before spawning to handle errors properly
+        let socket_addr: std::net::SocketAddr = listen_address.parse().map_err(|e| {
+            anyhow::anyhow!(
+                "Failed to parse gRPC listen address '{}': {}",
+                listen_address,
+                e
+            )
+        })?;
+
         let service = SubscriberServiceImpl::new(context);
         let server = BlockStreamSubscribeServiceServer::new(service);
 
         tokio::spawn(async move {
-            info!("Subscriber gRPC service listening on {}", listen_address);
+            info!("Subscriber gRPC service listening on {}", socket_addr);
 
-            let listener = TcpListener::bind(&listen_address).await.unwrap();
+            let listener = match TcpListener::bind(&socket_addr).await {
+                Ok(listener) => listener,
+                Err(e) => {
+                    error!(
+                        "Failed to bind subscriber gRPC server to {}: {}",
+                        socket_addr, e
+                    );
+                    return;
+                }
+            };
             let listener_stream = TcpListenerStream::new(listener);
 
             if let Err(e) = tonic::transport::Server::builder()

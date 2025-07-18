@@ -53,7 +53,16 @@ impl StateManager {
             .context("Failed to get CF_METADATA handle")?;
         Ok(db
             .get_cf(&cf_metadata, STATE_LAST_PROCESSED_BLOCK)?
-            .map(|v| u64::from_be_bytes(v.try_into().unwrap())))
+            .map(|v| {
+                let bytes: [u8; 8] = v
+                    .try_into()
+                    .map_err(|v: Vec<u8>| {
+                        anyhow!("Invalid state data: expected 8 bytes, got {}", v.len())
+                    })
+                    .ok()?;
+                Some(u64::from_be_bytes(bytes))
+            })
+            .flatten())
     }
 
     /// Processes a block coming from the live event stream (and its cache entry).

@@ -1,5 +1,5 @@
 use crate::state_manager::StateManager;
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Context, Result};
 use rock_node_core::{
     database_provider::DatabaseManagerProvider, service_provider::BlockReaderProvider,
     state_reader::StateReaderProvider, AppContext, Plugin,
@@ -41,7 +41,10 @@ impl Plugin for StateManagementPlugin {
 impl StateManagementPlugin {
     fn init_internal(&mut self, context: AppContext) -> Result<()> {
         info!("Initializing State Management Plugin...");
-        let providers = context.service_providers.read().unwrap();
+        let providers = context
+            .service_providers
+            .read()
+            .map_err(|_| anyhow!("Failed to acquire read lock on service providers"))?;
 
         let db_provider = providers
             .get(&TypeId::of::<DatabaseManagerProvider>())
@@ -50,15 +53,13 @@ impl StateManagementPlugin {
             .context("DatabaseManagerProvider not found")?;
 
         // Fetch the BlockReaderProvider to use for catch-up logic.
-
-        let block_reader = context
-            .service_providers
-            .read()
-            .unwrap()
+        let block_reader = providers
             .get(&TypeId::of::<BlockReaderProvider>())
             .and_then(|p| p.downcast_ref::<BlockReaderProvider>())
             .map(|p_concrete| p_concrete.get_service())
-            .expect("BlockReaderProvider not found in service providers!");
+            .ok_or_else(|| {
+                anyhow!("BlockReaderProvider not found - persistence plugin may not be initialized")
+            })?;
 
         let db_manager = db_provider.get_manager();
         let cache = context.block_data_cache.clone();
@@ -68,10 +69,14 @@ impl StateManagementPlugin {
 
         let reader_provider = StateReaderProvider::new(state_manager);
         drop(providers); // Drop read lock
-        context.service_providers.write().unwrap().insert(
-            TypeId::of::<StateReaderProvider>(),
-            Arc::new(reader_provider),
-        );
+        context
+            .service_providers
+            .write()
+            .map_err(|_| anyhow!("Failed to acquire write lock on service providers"))?
+            .insert(
+                TypeId::of::<StateReaderProvider>(),
+                Arc::new(reader_provider),
+            );
 
         info!("StateReaderProvider registered successfully.");
         self.app_context = Some(context);
