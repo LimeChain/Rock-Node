@@ -1,11 +1,46 @@
 use anyhow::Result;
+use once_cell::sync::Lazy;
+use rock_node_protobufs::org::hiero::block::api::block_stream_publish_service_client::BlockStreamPublishServiceClient;
 use std::path::PathBuf;
+use std::process::Command;
 use testcontainers::runners::AsyncRunner;
 use testcontainers::ContainerAsync;
 use testcontainers::{
     core::{IntoContainerPort, WaitFor},
     CopyDataSource, GenericImage, ImageExt,
 };
+use tonic::transport::Channel;
+
+static E2E_IMAGE_BUILT: Lazy<()> = Lazy::new(|| {
+    // Build the rock-node-e2e image once for the whole test binary.
+    let inspect = Command::new("docker")
+        .args(["image", "inspect", "rock-node-e2e:latest"])
+        .output()
+        .expect("failed to execute docker image inspect");
+
+    if inspect.status.success() {
+        println!("Docker image 'rock-node-e2e:latest' exists, skipping build.");
+        return;
+    }
+
+    println!("Building Docker image for E2E tests (one-time)…");
+    let status = Command::new("docker")
+        .args([
+            "build",
+            "-t",
+            "rock-node-e2e:latest",
+            "-f",
+            "Dockerfile.e2e",
+            "../..",
+        ])
+        .status()
+        .expect("failed to run docker build");
+
+    assert!(status.success(), "Failed to build rock-node-e2e image");
+    println!("Docker image built successfully.");
+});
+
+pub mod block_builder;
 
 pub struct TestContext {
     pub container: ContainerAsync<GenericImage>,
@@ -28,6 +63,9 @@ impl TestContext {
     /// Returns an error if the configuration file cannot be read, the container
     /// fails to start, or any required Docker operation fails.
     pub async fn new() -> Result<TestContext> {
+        // Ensure the image is built exactly once.
+        Lazy::force(&E2E_IMAGE_BUILT);
+
         let config_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../../config/config.e2e.toml")
             .canonicalize()?;
@@ -44,10 +82,9 @@ impl TestContext {
             .as_millis();
         let container_name = format!("rock-node-test-{}-{}", thread_id_clean, timestamp);
 
-        println!("🚀 Starting isolated container: {}", container_name);
-
         let container = GenericImage::new("rock-node-e2e", "latest")
             .with_exposed_port(8080.tcp())
+            .with_exposed_port(50051.tcp())
             .with_wait_for(WaitFor::message_on_stdout(
                 "Rock Node running successfully.",
             ))
@@ -63,7 +100,6 @@ impl TestContext {
             .start()
             .await?;
 
-        println!("✅ Container started successfully: {}", container_name);
         Ok(TestContext { container })
     }
 
@@ -71,5 +107,21 @@ impl TestContext {
     pub async fn http_port(&self) -> Result<u16> {
         let port = self.container.get_host_port_ipv4(8080).await?;
         Ok(port)
+    }
+
+    /// Returns a gRPC client for the `BlockStreamPublishService` running inside the
+    /// Rock-Node container.
+    ///
+    /// The port (50051) is defined in `config.e2e.toml` and mapped to a free host
+    /// port by `testcontainers`.  We look up that mapping and create a tonic
+    /// channel to it.
+    pub async fn publisher_client(&self) -> Result<BlockStreamPublishServiceClient<Channel>> {
+        // Resolve the mapped host port for container port 50051.
+        let port = self.container.get_host_port_ipv4(50051).await?;
+        let endpoint = format!("http://localhost:{}", port);
+
+        let channel = Channel::from_shared(endpoint)?.connect().await?;
+
+        Ok(BlockStreamPublishServiceClient::new(channel))
     }
 }

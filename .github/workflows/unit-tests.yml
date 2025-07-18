@@ -1,4 +1,4 @@
-name: Rock Node
+name: Unit Tests
 
 on:
   push:
