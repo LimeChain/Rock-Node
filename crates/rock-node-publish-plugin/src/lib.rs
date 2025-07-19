@@ -7,7 +7,7 @@ use state::SharedState;
 use std::any::TypeId;
 use std::sync::Arc;
 use std::time::Duration;
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 
 mod service;
 mod session_manager;
@@ -73,19 +73,19 @@ impl Plugin for PublishPlugin {
                         Ok(Some(num)) => num as i64,
                         Ok(None) => -1, // Use -1 as the sentinel for "no blocks" in our state
                         Err(e) => {
-                            error!("Could not get latest persisted block on startup: {}. Defaulting to -1.", e);
+                            warn!("Could not get latest persisted block on startup: {}. Defaulting to -1.", e);
                             -1
                         }
                     };
 
                     shared_state.set_latest_persisted_block(block_number_for_state);
 
-                    info!(
+                    debug!(
                         "Successfully retrieved BlockReader. Latest persisted block is: {}",
                         block_number_for_state
                     );
                 } else {
-                    warn!("Found BlockReaderProvider key, but failed to downcast. This indicates a critical type mismatch bug.");
+                    error!("Found BlockReaderProvider key, but failed to downcast. This indicates a critical type mismatch bug.");
                 }
             } else {
                 warn!("No BlockReaderProvider handle found. Is the persistence plugin configured and running correctly?");

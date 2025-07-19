@@ -20,7 +20,7 @@ use rock_node_core::{
 use rock_node_protobufs::com::hedera::hapi::block::stream::Block;
 use std::{any::TypeId, cmp::min, sync::Arc, time::Duration};
 use tokio::{sync::mpsc::Receiver, time::sleep};
-use tracing::{error, info, trace, warn};
+use tracing::{debug, error, info, trace, warn};
 use uuid::Uuid;
 
 enum InboundEvent {
@@ -111,7 +111,7 @@ impl Plugin for PersistencePlugin {
         let hot_tier = Arc::new(hot_tier::HotTier::new(db_handle.clone()));
         let cold_writer = Arc::new(cold_storage::writer::ColdWriter::new(config_arc.clone()));
 
-        info!("Building cold storage index...");
+        debug!("Building cold storage index...");
         let cold_reader = Arc::new(cold_storage::reader::ColdReader::new(
             config_arc.clone(),
             metrics_arc.clone(),
@@ -119,7 +119,7 @@ impl Plugin for PersistencePlugin {
         cold_reader.scan_and_build_index()?;
 
         if state_manager.get_true_earliest_persisted()?.is_none() {
-            info!("Determining true earliest block number for the first time...");
+            debug!("Determining true earliest block number for the first time...");
             let earliest_cold = cold_reader.get_earliest_indexed_block()?;
             let earliest_hot = hot_tier.get_earliest_block_number()?;
 
@@ -197,7 +197,7 @@ impl Plugin for PersistencePlugin {
                 TypeId::of::<BlockWriterProvider>(),
                 Arc::new(writer_provider),
             );
-            info!("PersistencePlugin registered providers for BlockReader and BlockWriter.");
+            debug!("PersistencePlugin registered providers for BlockReader and BlockWriter.");
         }
         Ok(())
     }
@@ -228,12 +228,12 @@ impl Plugin for PersistencePlugin {
                 .is_registered(Capability::ProvidesVerifiedBlocks)
                 .await;
             if use_verified_stream {
-                info!("Subscribing to 'BlockVerified' events.");
+                debug!("Subscribing to 'BlockVerified' events.");
                 while let Some(event) = rx_verified.recv().await {
                     process_event(InboundEvent::Verified(event), &context, &service).await;
                 }
             } else {
-                info!("Subscribing to 'BlockItemsReceived' events.");
+                debug!("Subscribing to 'BlockItemsReceived' events.");
                 if let Some(mut rx_items) = rx_items_received_opt {
                     while let Some(event) = rx_items.recv().await {
                         process_event(InboundEvent::Unverified(event), &context, &service).await;
@@ -259,7 +259,7 @@ async fn process_event(event: InboundEvent, context: &AppContext, service: &Pers
         match Block::decode(data.contents.as_slice()) {
             Ok(block_proto) => {
                 if let Err(e) = service.write_block(&block_proto) {
-                    warn!("[FATAL] Failed to persist block #{}: {}", block_number, e);
+                    error!("Failed to persist block #{}: {}", block_number, e);
                 } else {
                     trace!("Successfully persisted block #{}.", block_number);
                     let persisted_event = BlockPersisted {
