@@ -94,6 +94,8 @@ impl TestContext {
             .with_exposed_port(8080.tcp())
             .with_exposed_port(50051.tcp())
             .with_exposed_port(50052.tcp())
+            .with_exposed_port(50053.tcp())
+            .with_exposed_port(50054.tcp())
             .with_wait_for(WaitFor::message_on_stdout(
                 "Rock Node running successfully.",
             ))
@@ -134,7 +136,6 @@ impl TestContext {
         Ok(BlockStreamPublishServiceClient::new(channel))
     }
 
-    // SECOND_EDIT: add subscriber_client helper
     /// Returns a gRPC client for the `BlockStreamSubscribeService` running inside the
     /// Rock-Node container.
     pub async fn subscriber_client(&self) -> Result<BlockStreamSubscribeServiceClient<Channel>> {
@@ -142,6 +143,24 @@ impl TestContext {
         let endpoint = format!("http://localhost:{}", port);
         let channel = Channel::from_shared(endpoint)?.connect().await?;
         Ok(BlockStreamSubscribeServiceClient::new(channel))
+    }
+
+    /// Returns a gRPC client for the `BlockNodeService` (Server Status) running inside the
+    /// Rock-Node container.
+    pub async fn status_client(&self) -> Result<rock_node_protobufs::org::hiero::block::api::block_node_service_client::BlockNodeServiceClient<Channel>>{
+        let port = self.container.get_host_port_ipv4(50054).await?;
+        let endpoint = format!("http://localhost:{}", port);
+        let channel = Channel::from_shared(endpoint)?.connect().await?;
+        Ok(rock_node_protobufs::org::hiero::block::api::block_node_service_client::BlockNodeServiceClient::new(channel))
+    }
+
+    /// Returns a gRPC client for the `BlockAccessService` running inside the
+    /// Rock-Node container.
+    pub async fn access_client(&self) -> Result<rock_node_protobufs::org::hiero::block::api::block_access_service_client::BlockAccessServiceClient<Channel>>{
+        let port = self.container.get_host_port_ipv4(50053).await?;
+        let endpoint = format!("http://localhost:{}", port);
+        let channel = Channel::from_shared(endpoint)?.connect().await?;
+        Ok(rock_node_protobufs::org::hiero::block::api::block_access_service_client::BlockAccessServiceClient::new(channel))
     }
 }
 
