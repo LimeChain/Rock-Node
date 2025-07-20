@@ -15,7 +15,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 use tonic::Status;
-use tracing::{info, warn};
+use tracing::{debug, error, info, trace, warn};
 use uuid::Uuid;
 
 pub struct SessionManager {
@@ -76,7 +76,7 @@ impl SessionManager {
                 }
             }
             PublishRequestType::EndStream(_) => {
-                info!(session_id = %self.id, "Publisher sent EndStream. Closing connection.");
+                debug!(session_id = %self.id, "Publisher sent EndStream. Closing connection.");
                 return true;
             }
         }
@@ -84,7 +84,7 @@ impl SessionManager {
     }
 
     fn reset_for_next_block(&mut self) {
-        info!(session_id = %self.id, block_number = self.current_block_number, "Processed block. Resetting session for next block.");
+        debug!(session_id = %self.id, block_number = self.current_block_number, "Processed block. Resetting session for next block.");
         self.item_buffer.clear();
         self.state = SessionState::New;
         self.current_block_number = 0;
@@ -98,7 +98,8 @@ impl SessionManager {
         let latest_persisted = self.shared_state.get_latest_persisted_block();
 
         if block_number <= latest_persisted {
-            warn!(
+            // TODO: remove info and replace with debug
+            info!(
                 session_id = %self.id,
                 received_block = block_number,
                 latest_persisted_block = latest_persisted,
@@ -123,7 +124,8 @@ impl SessionManager {
         }
 
         if block_number > latest_persisted + 1 {
-            warn!(
+            // TODO: remove info and replace with debug
+            info!(
                 session_id = %self.id,
                 received_block = block_number,
                 expected_block = latest_persisted + 1,
@@ -159,6 +161,7 @@ impl SessionManager {
                 .publish_blocks_received_total
                 .with_label_values(&["primary"])
                 .inc();
+            // TODO: remove info and replace with debug
             info!(session_id = %self.id, block_number, "Session is PRIMARY for this block.");
         } else {
             self.state = SessionState::Behind;
@@ -167,6 +170,7 @@ impl SessionManager {
                 .publish_blocks_received_total
                 .with_label_values(&["behind"])
                 .inc();
+            // TODO: remove info and replace with debug
             info!(session_id = %self.id, block_number, "Another session is primary. Sending SkipBlock.");
             self.send_skip_block().await;
         }
@@ -176,6 +180,7 @@ impl SessionManager {
 
     /// Returns `true` on success, `false` on failure.
     async fn publish_complete_block(&mut self) -> bool {
+        // TODO: remove info and replace with debug
         info!(session_id = %self.id, block_number = self.current_block_number, "Block is complete. Publishing to core.");
 
         let block_proto = Block {
@@ -206,7 +211,7 @@ impl SessionManager {
             .await
             .is_err()
         {
-            warn!(session_id = %self.id, "Failed to publish BlockItemsReceived event to core channel.");
+            error!(session_id = %self.id, "Failed to publish BlockItemsReceived event to core channel.");
             return false;
         }
 
@@ -226,7 +231,7 @@ impl SessionManager {
         let mut rx_persisted = self.context.tx_block_persisted.subscribe();
         let block_to_await = self.current_block_number;
 
-        info!(session_id = %self.id, block = block_to_await, "Awaiting persistence ACK...");
+        trace!(session_id = %self.id, block = block_to_await, "Awaiting persistence ACK...");
 
         let start_time = Instant::now();
 
@@ -245,6 +250,7 @@ impl SessionManager {
 
         match timeout_result {
             Ok(Some(_)) => {
+                // TODO: remove info and replace with debug
                 info!(session_id = %self.id, block = block_to_await, "Block persisted. Sending ACK and updating shared state.");
 
                 // --- Metrics Instrumentation ---
@@ -328,7 +334,7 @@ impl SessionManager {
 
     async fn send_response(&self, response: PublishStreamResponse) -> Result<(), ()> {
         if self.response_tx.send(Ok(response)).await.is_err() {
-            warn!(session_id = %self.id, "Failed to send response to client. Connection may be closed.");
+            debug!(session_id = %self.id, "Failed to send response to client. Connection may be closed.");
             return Err(());
         }
         Ok(())
