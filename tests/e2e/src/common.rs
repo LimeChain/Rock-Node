@@ -97,7 +97,7 @@ impl TestContext {
             .with_exposed_port(50053.tcp())
             .with_exposed_port(50054.tcp())
             .with_wait_for(WaitFor::message_on_stdout(
-                "Rock Node running successfully.",
+                "Rock Node running successfully!",
             ))
             .with_copy_to(
                 "/config/config.toml",
