@@ -18,7 +18,8 @@ pub struct Archiver {
     pub state: Arc<StateManager>,
     pub cold_reader: Arc<ColdReader>,
     pub metrics: Arc<MetricsRegistry>,
-    pub trigger: Notify,
+    pub trigger: Arc<Notify>,
+    pub shutdown_notify: Arc<Notify>,
 }
 
 impl Archiver {
@@ -29,6 +30,7 @@ impl Archiver {
         state: Arc<StateManager>,
         cold_reader: Arc<ColdReader>,
         metrics: Arc<MetricsRegistry>,
+        shutdown_notify: Arc<Notify>,
     ) -> Self {
         Self {
             config,
@@ -37,7 +39,8 @@ impl Archiver {
             state,
             cold_reader,
             metrics,
-            trigger: Notify::new(),
+            trigger: Arc::new(Notify::new()),
+            shutdown_notify,
         }
     }
 

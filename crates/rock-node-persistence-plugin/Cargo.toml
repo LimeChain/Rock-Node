@@ -41,3 +41,6 @@ memmap2 = "0.9"
 # For parsing cold storage filenames
 lazy_static = "1.4.0"
 regex = "1.10"
+
+# Add async-trait for async methods in traits
+async-trait = "0.1"
