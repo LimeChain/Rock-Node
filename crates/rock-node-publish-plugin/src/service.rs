@@ -28,16 +28,22 @@ impl BlockStreamPublishService for PublishServiceImpl {
         let mut inbound_stream = request.into_inner();
         let (response_tx, response_rx) = mpsc::channel(16);
 
-        // --- Metrics Instrumentation ---
-        // Increment active sessions gauge when a new stream is established.
         self.context.metrics.active_publish_sessions.inc();
         let metrics_clone = self.context.metrics.clone();
-        // ---
 
-        let mut session_manager =
-            SessionManager::new(self.context.clone(), self.shared_state.clone(), response_tx);
+        let mut session_manager = SessionManager::new(
+            self.context.clone(),
+            self.shared_state.clone(),
+            response_tx.clone(),
+        );
         let session_id = session_manager.id;
         info!(%session_id, "New publisher connection. Spawning handler task.");
+
+        // Register the session's response sender for shutdown notifications
+        self.shared_state
+            .active_sessions
+            .insert(session_id, response_tx);
+        let shared_state_clone = self.shared_state.clone();
 
         tokio::spawn(async move {
             while let Some(request_result) = inbound_stream.message().await.ok().flatten() {
@@ -48,10 +54,10 @@ impl BlockStreamPublishService for PublishServiceImpl {
                 }
             }
             info!(%session_id, "Session handler task finished.");
-            // --- Metrics Instrumentation ---
-            // Decrement gauge when the stream handler task concludes.
+
+            // Unregister the session upon completion
+            shared_state_clone.active_sessions.remove(&session_id);
             metrics_clone.active_publish_sessions.dec();
-            // ---
         });
 
         Ok(Response::new(ReceiverStream::new(response_rx)))

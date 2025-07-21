@@ -1,5 +1,8 @@
 use dashmap::DashMap;
+use rock_node_protobufs::org::hiero::block::api::PublishStreamResponse;
 use std::sync::atomic::{AtomicI64, Ordering};
+use tokio::sync::mpsc;
+use tonic::Status;
 use uuid::Uuid;
 
 /// The state of a single publisher session in the block race.
@@ -20,6 +23,8 @@ pub struct SharedState {
     pub block_winners: DashMap<u64, Uuid>,
     /// The latest block number that has been confirmed as persisted by the system.
     pub latest_persisted_block: AtomicI64,
+    /// Maps a session ID to its response channel sender to broadcast messages.
+    pub active_sessions: DashMap<Uuid, mpsc::Sender<Result<PublishStreamResponse, Status>>>,
 }
 
 impl SharedState {
@@ -27,6 +32,7 @@ impl SharedState {
         Self {
             block_winners: DashMap::new(),
             latest_persisted_block: AtomicI64::new(-1),
+            active_sessions: DashMap::new(),
         }
     }
 

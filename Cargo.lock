@@ -2103,6 +2103,7 @@ name = "rock-node-publish-plugin"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "dashmap",
  "futures-util",
  "prost",
@@ -2162,6 +2163,8 @@ name = "rock-node-subscriber-plugin"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-trait",
+ "dashmap",
  "futures-util",
  "prometheus",
  "prost",
