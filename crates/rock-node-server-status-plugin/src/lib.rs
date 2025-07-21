@@ -1,14 +1,24 @@
-mod service;
-
+use async_trait::async_trait;
 use rock_node_core::{app_context::AppContext, error::Result, plugin::Plugin, BlockReaderProvider};
 use rock_node_protobufs::org::hiero::block::api::block_node_service_server::BlockNodeServiceServer;
 use service::StatusServiceImpl;
-use std::any::TypeId;
+use std::{
+    any::TypeId,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+};
+use tokio::sync::watch;
 use tracing::{error, info, warn};
+
+mod service;
 
 #[derive(Debug, Default)]
 pub struct StatusPlugin {
     context: Option<AppContext>,
+    running: Arc<AtomicBool>,
+    shutdown_tx: Option<watch::Sender<()>>,
 }
 
 impl StatusPlugin {
@@ -17,6 +27,7 @@ impl StatusPlugin {
     }
 }
 
+#[async_trait]
 impl Plugin for StatusPlugin {
     fn name(&self) -> &'static str {
         "status-plugin"
@@ -25,6 +36,7 @@ impl Plugin for StatusPlugin {
     fn initialize(&mut self, context: AppContext) -> Result<()> {
         info!("StatusPlugin initialized.");
         self.context = Some(context);
+        self.running = Arc::new(AtomicBool::new(false));
         Ok(())
     }
 
@@ -33,55 +45,35 @@ impl Plugin for StatusPlugin {
         let context = self
             .context
             .as_ref()
-            .ok_or_else(|| {
-                anyhow::anyhow!(
-                    "StatusPlugin not initialized - initialize() must be called before start()"
-                )
-            })?
+            .ok_or_else(|| anyhow::anyhow!("StatusPlugin not initialized"))?
             .clone();
 
-        // Ensure the plugin is enabled in config before starting the server
         let config = &context.config.plugins.server_status_service;
         if !config.enabled {
             info!("Server StatusPlugin is disabled. Skipping start.");
             return Ok(());
         }
 
-        // Get the BlockReader service provided by the persistence plugin
         let block_reader = {
             let providers = context
                 .service_providers
                 .read()
                 .map_err(|_| anyhow::anyhow!("Failed to acquire read lock on service providers"))?;
             let key = TypeId::of::<BlockReaderProvider>();
-
             if let Some(provider_any) = providers.get(&key) {
-                if let Some(provider_handle) = provider_any.downcast_ref::<BlockReaderProvider>() {
-                    info!("Successfully retrieved BlockReaderProvider handle.");
-                    provider_handle.get_service()
-                } else {
-                    return Err(
-                        anyhow::anyhow!("FATAL: Failed to downcast BlockReaderProvider.").into(),
-                    );
-                }
+                provider_any
+                    .downcast_ref::<BlockReaderProvider>()
+                    .map(|p| p.get_service())
+                    .ok_or_else(|| {
+                        anyhow::anyhow!("FATAL: Failed to downcast BlockReaderProvider.")
+                    })
             } else {
-                warn!(
-                    "BlockReaderProvider not found. The service will not be able to serve blocks."
-                );
+                warn!("BlockReaderProvider not found. Status service will not be able to serve blocks.");
                 return Ok(());
-            }
+            }?
         };
 
         let listen_address = format!("{}:{}", config.grpc_address, config.grpc_port);
-
-        // Pass the metrics registry to the service implementation
-        let service = StatusServiceImpl {
-            block_reader,
-            metrics: context.metrics.clone(),
-        };
-        let server = BlockNodeServiceServer::new(service);
-
-        // Parse the address before spawning to handle errors properly
         let socket_addr = listen_address.parse().map_err(|e| {
             anyhow::anyhow!(
                 "Failed to parse gRPC listen address '{}': {}",
@@ -90,17 +82,47 @@ impl Plugin for StatusPlugin {
             )
         })?;
 
+        let service = StatusServiceImpl {
+            block_reader,
+            metrics: context.metrics.clone(),
+        };
+        let server = BlockNodeServiceServer::new(service);
+
+        let (shutdown_tx, mut shutdown_rx) = watch::channel(());
+        self.shutdown_tx = Some(shutdown_tx);
+        let running_clone = self.running.clone();
+
+        self.running.store(true, Ordering::SeqCst);
         tokio::spawn(async move {
             info!("Status gRPC service listening on {}", socket_addr);
-            if let Err(e) = tonic::transport::Server::builder()
+
+            let server_future = tonic::transport::Server::builder()
                 .add_service(server)
-                .serve(socket_addr)
-                .await
-            {
+                .serve_with_shutdown(socket_addr, async move {
+                    shutdown_rx.changed().await.ok();
+                    info!("Gracefully shutting down Status gRPC server...");
+                });
+
+            if let Err(e) = server_future.await {
                 error!("Status gRPC server failed: {}", e);
             }
+            running_clone.store(false, Ordering::SeqCst);
         });
 
+        Ok(())
+    }
+
+    fn is_running(&self) -> bool {
+        self.running.load(Ordering::SeqCst)
+    }
+
+    async fn stop(&mut self) -> Result<()> {
+        if let Some(shutdown_tx) = self.shutdown_tx.take() {
+            if shutdown_tx.send(()).is_err() {
+                error!("Failed to send shutdown signal to Status gRPC server: receiver dropped.");
+            }
+        }
+        self.running.store(false, Ordering::SeqCst);
         Ok(())
     }
 }

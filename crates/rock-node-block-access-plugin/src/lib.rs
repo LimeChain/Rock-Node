@@ -1,14 +1,24 @@
+use async_trait::async_trait;
 use rock_node_core::{app_context::AppContext, error::Result, plugin::Plugin, BlockReaderProvider};
 use rock_node_protobufs::org::hiero::block::api::block_access_service_server::BlockAccessServiceServer;
-use std::any::TypeId;
+use service::BlockAccessServiceImpl;
+use std::{
+    any::TypeId,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+};
+use tokio::sync::watch;
 use tracing::{error, info, warn};
 
 mod service;
-use service::BlockAccessServiceImpl;
 
 #[derive(Debug, Default)]
 pub struct BlockAccessPlugin {
     context: Option<AppContext>,
+    running: Arc<AtomicBool>,
+    shutdown_tx: Option<watch::Sender<()>>,
 }
 
 impl BlockAccessPlugin {
@@ -17,6 +27,7 @@ impl BlockAccessPlugin {
     }
 }
 
+#[async_trait]
 impl Plugin for BlockAccessPlugin {
     fn name(&self) -> &'static str {
         "block-access-plugin"
@@ -25,6 +36,7 @@ impl Plugin for BlockAccessPlugin {
     fn initialize(&mut self, context: AppContext) -> Result<()> {
         info!("BlockAccessPlugin initialized.");
         self.context = Some(context);
+        self.running = Arc::new(AtomicBool::new(false));
         Ok(())
     }
 
@@ -83,17 +95,47 @@ impl Plugin for BlockAccessPlugin {
             )
         })?;
 
+        // Create a channel for shutdown signaling
+        let (shutdown_tx, mut shutdown_rx) = watch::channel(());
+        self.shutdown_tx = Some(shutdown_tx);
+        let running_clone = self.running.clone();
+
+        self.running.store(true, Ordering::SeqCst);
         tokio::spawn(async move {
             info!("BlockAccess gRPC service listening on {}", socket_addr);
-            if let Err(e) = tonic::transport::Server::builder()
+
+            let server_future = tonic::transport::Server::builder()
                 .add_service(server)
-                .serve(socket_addr)
-                .await
-            {
+                .serve_with_shutdown(socket_addr, async move {
+                    shutdown_rx.changed().await.ok();
+                    info!("Gracefully shutting down BlockAccess gRPC server...");
+                });
+
+            if let Err(e) = server_future.await {
                 error!("BlockAccess gRPC server failed: {}", e);
             }
+
+            // Server has shut down, update the running status
+            running_clone.store(false, Ordering::SeqCst);
         });
 
+        Ok(())
+    }
+
+    fn is_running(&self) -> bool {
+        self.running.load(Ordering::SeqCst)
+    }
+
+    async fn stop(&mut self) -> Result<()> {
+        if let Some(shutdown_tx) = self.shutdown_tx.take() {
+            // Sending on the channel will trigger the shutdown future in the server.
+            if shutdown_tx.send(()).is_err() {
+                error!(
+                    "Failed to send shutdown signal to BlockAccess gRPC server: receiver dropped."
+                );
+            }
+        }
+        self.running.store(false, Ordering::SeqCst);
         Ok(())
     }
 }

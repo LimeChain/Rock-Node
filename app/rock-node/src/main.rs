@@ -19,9 +19,10 @@ use std::{
     collections::HashMap,
     path::PathBuf,
     sync::{Arc, RwLock},
+    time::Duration,
 };
 use tokio::sync::{broadcast, mpsc};
-use tracing::info;
+use tracing::{error, info};
 
 fn print_section(name: &str, section: &toml::Value, depth: usize) {
     let dash_char = if name == "plugins" && depth == 0 {
@@ -72,6 +73,30 @@ struct Args {
     /// Path to the TOML configuration file.
     #[arg(long, default_value = "config/config.toml")]
     config_path: PathBuf,
+}
+
+async fn shutdown_signal() {
+    let ctrl_c = async {
+        tokio::signal::ctrl_c()
+            .await
+            .expect("failed to install Ctrl+C handler");
+    };
+
+    #[cfg(unix)]
+    let terminate = async {
+        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+            .expect("failed to install signal handler")
+            .recv()
+            .await;
+    };
+
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+
+    tokio::select! {
+        _ = ctrl_c => {info!("Received Ctrl+C, initiating shutdown...");},
+        _ = terminate => {info!("Received SIGTERM, initiating shutdown...");},
+    }
 }
 
 #[tokio::main]
@@ -195,9 +220,26 @@ async fn main() -> Result<()> {
         plugin.start()?;
     }
     info!("{}", "-".repeat(16));
-    info!("Rock Node running successfully. Press Ctrl+C to shut down.");
-    tokio::signal::ctrl_c().await?;
-    info!("Shutdown signal received. Exiting.");
+    info!("Rock Node running successfully!");
+
+    // --- Wait for Shutdown Signal ---
+    shutdown_signal().await;
+
+    // --- Step 8: Graceful Shutdown ---
+    info!("Shutdown signal received. Stopping plugins...");
+    // Iterate in reverse order of startup to handle dependencies correctly.
+    for plugin in plugins.iter_mut().rev() {
+        if plugin.is_running() {
+            info!("Stopping plugin '{}'...", plugin.name());
+            if let Err(e) = plugin.stop().await {
+                error!("Error stopping plugin '{}': {}", plugin.name(), e);
+            }
+        }
+    }
+
+    // A small delay to allow background tasks to finish logging, etc.
+    tokio::time::sleep(Duration::from_millis(250)).await;
+    info!("All plugins stopped. Exiting.");
 
     Ok(())
 }

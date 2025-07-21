@@ -1,3 +1,4 @@
+use async_trait::async_trait;
 use axum::{
     body::Body,
     extract::State,
@@ -7,12 +8,18 @@ use axum::{
     Router,
 };
 use rock_node_core::{app_context::AppContext, error::Result, plugin::Plugin, MetricsRegistry};
-use std::sync::Arc;
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
+use tokio::sync::watch;
 use tracing::{error, info};
 
 #[derive(Debug, Default)]
 pub struct ObservabilityPlugin {
     context: Option<AppContext>,
+    running: Arc<AtomicBool>,
+    shutdown_tx: Option<watch::Sender<()>>,
 }
 
 impl ObservabilityPlugin {
@@ -22,7 +29,6 @@ impl ObservabilityPlugin {
 }
 
 /// Axum handler that serves the Prometheus metrics.
-/// It takes the shared `MetricsRegistry` from the application state.
 async fn get_metrics(State(metrics): State<Arc<MetricsRegistry>>) -> impl IntoResponse {
     match Response::builder()
         .status(200)
@@ -45,6 +51,7 @@ async fn health_check() -> impl IntoResponse {
     (StatusCode::OK, "OK")
 }
 
+#[async_trait]
 impl Plugin for ObservabilityPlugin {
     fn name(&self) -> &'static str {
         "observability-plugin"
@@ -53,13 +60,15 @@ impl Plugin for ObservabilityPlugin {
     fn initialize(&mut self, context: AppContext) -> Result<()> {
         info!("ObservabilityPlugin initialized.");
         self.context = Some(context);
+        self.running = Arc::new(AtomicBool::new(false));
         Ok(())
     }
 
     fn start(&mut self) -> Result<()> {
-        let context = self.context
+        let context = self
+            .context
             .as_ref()
-            .ok_or_else(|| anyhow::anyhow!("ObservabilityPlugin not initialized - initialize() must be called before start()"))?
+            .ok_or_else(|| anyhow::anyhow!("ObservabilityPlugin not initialized"))?
             .clone();
         let config = &context.config.plugins.observability;
         if !config.enabled {
@@ -75,9 +84,7 @@ impl Plugin for ObservabilityPlugin {
             .with_state(context.metrics);
 
         let listen_address = config.listen_address.clone();
-
-        // Validate the address format before spawning
-        let _socket_addr: std::net::SocketAddr = listen_address.parse().map_err(|e| {
+        let socket_addr: std::net::SocketAddr = listen_address.parse().map_err(|e| {
             anyhow::anyhow!(
                 "Invalid observability listen address '{}': {}",
                 listen_address,
@@ -85,8 +92,13 @@ impl Plugin for ObservabilityPlugin {
             )
         })?;
 
+        let (shutdown_tx, mut shutdown_rx) = watch::channel(());
+        self.shutdown_tx = Some(shutdown_tx);
+        let running_clone = self.running.clone();
+
+        self.running.store(true, Ordering::SeqCst);
         tokio::spawn(async move {
-            let listener = match tokio::net::TcpListener::bind(&listen_address).await {
+            let listener = match tokio::net::TcpListener::bind(&socket_addr).await {
                 Ok(listener) => {
                     info!(
                         "Observability server listening on http://{}",
@@ -99,15 +111,37 @@ impl Plugin for ObservabilityPlugin {
                         "Failed to bind observability server to {}: {}",
                         listen_address, e
                     );
+                    running_clone.store(false, Ordering::SeqCst);
                     return;
                 }
             };
 
-            if let Err(e) = axum::serve(listener, app.into_make_service()).await {
+            let server_future = axum::serve(listener, app.into_make_service())
+                .with_graceful_shutdown(async move {
+                    shutdown_rx.changed().await.ok();
+                    info!("Gracefully shutting down Observability server...");
+                });
+
+            if let Err(e) = server_future.await {
                 error!("Observability server failed: {}", e);
             }
+            running_clone.store(false, Ordering::SeqCst);
         });
 
+        Ok(())
+    }
+
+    fn is_running(&self) -> bool {
+        self.running.load(Ordering::SeqCst)
+    }
+
+    async fn stop(&mut self) -> Result<()> {
+        if let Some(shutdown_tx) = self.shutdown_tx.take() {
+            if shutdown_tx.send(()).is_err() {
+                error!("Failed to send shutdown signal to Observability server: receiver dropped.");
+            }
+        }
+        self.running.store(false, Ordering::SeqCst);
         Ok(())
     }
 }
