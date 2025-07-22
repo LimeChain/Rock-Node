@@ -1,8 +1,7 @@
 use crate::error::SubscriberError;
 use prost::Message;
-use rock_node_core::{
-    app_context::AppContext, block_reader::BlockReader, service_provider::BlockReaderProvider,
-};
+use rock_node_core::BlockReaderProvider;
+use rock_node_core::{app_context::AppContext, block_reader::BlockReader};
 use rock_node_protobufs::com::hedera::hapi::block::stream::Block;
 use rock_node_protobufs::org::hiero::block::api::{
     subscribe_stream_response::{Code, Response as ResponseType},
@@ -40,7 +39,7 @@ impl SubscriberSession {
             providers
                 .get(&TypeId::of::<BlockReaderProvider>())
                 .and_then(|p| p.downcast_ref::<BlockReaderProvider>())
-                .map(|p_concrete| p_concrete.get_service())
+                .map(|p_concrete| p_concrete.get_reader())
                 .ok_or_else(|| Status::internal("BlockReaderProvider not found"))?
         };
 

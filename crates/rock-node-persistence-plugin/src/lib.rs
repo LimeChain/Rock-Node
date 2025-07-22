@@ -9,7 +9,7 @@ use prost::Message;
 use rock_node_core::{
     app_context::AppContext,
     block_reader::BlockReader,
-    block_writer::BlockWriter,
+    block_writer::{BlockWriter, BlockWriterProvider},
     capability::Capability,
     database_provider::DatabaseManagerProvider,
     error::{Error as CoreError, Result as CoreResult},
@@ -50,19 +50,6 @@ impl InboundEvent {
             InboundEvent::Verified(e) => e.cache_key,
             InboundEvent::Unverified(e) => e.cache_key,
         }
-    }
-}
-
-#[derive(Clone)]
-pub struct BlockWriterProvider {
-    writer: Arc<dyn BlockWriter>,
-}
-impl BlockWriterProvider {
-    pub fn new(writer: Arc<dyn BlockWriter>) -> Self {
-        Self { writer }
-    }
-    pub fn get_writer(&self) -> Arc<dyn BlockWriter> {
-        self.writer.clone()
     }
 }
 

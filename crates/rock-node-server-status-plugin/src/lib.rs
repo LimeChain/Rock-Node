@@ -65,7 +65,7 @@ impl Plugin for StatusPlugin {
             if let Some(provider_any) = providers.get(&key) {
                 provider_any
                     .downcast_ref::<BlockReaderProvider>()
-                    .map(|p| p.get_service())
+                    .map(|p| p.get_reader())
                     .ok_or_else(|| {
                         anyhow::anyhow!("FATAL: Failed to downcast BlockReaderProvider.")
                     })

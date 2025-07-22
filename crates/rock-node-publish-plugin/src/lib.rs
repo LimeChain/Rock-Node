@@ -75,7 +75,7 @@ impl Plugin for PublishPlugin {
 
             if let Some(provider_any) = providers.get(&TypeId::of::<BlockReaderProvider>()) {
                 if let Some(provider_handle) = provider_any.downcast_ref::<BlockReaderProvider>() {
-                    let block_reader = provider_handle.get_service();
+                    let block_reader = provider_handle.get_reader();
 
                     let block_number_for_state = match block_reader
                         .get_latest_persisted_block_number()

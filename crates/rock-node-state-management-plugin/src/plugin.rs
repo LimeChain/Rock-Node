@@ -6,8 +6,8 @@ use rock_node_core::{
     database_provider::DatabaseManagerProvider,
     error::{Error as CoreError, Result as CoreResult},
     plugin::Plugin,
-    service_provider::BlockReaderProvider,
     state_reader::StateReaderProvider,
+    BlockReaderProvider,
 };
 use std::{
     any::TypeId,
@@ -82,7 +82,7 @@ impl StateManagementPlugin {
         let block_reader = providers
             .get(&TypeId::of::<BlockReaderProvider>())
             .and_then(|p| p.downcast_ref::<BlockReaderProvider>())
-            .map(|p_concrete| p_concrete.get_service())
+            .map(|p_concrete| p_concrete.get_reader())
             .ok_or_else(|| anyhow!("BlockReaderProvider not found"))?;
 
         let db_manager = db_provider.get_manager();

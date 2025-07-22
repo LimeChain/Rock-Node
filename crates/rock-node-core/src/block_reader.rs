@@ -9,6 +9,10 @@ pub trait BlockReader: Debug + Send + Sync + 'static {
     fn get_highest_contiguous_block_number(&self) -> Result<u64>;
 }
 
+/// A concrete, shareable handle for the BlockReader service.
+///
+/// This provider is registered in the `AppContext` by the Persistence Plugin at startup.
+/// Other plugins can then request this provider to get access to the `BlockReader` service.
 #[derive(Clone, Debug)]
 pub struct BlockReaderProvider {
     reader: Arc<dyn BlockReader>,

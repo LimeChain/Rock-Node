@@ -18,6 +18,9 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     # Build and install the main application binary to a persistent location.
     cargo install --path app/rock-node --root /dist --locked
 
+# Create the data directory that the application needs
+RUN mkdir -p /dist/data
+
 # ====================================================================================
 # Stage 2: Final Rock Node Image for Testing
 # ====================================================================================
@@ -27,4 +30,5 @@ WORKDIR /app
 USER nonroot
 
 COPY --from=builder --chown=nonroot:nonroot /dist/bin/rock-node /app/rock-node
+COPY --from=builder --chown=nonroot:nonroot /dist/data /app/data
 ENTRYPOINT ["/app/rock-node"]
