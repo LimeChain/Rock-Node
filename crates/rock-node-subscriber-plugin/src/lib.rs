@@ -1,6 +1,8 @@
 use crate::service::SubscriberServiceImpl;
 use async_trait::async_trait;
-use rock_node_core::{app_context::AppContext, error::Result as CoreResult, plugin::Plugin};
+use rock_node_core::{
+    app_context::AppContext, error::Result as CoreResult, plugin::Plugin, Error as CoreError,
+};
 use rock_node_protobufs::org::hiero::block::api::block_stream_subscribe_service_server::BlockStreamSubscribeServiceServer;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
@@ -109,7 +111,12 @@ impl Plugin for SubscriberPlugin {
 
         // Signal the main gRPC server to stop accepting new connections.
         if let Some(tx) = self.shutdown_tx.take() {
-            let _ = tx.send(());
+            if tx.send(()).is_err() {
+                let msg =
+                    "Failed to send shutdown signal to Subscriber gRPC server: receiver dropped.";
+                error!("{}", msg);
+                return Err(CoreError::PluginShutdown(msg.to_string()));
+            }
         }
         self.running.store(false, Ordering::SeqCst);
         Ok(())

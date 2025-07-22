@@ -1,5 +1,7 @@
 use async_trait::async_trait;
-use rock_node_core::{app_context::AppContext, error::Result, plugin::Plugin, BlockReaderProvider};
+use rock_node_core::{
+    app_context::AppContext, error::Result, plugin::Plugin, BlockReaderProvider, Error as CoreError,
+};
 use rock_node_protobufs::org::hiero::block::api::{
     block_stream_publish_service_server::BlockStreamPublishServiceServer,
     publish_stream_response::{self, end_of_stream},
@@ -182,7 +184,12 @@ impl Plugin for PublishPlugin {
         }
 
         if let Some(tx) = self.shutdown_tx.take() {
-            let _ = tx.send(());
+            if tx.send(()).is_err() {
+                let msg =
+                    "Failed to send shutdown signal to Publish gRPC server: receiver dropped.";
+                error!("{}", msg);
+                return Err(CoreError::PluginShutdown(msg.to_string()));
+            }
         }
 
         tokio::time::sleep(Duration::from_millis(100)).await;

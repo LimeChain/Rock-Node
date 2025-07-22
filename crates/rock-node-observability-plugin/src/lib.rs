@@ -7,7 +7,9 @@ use axum::{
     routing::get,
     Router,
 };
-use rock_node_core::{app_context::AppContext, error::Result, plugin::Plugin, MetricsRegistry};
+use rock_node_core::{
+    app_context::AppContext, error::Result, plugin::Plugin, Error as CoreError, MetricsRegistry,
+};
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc,
@@ -138,7 +140,10 @@ impl Plugin for ObservabilityPlugin {
     async fn stop(&mut self) -> Result<()> {
         if let Some(shutdown_tx) = self.shutdown_tx.take() {
             if shutdown_tx.send(()).is_err() {
-                error!("Failed to send shutdown signal to Observability server: receiver dropped.");
+                let msg =
+                    "Failed to send shutdown signal to Observability server: receiver dropped.";
+                error!("{}", msg);
+                return Err(CoreError::PluginShutdown(msg.to_string()));
             }
         }
         self.running.store(false, Ordering::SeqCst);

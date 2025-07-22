@@ -1,7 +1,9 @@
 use crate::service::CryptoServiceImpl;
 use async_trait::async_trait;
 use rock_node_core::{
-    app_context::AppContext, error::Result as CoreResult, plugin::Plugin,
+    app_context::AppContext,
+    error::{Error as CoreError, Result as CoreResult},
+    plugin::Plugin,
     state_reader::StateReaderProvider,
 };
 use rock_node_protobufs::proto::crypto_service_server::CryptoServiceServer;
@@ -118,7 +120,9 @@ impl Plugin for QueryPlugin {
     async fn stop(&mut self) -> CoreResult<()> {
         if let Some(shutdown_tx) = self.shutdown_tx.take() {
             if shutdown_tx.send(()).is_err() {
-                error!("Failed to send shutdown signal to Query gRPC server: receiver dropped.");
+                let msg = "Failed to send shutdown signal to Query gRPC server: receiver dropped.";
+                error!("{}", msg);
+                return Err(CoreError::PluginShutdown(msg.to_string()));
             }
         }
         self.running.store(false, Ordering::SeqCst);

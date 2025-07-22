@@ -1,5 +1,7 @@
 use async_trait::async_trait;
-use rock_node_core::{app_context::AppContext, error::Result, plugin::Plugin, BlockReaderProvider};
+use rock_node_core::{
+    app_context::AppContext, error::Result, plugin::Plugin, BlockReaderProvider, Error as CoreError,
+};
 use rock_node_protobufs::org::hiero::block::api::block_node_service_server::BlockNodeServiceServer;
 use service::StatusServiceImpl;
 use std::{
@@ -119,7 +121,9 @@ impl Plugin for StatusPlugin {
     async fn stop(&mut self) -> Result<()> {
         if let Some(shutdown_tx) = self.shutdown_tx.take() {
             if shutdown_tx.send(()).is_err() {
-                error!("Failed to send shutdown signal to Status gRPC server: receiver dropped.");
+                let msg = "Failed to send shutdown signal to Status gRPC server: receiver dropped.";
+                error!("{}", msg);
+                return Err(CoreError::PluginShutdown(msg.to_string()));
             }
         }
         self.running.store(false, Ordering::SeqCst);

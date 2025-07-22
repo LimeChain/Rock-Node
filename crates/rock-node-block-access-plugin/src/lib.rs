@@ -1,5 +1,7 @@
 use async_trait::async_trait;
-use rock_node_core::{app_context::AppContext, error::Result, plugin::Plugin, BlockReaderProvider};
+use rock_node_core::{
+    app_context::AppContext, error::Result, plugin::Plugin, BlockReaderProvider, Error as CoreError,
+};
 use rock_node_protobufs::org::hiero::block::api::block_access_service_server::BlockAccessServiceServer;
 use service::BlockAccessServiceImpl;
 use std::{
@@ -128,11 +130,11 @@ impl Plugin for BlockAccessPlugin {
 
     async fn stop(&mut self) -> Result<()> {
         if let Some(shutdown_tx) = self.shutdown_tx.take() {
-            // Sending on the channel will trigger the shutdown future in the server.
             if shutdown_tx.send(()).is_err() {
-                error!(
-                    "Failed to send shutdown signal to BlockAccess gRPC server: receiver dropped."
-                );
+                let msg =
+                    "Failed to send shutdown signal to BlockAccess gRPC server: receiver dropped.";
+                error!("{}", msg);
+                return Err(CoreError::PluginShutdown(msg.to_string()));
             }
         }
         self.running.store(false, Ordering::SeqCst);
