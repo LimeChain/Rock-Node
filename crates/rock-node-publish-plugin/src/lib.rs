@@ -1,7 +1,5 @@
 use async_trait::async_trait;
-use rock_node_core::{
-    app_context::AppContext, error::Result, plugin::Plugin, BlockReaderProvider,
-};
+use rock_node_core::{app_context::AppContext, error::Result, plugin::Plugin, BlockReaderProvider};
 use rock_node_protobufs::org::hiero::block::api::{
     block_stream_publish_service_server::BlockStreamPublishServiceServer,
     publish_stream_response::{self, end_of_stream},
@@ -69,16 +67,17 @@ impl Plugin for PublishPlugin {
         let shared_state = Arc::new(SharedState::new());
         self.shared_state = Some(shared_state.clone());
         {
-            let providers = context
-                .service_providers
-                .read()
-                .map_err(|e| anyhow::anyhow!("Failed to acquire read lock on service providers: {}", e))?;
-            
+            let providers = context.service_providers.read().map_err(|e| {
+                anyhow::anyhow!("Failed to acquire read lock on service providers: {}", e)
+            })?;
+
             if let Some(provider_any) = providers.get(&TypeId::of::<BlockReaderProvider>()) {
                 if let Some(provider_handle) = provider_any.downcast_ref::<BlockReaderProvider>() {
                     let block_reader = provider_handle.get_service();
 
-                    let block_number_for_state = match block_reader.get_latest_persisted_block_number() {
+                    let block_number_for_state = match block_reader
+                        .get_latest_persisted_block_number()
+                    {
                         Ok(Some(num)) => num as i64,
                         Ok(None) => -1,
                         Err(e) => {
@@ -88,9 +87,12 @@ impl Plugin for PublishPlugin {
                     };
 
                     shared_state.set_latest_persisted_block(block_number_for_state);
-                    debug!("Initialized PublishPlugin state. Latest persisted block is: {}", block_number_for_state);
+                    debug!(
+                        "Initialized PublishPlugin state. Latest persisted block is: {}",
+                        block_number_for_state
+                    );
                 } else {
-                     error!("FATAL: Failed to downcast BlockReaderProvider. This indicates a critical type mismatch bug.");
+                    error!("FATAL: Failed to downcast BlockReaderProvider. This indicates a critical type mismatch bug.");
                 }
             } else {
                 warn!("No BlockReaderProvider handle found. Is the persistence plugin running? Defaulting latest block to -1.");
@@ -150,12 +152,16 @@ impl Plugin for PublishPlugin {
         if !self.is_running() {
             return Ok(());
         }
-        
+
         info!("Stopping PublishPlugin...");
 
         if let Some(shared_state) = &self.shared_state {
             let latest_block = shared_state.get_latest_persisted_block();
-            let block_number_to_send = if latest_block < 0 { 0 } else { latest_block as u64 };
+            let block_number_to_send = if latest_block < 0 {
+                0
+            } else {
+                latest_block as u64
+            };
 
             let end_stream_msg = PublishStreamResponse {
                 response: Some(publish_stream_response::Response::EndStream(
@@ -166,12 +172,15 @@ impl Plugin for PublishPlugin {
                 )),
             };
 
-            info!("Sending EndStream to {} active clients.", shared_state.active_sessions.len());
+            info!(
+                "Sending EndStream to {} active clients.",
+                shared_state.active_sessions.len()
+            );
             for entry in shared_state.active_sessions.iter() {
                 let _ = entry.value().send(Ok(end_stream_msg.clone())).await;
             }
         }
-        
+
         if let Some(tx) = self.shutdown_tx.take() {
             let _ = tx.send(());
         }
