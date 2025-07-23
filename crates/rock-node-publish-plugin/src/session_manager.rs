@@ -98,7 +98,6 @@ impl SessionManager {
         let latest_persisted = self.shared_state.get_latest_persisted_block();
 
         if block_number <= latest_persisted {
-            // TODO: remove info and replace with debug
             info!(
                 session_id = %self.id,
                 received_block = block_number,
@@ -124,7 +123,6 @@ impl SessionManager {
         }
 
         if block_number > latest_persisted + 1 {
-            // TODO: remove info and replace with debug
             info!(
                 session_id = %self.id,
                 received_block = block_number,
@@ -161,7 +159,6 @@ impl SessionManager {
                 .publish_blocks_received_total
                 .with_label_values(&["primary"])
                 .inc();
-            // TODO: remove info and replace with debug
             info!(session_id = %self.id, block_number, "Session is PRIMARY for this block.");
         } else {
             self.state = SessionState::Behind;
@@ -170,7 +167,6 @@ impl SessionManager {
                 .publish_blocks_received_total
                 .with_label_values(&["behind"])
                 .inc();
-            // TODO: remove info and replace with debug
             info!(session_id = %self.id, block_number, "Another session is primary. Sending SkipBlock.");
             self.send_skip_block().await;
         }
@@ -180,7 +176,6 @@ impl SessionManager {
 
     /// Returns `true` on success, `false` on failure.
     async fn publish_complete_block(&mut self) -> bool {
-        // TODO: remove info and replace with debug
         info!(session_id = %self.id, block_number = self.current_block_number, "Block is complete. Publishing to core.");
 
         let block_proto = Block {
@@ -215,27 +210,33 @@ impl SessionManager {
             return false;
         }
 
-        // AWAIT the persistence result. This is the critical change for flow control.
         if self.wait_for_persistence_ack().await.is_ok() {
             self.reset_for_next_block();
             true
         } else {
-            // ACK failed or timed out, signal failure to the main loop.
+            // ACK failed or timed out. The logic inside wait_for_persistence_ack handles retries.
+            // Terminate this session's attempt.
             false
         }
     }
 
-    /// Waits for the persistence event. Does NOT spawn a separate task.
-    /// Returns Ok on success, Err on timeout or channel close.
+    /// Waits for the persistence event and broadcasts the result to all active sessions.
     async fn wait_for_persistence_ack(&mut self) -> Result<(), ()> {
         let mut rx_persisted = self.context.tx_block_persisted.subscribe();
         let block_to_await = self.current_block_number;
+        let ack_timeout = Duration::from_secs(
+            self.context
+                .config
+                .plugins
+                .publish_service
+                .persistence_ack_timeout_seconds,
+        );
 
         trace!(session_id = %self.id, block = block_to_await, "Awaiting persistence ACK...");
-
         let start_time = Instant::now();
 
-        let timeout_result = tokio::time::timeout(Duration::from_secs(30), async {
+        // This is only ever called by the PRIMARY session.
+        let timeout_result = tokio::time::timeout(ack_timeout, async {
             while let Ok(persisted_event) = rx_persisted.recv().await {
                 if persisted_event.block_number == block_to_await {
                     return Some(persisted_event);
@@ -245,33 +246,25 @@ impl SessionManager {
         })
         .await;
 
-        // Clean up the winner map regardless of the outcome.
-        self.shared_state.block_winners.remove(&block_to_await);
-
         match timeout_result {
             Ok(Some(_)) => {
-                // TODO: remove info and replace with debug
-                info!(session_id = %self.id, block = block_to_await, "Block persisted. Sending ACK and updating shared state.");
+                // SUCCESS CASE
+                info!(session_id = %self.id, block = block_to_await, "Block persisted. Broadcasting ACK and updating shared state.");
 
-                // --- Metrics Instrumentation ---
                 let duration = start_time.elapsed().as_secs_f64();
                 self.context
                     .metrics
                     .publish_persistence_duration_seconds
                     .with_label_values(&["acknowledged"])
                     .observe(duration);
-                self.context.metrics.blocks_acknowledged.inc(); // Core metric
-                self.context
-                    .metrics
-                    .publish_responses_sent_total
-                    .with_label_values(&["Acknowledgement"])
-                    .inc();
-                // ---
+                self.context.metrics.blocks_acknowledged.inc();
 
+                // Update shared state *before* broadcasting
                 self.shared_state
                     .set_latest_persisted_block(block_to_await as i64);
 
-                let ack = PublishStreamResponse {
+                // Create the acknowledgement message
+                let ack_msg = PublishStreamResponse {
                     response: Some(publish_stream_response::Response::Acknowledgement(
                         BlockAcknowledgement {
                             block_number: block_to_await,
@@ -280,37 +273,60 @@ impl SessionManager {
                         },
                     )),
                 };
-                if self.send_response(ack).await.is_err() {
-                    // Client likely disconnected, which is an error state for this cycle.
-                    return Err(());
+
+                // Broadcast to all active sessions
+                for session_entry in self.shared_state.active_sessions.iter() {
+                    let _ = session_entry.value().send(Ok(ack_msg.clone())).await;
                 }
+
+                self.context
+                    .metrics
+                    .publish_responses_sent_total
+                    .with_label_values(&["Acknowledgement"])
+                    .inc();
+
+                // Clean up the winner map for this block
+                self.shared_state.block_winners.remove(&block_to_await);
                 Ok(())
             }
             _ => {
-                warn!(session_id = %self.id, block = block_to_await, "Did not receive persistence ACK for block. Requesting resend.");
+                // FAILURE/TIMEOUT CASE
+                warn!(session_id = %self.id, block = block_to_await, "Did not receive persistence ACK. Broadcasting ResendBlock request.");
 
-                // --- Metrics Instrumentation ---
                 let duration = start_time.elapsed().as_secs_f64();
                 self.context
                     .metrics
                     .publish_persistence_duration_seconds
                     .with_label_values(&["timeout"])
                     .observe(duration);
-                self.context
-                    .metrics
-                    .publish_responses_sent_total
-                    .with_label_values(&["ResendBlock"])
-                    .inc();
-                // ---
 
-                let resend_req = PublishStreamResponse {
+                // IMPORTANT: Remove the failed winner to allow a new race
+                self.shared_state.block_winners.remove(&block_to_await);
+
+                // Create the ResendBlock message
+                let resend_msg = PublishStreamResponse {
                     response: Some(publish_stream_response::Response::ResendBlock(
                         ResendBlock {
                             block_number: block_to_await,
                         },
                     )),
                 };
-                let _ = self.send_response(resend_req).await;
+
+                // Broadcast to all other sessions to trigger a new race for this block
+                for session_entry in self.shared_state.active_sessions.iter() {
+                    if *session_entry.key() != self.id {
+                        // Don't ask the failed session to resend
+                        let _ = session_entry.value().send(Ok(resend_msg.clone())).await;
+                    }
+                }
+
+                self.context
+                    .metrics
+                    .publish_responses_sent_total
+                    .with_label_values(&["ResendBlock"])
+                    .inc();
+
+                // Terminate this session's attempt.
                 Err(())
             }
         }
@@ -335,9 +351,10 @@ impl SessionManager {
     async fn send_response(&self, response: PublishStreamResponse) -> Result<(), ()> {
         if self.response_tx.send(Ok(response)).await.is_err() {
             debug!(session_id = %self.id, "Failed to send response to client. Connection may be closed.");
-            return Err(());
+            Err(())
+        } else {
+            Ok(())
         }
-        Ok(())
     }
 }
 

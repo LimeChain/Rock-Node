@@ -1,13 +1,28 @@
 use crate::service::CryptoServiceImpl;
-use rock_node_core::{state_reader::StateReaderProvider, AppContext, Plugin};
+use async_trait::async_trait;
+use rock_node_core::{
+    app_context::AppContext,
+    error::{Error as CoreError, Result as CoreResult},
+    plugin::Plugin,
+    state_reader::StateReaderProvider,
+};
 use rock_node_protobufs::proto::crypto_service_server::CryptoServiceServer;
-use std::any::TypeId;
+use std::{
+    any::TypeId,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+};
+use tokio::sync::watch;
 use tracing::{error, info, warn};
 
 /// The main plugin struct that registers and runs the gRPC query services.
 #[derive(Debug, Default)]
 pub struct QueryPlugin {
     context: Option<AppContext>,
+    running: Arc<AtomicBool>,
+    shutdown_tx: Option<watch::Sender<()>>,
 }
 
 impl QueryPlugin {
@@ -16,26 +31,24 @@ impl QueryPlugin {
     }
 }
 
+#[async_trait]
 impl Plugin for QueryPlugin {
     fn name(&self) -> &'static str {
         "rock-node-query-plugin"
     }
 
-    fn initialize(&mut self, context: AppContext) -> rock_node_core::Result<()> {
+    fn initialize(&mut self, context: AppContext) -> CoreResult<()> {
         info!("QueryPlugin initialized.");
         self.context = Some(context);
+        self.running = Arc::new(AtomicBool::new(false));
         Ok(())
     }
 
-    fn start(&mut self) -> rock_node_core::Result<()> {
+    fn start(&mut self) -> CoreResult<()> {
         let context = self
             .context
             .as_ref()
-            .ok_or_else(|| {
-                anyhow::anyhow!(
-                    "QueryPlugin not initialized - initialize() must be called before start()"
-                )
-            })?
+            .ok_or_else(|| anyhow::anyhow!("QueryPlugin not initialized"))?
             .clone();
         let config = &context.config.plugins.query_service;
 
@@ -62,10 +75,6 @@ impl Plugin for QueryPlugin {
         };
 
         let listen_address = format!("{}:{}", config.grpc_address, config.grpc_port);
-        let crypto_service = CryptoServiceImpl::new(state_reader);
-        let server = CryptoServiceServer::new(crypto_service);
-
-        // Parse the address before spawning to handle errors properly
         let socket_addr = listen_address.parse().map_err(|e| {
             anyhow::anyhow!(
                 "Failed to parse gRPC listen address '{}': {}",
@@ -74,21 +83,49 @@ impl Plugin for QueryPlugin {
             )
         })?;
 
-        info!(
-            "QueryPlugin: CryptoService gRPC listening on {}",
-            socket_addr
-        );
+        let crypto_service = CryptoServiceImpl::new(state_reader);
+        let server = CryptoServiceServer::new(crypto_service);
 
+        let (shutdown_tx, mut shutdown_rx) = watch::channel(());
+        self.shutdown_tx = Some(shutdown_tx);
+        let running_clone = self.running.clone();
+
+        self.running.store(true, Ordering::SeqCst);
         tokio::spawn(async move {
-            if let Err(e) = tonic::transport::Server::builder()
+            info!(
+                "QueryPlugin: CryptoService gRPC listening on {}",
+                socket_addr
+            );
+
+            let server_future = tonic::transport::Server::builder()
                 .add_service(server)
-                .serve(socket_addr)
-                .await
-            {
+                .serve_with_shutdown(socket_addr, async move {
+                    shutdown_rx.changed().await.ok();
+                    info!("Gracefully shutting down Query gRPC server...");
+                });
+
+            if let Err(e) = server_future.await {
                 error!("QueryPlugin gRPC server failed: {}", e);
             }
+            running_clone.store(false, Ordering::SeqCst);
         });
 
+        Ok(())
+    }
+
+    fn is_running(&self) -> bool {
+        self.running.load(Ordering::SeqCst)
+    }
+
+    async fn stop(&mut self) -> CoreResult<()> {
+        if let Some(shutdown_tx) = self.shutdown_tx.take() {
+            if shutdown_tx.send(()).is_err() {
+                let msg = "Failed to send shutdown signal to Query gRPC server: receiver dropped.";
+                error!("{}", msg);
+                return Err(CoreError::PluginShutdown(msg.to_string()));
+            }
+        }
+        self.running.store(false, Ordering::SeqCst);
         Ok(())
     }
 }

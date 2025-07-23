@@ -5,10 +5,10 @@ edition = "2021"
 
 [dependencies]
 rock-node-protobufs = { path = "../rock-node-protobufs" }
-tokio = { version = "1", features = ["sync"] }
+tokio = { version = "1", features = ["sync", "macros"] } # Added macros feature
 serde = { version = "1", features = ["derive"] }
 thiserror = "1"
-anyhow = "1" 
+anyhow = "1"
 rocksdb = "0.22"
 
 # For generating unique "Claim Check" keys
@@ -20,3 +20,6 @@ dashmap = "5.5"
 # Metrics
 prometheus = { version = "0.13", features = ["process"] }
 tracing = "0.1"
+
+# Add async-trait for async methods in traits
+async-trait = "0.1"

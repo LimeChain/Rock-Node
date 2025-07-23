@@ -50,6 +50,10 @@ pub struct PublishServiceConfig {
     pub grpc_address: String,
     pub grpc_port: u16,
     pub max_concurrent_streams: usize,
+    pub persistence_ack_timeout_seconds: u64,
+    pub stale_winner_timeout_seconds: u64,
+    pub winner_cleanup_interval_seconds: u64,
+    pub winner_cleanup_threshold_blocks: u64,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -58,6 +62,7 @@ pub struct SubscriberServiceConfig {
     pub grpc_address: String,
     pub grpc_port: u16,
     pub max_concurrent_streams: usize,
+    pub session_timeout_seconds: u64,
     pub live_stream_queue_size: usize,
     pub max_future_block_lookahead: u64,
 }

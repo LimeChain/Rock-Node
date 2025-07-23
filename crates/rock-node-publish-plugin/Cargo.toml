@@ -29,3 +29,6 @@ dashmap = "5.5"
 
 # For protobufs
 prost = "0.13.5"
+
+# Add async-trait for the Plugin trait
+async-trait = "0.1"

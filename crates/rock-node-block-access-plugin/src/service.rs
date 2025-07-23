@@ -318,7 +318,7 @@ mod tests {
             items: vec![BlockItem {
                 item: Some(rock_node_protobufs::com::hedera::hapi::block::stream::block_item::Item::BlockHeader(
                     rock_node_protobufs::com::hedera::hapi::block::stream::output::BlockHeader {
-                        number: 200, // Example number
+                        number: 200,
                         ..Default::default()
                     }
                 ))

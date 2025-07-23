@@ -24,3 +24,6 @@ prost = "0.13.5"
 
 # Add the RocksDB dependency
 rocksdb = "0.22"
+
+# Add async-trait for async methods in traits
+async-trait = "0.1"

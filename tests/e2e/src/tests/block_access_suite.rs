@@ -6,9 +6,6 @@ use rock_node_protobufs::org::hiero::block::api::{
 use serial_test::serial;
 
 /// Test Case: Get Existing Block
-///
-/// Objective: Verify that a client can fetch a specific, single historical
-/// block by its number.
 #[tokio::test]
 #[serial]
 async fn test_get_block_by_number_successfully() -> Result<()> {
@@ -38,13 +35,10 @@ async fn test_get_block_by_number_successfully() -> Result<()> {
     Ok(())
 }
 
-/// Test Case: Get Non-Existent Block
-///
-/// Objective: Verify that requesting a block that has not been published
-/// results in a NOT_AVAILABLE status.
+/// Test Case: Get Non-Existent Block (outside range)
 #[tokio::test]
 #[serial]
-async fn test_get_non_existent_block() -> Result<()> {
+async fn test_get_non_existent_block_not_available() -> Result<()> {
     let ctx = TestContext::new().await?;
     publish_blocks(&ctx, 0, 5).await?;
     let mut access_client = ctx.access_client().await?;
@@ -53,7 +47,7 @@ async fn test_get_non_existent_block() -> Result<()> {
         block_specifier: Some(BlockSpecifier::BlockNumber(10)),
     };
     let response = access_client.get_block(request).await?.into_inner();
-    println!("Response: {:?}", response);
+
     assert_eq!(
         response.status,
         block_response::Code::NotAvailable as i32,

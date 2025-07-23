@@ -31,3 +31,9 @@ uuid = { version = "1", features = ["v4"] }
 
 # Metrics
 prometheus = { version = "0.13", features = ["process"] }
+
+# Add async-trait for async methods in traits
+async-trait = "0.1"
+
+# Add dashmap for the service's session tracking
+dashmap = "5.5"

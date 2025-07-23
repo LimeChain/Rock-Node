@@ -1,16 +1,14 @@
 use crate::error::SubscriberError;
-use futures_util::FutureExt;
 use prost::Message;
-use rock_node_core::{
-    app_context::AppContext, block_reader::BlockReader, service_provider::BlockReaderProvider,
-};
+use rock_node_core::BlockReaderProvider;
+use rock_node_core::{app_context::AppContext, block_reader::BlockReader};
 use rock_node_protobufs::com::hedera::hapi::block::stream::Block;
 use rock_node_protobufs::org::hiero::block::api::{
     subscribe_stream_response::{Code, Response as ResponseType},
     BlockItemSet, SubscribeStreamRequest, SubscribeStreamResponse,
 };
 use std::{any::TypeId, sync::Arc, time::Duration};
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, Notify};
 use tonic::Status;
 use tracing::{debug, info, warn};
 use uuid::Uuid;
@@ -21,6 +19,8 @@ pub struct SubscriberSession {
     request: SubscribeStreamRequest,
     response_tx: mpsc::Sender<Result<SubscribeStreamResponse, Status>>,
     block_reader: Arc<dyn BlockReader>,
+    server_shutdown_notify: Arc<Notify>,
+    session_shutdown_notify: Arc<Notify>,
 }
 
 impl SubscriberSession {
@@ -28,6 +28,8 @@ impl SubscriberSession {
         context: Arc<AppContext>,
         request: SubscribeStreamRequest,
         response_tx: mpsc::Sender<Result<SubscribeStreamResponse, Status>>,
+        server_shutdown_notify: Arc<Notify>,
+        session_shutdown_notify: Arc<Notify>,
     ) -> Result<Self, Status> {
         let block_reader = {
             let providers = context.service_providers.read().map_err(|_| {
@@ -37,12 +39,8 @@ impl SubscriberSession {
             providers
                 .get(&TypeId::of::<BlockReaderProvider>())
                 .and_then(|p| p.downcast_ref::<BlockReaderProvider>())
-                .map(|p_concrete| p_concrete.get_service())
-                .ok_or_else(|| {
-                    Status::internal(
-                        "BlockReaderProvider not found - persistence plugin may not be initialized",
-                    )
-                })?
+                .map(|p_concrete| p_concrete.get_reader())
+                .ok_or_else(|| Status::internal("BlockReaderProvider not found"))?
         };
 
         Ok(Self {
@@ -51,6 +49,8 @@ impl SubscriberSession {
             request,
             response_tx,
             block_reader,
+            server_shutdown_notify,
+            session_shutdown_notify,
         })
     }
 
@@ -67,36 +67,70 @@ impl SubscriberSession {
         let is_finite_stream = self.request.end_block_number != u64::MAX;
 
         loop {
-            if is_finite_stream && next_block_to_send > self.request.end_block_number {
-                return Ok(());
-            }
-
-            match self.block_reader.read_block(next_block_to_send) {
-                Ok(Some(block_bytes)) => {
-                    self.send_block(&block_bytes).await?;
-                    self.context
-                        .metrics
-                        .subscriber_blocks_sent_total
-                        .with_label_values(&["historical"])
-                        .inc();
-                    next_block_to_send += 1;
-                    continue;
+            tokio::select! {
+                _ = self.server_shutdown_notify.notified() => {
+                    return Err(SubscriberError::ServerShutdown);
                 }
-                Ok(None) => {}
-                Err(e) => return Err(SubscriberError::Persistence(e)),
+                _ = self.session_shutdown_notify.notified() => {
+                    return Err(SubscriberError::ServerShutdown);
+                }
+                res = self.process_next_block(next_block_to_send, is_finite_stream) => {
+                    match res {
+                        Ok(Some(next_block)) => {
+                            next_block_to_send = next_block;
+                        }
+                        Ok(None) => {
+                            return Ok(());
+                        }
+                        Err(e) => {
+                            return Err(e);
+                        }
+                    }
+                }
             }
-
-            self.wait_for_new_block(next_block_to_send).await?;
         }
+    }
+
+    async fn process_next_block(
+        &self,
+        block_to_send: u64,
+        is_finite: bool,
+    ) -> Result<Option<u64>, SubscriberError> {
+        if is_finite && block_to_send > self.request.end_block_number {
+            return Ok(None);
+        }
+
+        match self.block_reader.read_block(block_to_send) {
+            Ok(Some(block_bytes)) => {
+                self.send_block(&block_bytes).await?;
+                self.context
+                    .metrics
+                    .subscriber_blocks_sent_total
+                    .with_label_values(&["historical"])
+                    .inc();
+                return Ok(Some(block_to_send + 1));
+            }
+            Ok(None) => {}
+            Err(e) => return Err(SubscriberError::Persistence(e)),
+        }
+
+        self.wait_for_new_block(block_to_send).await?;
+        Ok(Some(block_to_send))
     }
 
     async fn wait_for_new_block(&self, block_number_needed: u64) -> Result<(), SubscriberError> {
         let mut broadcast_rx = self.context.tx_block_persisted.subscribe();
-        let timeout_duration = Duration::from_secs(60);
+        let timeout_duration = Duration::from_secs(
+            self.context
+                .config
+                .plugins
+                .subscriber_service
+                .session_timeout_seconds,
+        );
 
         debug!(session_id = %self.id, "Waiting for block #{} or newer...", block_number_needed);
         loop {
-            match tokio::time::timeout(timeout_duration, broadcast_rx.recv().fuse()).await {
+            match tokio::time::timeout(timeout_duration, broadcast_rx.recv()).await {
                 Ok(Ok(event)) => {
                     if event.block_number >= block_number_needed {
                         self.context
@@ -133,14 +167,20 @@ impl SubscriberSession {
         };
         if req_end != u64::MAX && start_block > req_end {
             return Err(SubscriberError::Validation(
-                format!("..."),
+                format!(
+                    "Start block {} cannot be after end block {}",
+                    start_block, req_end
+                ),
                 Code::ReadStreamInvalidEndBlockNumber,
             ));
         }
         if let Some(earliest_num) = earliest {
             if start_block < earliest_num {
                 return Err(SubscriberError::Validation(
-                    format!("..."),
+                    format!(
+                        "Requested start block {} is earlier than the first available block {}",
+                        start_block, earliest_num
+                    ),
                     Code::ReadStreamInvalidStartBlockNumber,
                 ));
             }
@@ -285,6 +325,10 @@ mod tests {
                     grpc_address: "".to_string(),
                     grpc_port: 0,
                     max_concurrent_streams: 0,
+                    persistence_ack_timeout_seconds: 0,
+                    stale_winner_timeout_seconds: 0,
+                    winner_cleanup_interval_seconds: 0,
+                    winner_cleanup_threshold_blocks: 0,
                 },
                 verification_service: VerificationServiceConfig { enabled: false },
                 block_access_service: BlockAccessServiceConfig {
@@ -303,6 +347,7 @@ mod tests {
                     grpc_address: "".to_string(),
                     grpc_port: 0,
                     max_concurrent_streams: 10,
+                    session_timeout_seconds: 0,
                     live_stream_queue_size: 10,
                     max_future_block_lookahead: 100,
                 },
@@ -351,8 +396,14 @@ mod tests {
             end_block_number: 10,
         };
         let (tx, mut rx) = mpsc::channel(16);
+
+        // CORRECTED: Added missing Arc<Notify> arguments
+        let server_shutdown = Arc::new(Notify::new());
+        let session_shutdown = Arc::new(Notify::new());
         let mut session =
-            SubscriberSession::new(context, request, tx).expect("Failed to create test session");
+            SubscriberSession::new(context, request, tx, server_shutdown, session_shutdown)
+                .expect("Failed to create test session");
+
         tokio::spawn(async move {
             session.run().await;
         });
@@ -386,8 +437,13 @@ mod tests {
             end_block_number: 15,
         };
         let (tx, mut rx) = mpsc::channel(32);
+
+        // CORRECTED: Added missing Arc<Notify> arguments
+        let server_shutdown = Arc::new(Notify::new());
+        let session_shutdown = Arc::new(Notify::new());
         let mut session =
-            SubscriberSession::new(context, request, tx).expect("Failed to create test session");
+            SubscriberSession::new(context, request, tx, server_shutdown, session_shutdown)
+                .expect("Failed to create test session");
 
         tokio::spawn(async move {
             session.run().await;
@@ -436,8 +492,13 @@ mod tests {
             end_block_number: 5,
         };
         let (tx, mut rx) = mpsc::channel(16);
+
+        // CORRECTED: Added missing Arc<Notify> arguments
+        let server_shutdown = Arc::new(Notify::new());
+        let session_shutdown = Arc::new(Notify::new());
         let mut session =
-            SubscriberSession::new(context, request, tx).expect("Failed to create test session");
+            SubscriberSession::new(context, request, tx, server_shutdown, session_shutdown)
+                .expect("Failed to create test session");
 
         tokio::spawn(async move {
             session.run().await;
@@ -450,5 +511,57 @@ mod tests {
                 Code::ReadStreamInvalidEndBlockNumber.into()
             ))
         );
+    }
+
+    #[tokio::test]
+    async fn test_stream_terminates_on_shutdown_signal() {
+        let reader = Arc::new(MockBlockReader::default());
+        reader.add_block(0);
+        reader.add_block(1);
+        let (context, _) = create_test_context(reader.clone());
+
+        let request = SubscribeStreamRequest {
+            start_block_number: 0,
+            end_block_number: u64::MAX, // Infinite stream
+        };
+        let (tx, mut rx) = mpsc::channel(16);
+
+        let server_shutdown = Arc::new(Notify::new());
+        let session_shutdown = Arc::new(Notify::new());
+        let mut session = SubscriberSession::new(
+            context,
+            request,
+            tx,
+            server_shutdown.clone(),
+            session_shutdown,
+        )
+        .expect("Failed to create test session");
+
+        tokio::spawn(async move {
+            session.run().await;
+        });
+
+        // Receive the first two blocks
+        assert!(matches!(
+            rx.recv().await.unwrap().unwrap().response,
+            Some(ResponseType::BlockItems(_))
+        ));
+        assert!(matches!(
+            rx.recv().await.unwrap().unwrap().response,
+            Some(ResponseType::BlockItems(_))
+        ));
+
+        // Now, signal the server to shut down
+        server_shutdown.notify_one();
+
+        // The session should send a final status and terminate
+        let final_msg = rx.recv().await.unwrap().unwrap();
+        assert_eq!(
+            final_msg.response,
+            Some(ResponseType::Status(Code::ReadStreamNotAvailable.into()))
+        );
+
+        // The channel should now be closed
+        assert!(rx.recv().await.is_none());
     }
 }

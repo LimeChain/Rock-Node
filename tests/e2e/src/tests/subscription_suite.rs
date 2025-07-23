@@ -10,6 +10,7 @@ use rock_node_protobufs::org::hiero::block::api::{
     SubscribeStreamRequest,
 };
 use serial_test::serial;
+use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio::time::Duration;
 use tokio_stream::wrappers::ReceiverStream;
@@ -176,5 +177,76 @@ async fn test_invalid_end_block_number() -> Result<()> {
         stream.next().await.is_none(),
         "Stream should have terminated"
     );
+    Ok(())
+}
+
+/// Test Case: Multiple concurrent subscribers with different ranges.
+#[tokio::test]
+#[serial]
+async fn test_multiple_concurrent_subscribers() -> Result<()> {
+    let ctx = Arc::new(TestContext::new().await?);
+    publish_blocks(&ctx, 0, 20).await?;
+
+    // --- Subscriber A (historical only) ---
+    let ctx_a = Arc::clone(&ctx);
+    let task_a = tokio::spawn(async move {
+        let mut client = ctx_a.subscriber_client().await.unwrap();
+        let request = SubscribeStreamRequest {
+            start_block_number: 5,
+            end_block_number: 15,
+        };
+        let mut stream = client
+            .subscribe_block_stream(request)
+            .await
+            .unwrap()
+            .into_inner();
+        let mut received_blocks = Vec::new();
+        while let Some(Ok(msg)) = stream.next().await {
+            if let Some(SubResponse::BlockItems(set)) = msg.response {
+                received_blocks.push(header_number(&set));
+            }
+        }
+        received_blocks
+    });
+
+    // --- Subscriber B (historical and live) ---
+    let ctx_b = Arc::clone(&ctx);
+    let task_b = tokio::spawn(async move {
+        let mut client = ctx_b.subscriber_client().await.unwrap();
+        let request = SubscribeStreamRequest {
+            start_block_number: 18,
+            end_block_number: u64::MAX,
+        };
+        let mut stream = client
+            .subscribe_block_stream(request)
+            .await
+            .unwrap()
+            .into_inner();
+        let mut received_blocks = Vec::new();
+        while let Some(Ok(msg)) = stream.next().await {
+            if let Some(SubResponse::BlockItems(set)) = msg.response {
+                let block_num = header_number(&set);
+                received_blocks.push(block_num);
+                if block_num == 22 {
+                    break; // End the test for B after receiving a live block
+                }
+            }
+        }
+        received_blocks
+    });
+
+    // Give subscribers a moment to connect and start receiving historical data
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    // Publish live blocks
+    publish_blocks(&ctx, 21, 22).await?;
+
+    // --- Assertions ---
+    let received_a = task_a.await?;
+    assert_eq!(received_a, (5..=15).collect::<Vec<u64>>());
+
+    let received_b = task_b.await?;
+    assert_eq!(received_b, (18..=22).collect::<Vec<u64>>());
+
     Ok(())
 }

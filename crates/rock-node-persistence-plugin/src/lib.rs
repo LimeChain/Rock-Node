@@ -4,12 +4,12 @@ mod service;
 mod state;
 
 use crate::service::PersistenceService;
-use anyhow::anyhow;
+use async_trait::async_trait;
 use prost::Message;
 use rock_node_core::{
     app_context::AppContext,
     block_reader::BlockReader,
-    block_writer::BlockWriter,
+    block_writer::{BlockWriter, BlockWriterProvider},
     capability::Capability,
     database_provider::DatabaseManagerProvider,
     error::{Error as CoreError, Result as CoreResult},
@@ -18,8 +18,19 @@ use rock_node_core::{
     BlockReaderProvider,
 };
 use rock_node_protobufs::com::hedera::hapi::block::stream::Block;
-use std::{any::TypeId, cmp::min, sync::Arc, time::Duration};
-use tokio::{sync::mpsc::Receiver, time::sleep};
+use std::{
+    any::TypeId,
+    cmp::min,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+    time::Duration,
+};
+use tokio::{
+    sync::{mpsc::Receiver, Notify},
+    time::sleep,
+};
 use tracing::{debug, error, info, trace, warn};
 use uuid::Uuid;
 
@@ -29,39 +40,16 @@ enum InboundEvent {
 }
 impl InboundEvent {
     fn block_number(&self) -> u64 {
-        self.into()
-    }
-    fn cache_key(&self) -> Uuid {
-        self.into()
-    }
-}
-impl From<&InboundEvent> for u64 {
-    fn from(event: &InboundEvent) -> Self {
-        match event {
+        match self {
             InboundEvent::Verified(e) => e.block_number,
             InboundEvent::Unverified(e) => e.block_number,
         }
     }
-}
-impl From<&InboundEvent> for Uuid {
-    fn from(event: &InboundEvent) -> Self {
-        match event {
+    fn cache_key(&self) -> Uuid {
+        match self {
             InboundEvent::Verified(e) => e.cache_key,
             InboundEvent::Unverified(e) => e.cache_key,
         }
-    }
-}
-
-#[derive(Clone)]
-pub struct BlockWriterProvider {
-    writer: Arc<dyn BlockWriter>,
-}
-impl BlockWriterProvider {
-    pub fn new(writer: Arc<dyn BlockWriter>) -> Self {
-        Self { writer }
-    }
-    pub fn get_writer(&self) -> Arc<dyn BlockWriter> {
-        self.writer.clone()
     }
 }
 
@@ -70,6 +58,8 @@ pub struct PersistencePlugin {
     rx_block_items_received: Option<Receiver<BlockItemsReceived>>,
     rx_block_verified: Option<Receiver<BlockVerified>>,
     service: Option<PersistenceService>,
+    running: Arc<AtomicBool>,
+    shutdown_notify: Arc<Notify>,
 }
 
 impl PersistencePlugin {
@@ -82,10 +72,13 @@ impl PersistencePlugin {
             rx_block_items_received,
             rx_block_verified: Some(rx_block_verified),
             service: None,
+            running: Arc::new(AtomicBool::new(false)),
+            shutdown_notify: Arc::new(Notify::new()),
         }
     }
 }
 
+#[async_trait]
 impl Plugin for PersistencePlugin {
     fn name(&self) -> &'static str {
         "persistence-plugin"
@@ -97,10 +90,14 @@ impl Plugin for PersistencePlugin {
         let db_provider = context
             .service_providers
             .read()
-            .unwrap()
+            .map_err(|e| {
+                CoreError::PluginInitialization(format!("Failed to read service_providers: {}", e))
+            })?
             .get(&TypeId::of::<DatabaseManagerProvider>())
             .and_then(|any| any.downcast_ref::<DatabaseManagerProvider>().cloned())
-            .ok_or_else(|| anyhow!("DatabaseManagerProvider not found!"))?;
+            .ok_or_else(|| {
+                CoreError::PluginInitialization("DatabaseManagerProvider not found!".to_string())
+            })?;
 
         let db_manager = db_provider.get_manager();
         let db_handle = db_manager.db_handle();
@@ -145,6 +142,7 @@ impl Plugin for PersistencePlugin {
             state_manager.clone(),
             cold_reader.clone(),
             metrics_arc.clone(),
+            self.shutdown_notify.clone(),
         ));
 
         let service = service::PersistenceService::new(
@@ -160,11 +158,14 @@ impl Plugin for PersistencePlugin {
         // Spawn the dedicated background archiver task.
         tokio::spawn(async move {
             info!("Starting background Archiver task.");
-            // As per the design doc, a periodic check is recommended.
             let archival_check_interval = Duration::from_secs(30);
 
             loop {
                 tokio::select! {
+                    _ = archiver.shutdown_notify.notified() => {
+                        info!("Archiver received shutdown signal. Exiting loop.");
+                        break;
+                    }
                     _ = archiver.trigger.notified() => {
                         trace!("Archiver triggered by write notification.");
                     }
@@ -177,15 +178,17 @@ impl Plugin for PersistencePlugin {
                     warn!("Error during background archival cycle: {}", e);
                 }
             }
+            info!("Archiver task has terminated.");
         });
 
         self.context = Some(context.clone());
 
         {
-            let mut providers = context
-                .service_providers
-                .write()
-                .map_err(|_| anyhow!("Failed to acquire write lock on service providers"))?;
+            let mut providers = context.service_providers.write().map_err(|_| {
+                CoreError::PluginInitialization(
+                    "Failed to acquire write lock on service providers".to_string(),
+                )
+            })?;
             let reader_provider =
                 BlockReaderProvider::new(service_arc.clone() as Arc<dyn BlockReader>);
             providers.insert(
@@ -204,50 +207,67 @@ impl Plugin for PersistencePlugin {
 
     fn start(&mut self) -> CoreResult<()> {
         info!("Starting Persistence Plugin event loop...");
-        let context = self
-            .context
-            .as_ref()
-            .ok_or_else(|| {
-                CoreError::PluginInitialization("PersistencePlugin not initialized".to_string())
-            })?
-            .clone();
-        let service = self
-            .service
-            .as_ref()
-            .ok_or_else(|| {
-                CoreError::PluginInitialization("PersistenceService not initialized".to_string())
-            })?
-            .clone();
+        let context = self.context.as_ref().cloned().ok_or_else(|| {
+            CoreError::PluginInitialization("PersistencePlugin not initialized".to_string())
+        })?;
+        let service = self.service.as_ref().cloned().ok_or_else(|| {
+            CoreError::PluginInitialization("PersistenceService not initialized".to_string())
+        })?;
         let mut rx_verified = self.rx_block_verified.take().ok_or_else(|| {
             CoreError::PluginInitialization("Block verified receiver not set".to_string())
         })?;
-        let rx_items_received_opt = self.rx_block_items_received.take();
+        let mut rx_items_received_opt = self.rx_block_items_received.take();
+
+        let shutdown_notify = self.shutdown_notify.clone();
+        let running_clone = self.running.clone();
+
+        self.running.store(true, Ordering::SeqCst);
         tokio::spawn(async move {
             let use_verified_stream = context
                 .capability_registry
                 .is_registered(Capability::ProvidesVerifiedBlocks)
                 .await;
-            if use_verified_stream {
-                debug!("Subscribing to 'BlockVerified' events.");
-                while let Some(event) = rx_verified.recv().await {
-                    process_event(InboundEvent::Verified(event), &context, &service).await;
-                }
-            } else {
-                debug!("Subscribing to 'BlockItemsReceived' events.");
-                if let Some(mut rx_items) = rx_items_received_opt {
-                    while let Some(event) = rx_items.recv().await {
-                        process_event(InboundEvent::Unverified(event), &context, &service).await;
+
+            loop {
+                let event_future = async {
+                    if use_verified_stream {
+                        rx_verified.recv().await.map(InboundEvent::Verified)
+                    } else if let Some(rx) = &mut rx_items_received_opt {
+                        rx.recv().await.map(InboundEvent::Unverified)
+                    } else {
+                        None
                     }
-                } else {
-                    error!(
-                        "FATAL: PersistencePlugin misconfigured. No verifier and no unverified receiver. \
-                        The persistence pipeline cannot function without an event source."
-                    );
-                    // Exit the event loop - the plugin is non-functional
-                    return;
+                };
+
+                tokio::select! {
+                    _ = shutdown_notify.notified() => {
+                        info!("PersistencePlugin event loop received shutdown signal. Exiting.");
+                        break;
+                    }
+                    event_opt = event_future => {
+                        if let Some(event) = event_opt {
+                            process_event(event, &context, &service).await;
+                        } else {
+                            info!("Upstream channel closed. PersistencePlugin event loop is terminating.");
+                            break;
+                        }
+                    }
                 }
             }
+            running_clone.store(false, Ordering::SeqCst);
+            info!("PersistencePlugin event loop has terminated.");
         });
+        Ok(())
+    }
+
+    fn is_running(&self) -> bool {
+        self.running.load(Ordering::SeqCst)
+    }
+
+    async fn stop(&mut self) -> CoreResult<()> {
+        info!("Stopping PersistencePlugin...");
+        self.shutdown_notify.notify_waiters();
+        self.running.store(false, Ordering::SeqCst);
         Ok(())
     }
 }
@@ -266,7 +286,9 @@ async fn process_event(event: InboundEvent, context: &AppContext, service: &Pers
                         block_number,
                         cache_key,
                     };
-                    let _ = context.tx_block_persisted.send(persisted_event);
+                    if context.tx_block_persisted.send(persisted_event).is_err() {
+                        warn!("No active subscribers for persisted block events.");
+                    }
                 }
             }
             Err(e) => {
@@ -282,5 +304,6 @@ async fn process_event(event: InboundEvent, context: &AppContext, service: &Pers
             block_number, cache_key
         );
     }
+    // Still mark for removal even if processing failed, to prevent cache leaks.
     context.block_data_cache.mark_for_removal(cache_key).await;
 }

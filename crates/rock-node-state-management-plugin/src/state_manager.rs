@@ -222,7 +222,7 @@ impl StateManager {
                     let prefix = change.state_id.to_be_bytes();
                     let mut iter = db.prefix_iterator_cf(cf, prefix);
                     if let Some(Ok((key, _value))) = iter.next() {
-                        batch.delete(key);
+                        batch.delete_cf(cf, &key);
                     } else {
                         warn!(
                             "Received QueuePop for an empty or non-existent queue (state_id: {})",

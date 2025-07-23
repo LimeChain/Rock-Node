@@ -9,6 +9,9 @@ pub enum Error {
     #[error("Plugin Initialization Failed: {0}")]
     PluginInitialization(String),
 
+    #[error("Plugin Shutdown Failed: {0}")]
+    PluginShutdown(String),
+
     #[error("I/O Error")]
     Io(#[from] std::io::Error),
 

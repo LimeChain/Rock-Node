@@ -19,6 +19,9 @@ pub enum SubscriberError {
     #[error("Timed out waiting for block #{0} to be persisted")]
     TimeoutWaitingForBlock(u64),
 
+    #[error("Server is shutting down")]
+    ServerShutdown,
+
     #[error("Internal task error: {0}")]
     Internal(String),
 }
@@ -31,6 +34,7 @@ impl SubscriberError {
             SubscriberError::Persistence(_) => Code::ReadStreamNotAvailable,
             SubscriberError::StreamLagged => Code::ReadStreamNotAvailable,
             SubscriberError::TimeoutWaitingForBlock(_) => Code::ReadStreamNotAvailable,
+            SubscriberError::ServerShutdown => Code::ReadStreamNotAvailable,
             SubscriberError::ClientDisconnected => Code::ReadStreamUnknown,
             SubscriberError::Internal(_) => Code::ReadStreamUnknown,
         }
@@ -44,6 +48,7 @@ impl SubscriberError {
             SubscriberError::ClientDisconnected => "client_disconnect",
             SubscriberError::StreamLagged => "stream_lagged",
             SubscriberError::TimeoutWaitingForBlock(_) => "timeout",
+            SubscriberError::ServerShutdown => "server_shutdown",
             SubscriberError::Internal(_) => "internal_error",
         }
     }

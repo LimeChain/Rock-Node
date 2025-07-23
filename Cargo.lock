@@ -611,6 +611,7 @@ dependencies = [
  "tonic",
  "tracing",
  "tracing-subscriber",
+ "uuid",
 ]
 
 [[package]]
@@ -2020,6 +2021,7 @@ name = "rock-node-block-access-plugin"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "futures-util",
  "prometheus",
  "prost",
@@ -2036,6 +2038,7 @@ name = "rock-node-core"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "dashmap",
  "prometheus",
  "rock-node-protobufs",
@@ -2052,6 +2055,7 @@ name = "rock-node-observability-plugin"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "axum 0.7.9",
  "prometheus",
  "rock-node-core",
@@ -2064,6 +2068,7 @@ name = "rock-node-persistence-plugin"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "bincode",
  "dashmap",
  "lazy_static",
@@ -2099,6 +2104,7 @@ name = "rock-node-publish-plugin"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "dashmap",
  "futures-util",
  "prost",
@@ -2131,6 +2137,7 @@ name = "rock-node-server-status-plugin"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "rock-node-core",
  "rock-node-protobufs",
  "tokio",
@@ -2143,6 +2150,7 @@ name = "rock-node-state-management-plugin"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "prost",
  "rock-node-core",
  "rock-node-protobufs",
@@ -2156,6 +2164,8 @@ name = "rock-node-subscriber-plugin"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-trait",
+ "dashmap",
  "futures-util",
  "prometheus",
  "prost",
@@ -2174,6 +2184,7 @@ name = "rock-node-verifier-plugin"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "rock-node-core",
  "tokio",
  "tracing",

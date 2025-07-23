@@ -24,3 +24,6 @@ tracing = "0.1"
 
 # For metrics
 prometheus = "0.13"
+
+# Add async-trait for async methods in traits
+async-trait = "0.1"
