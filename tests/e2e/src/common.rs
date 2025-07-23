@@ -7,13 +7,13 @@ use rock_node_protobufs::org::hiero::block::api::block_stream_subscribe_service_
 use rock_node_protobufs::org::hiero::block::api::{
     publish_stream_request::Request as PublishRequest, BlockItemSet, PublishStreamRequest,
 };
+use rock_node_protobufs::proto::crypto_service_client::CryptoServiceClient;
 use std::path::PathBuf;
 use std::process::Command;
 use testcontainers::runners::AsyncRunner;
-use testcontainers::ContainerAsync;
 use testcontainers::{
-    core::{IntoContainerPort, WaitFor},
-    CopyDataSource, GenericImage, ImageExt,
+    core::{IntoContainerPort, Mount, WaitFor},
+    ContainerAsync, CopyDataSource, GenericImage, ImageExt,
 };
 use tokio::sync::mpsc;
 use tokio_stream::{wrappers::ReceiverStream, StreamExt};
@@ -56,88 +56,71 @@ pub struct TestContext {
 
 impl TestContext {
     /// Creates a new `TestContext` by starting an isolated Docker container
-    /// running the `rock-node-e2e` image. This method:
-    ///
-    /// - Loads the E2E test configuration from `config/config.e2e.toml`.
-    /// - Generates a unique container name for test isolation.
-    /// - Starts a container with the configuration file mounted inside.
-    /// - Waits for the node to signal readiness via a specific stdout message.
-    ///
-    /// Returns a `TestContext` containing the running container, which can be
-    /// used to interact with the test node (e.g., to retrieve its HTTP port).
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the configuration file cannot be read, the container
-    /// fails to start, or any required Docker operation fails.
+    /// running the `rock-node-e2e` image.
     pub async fn new() -> Result<TestContext> {
-        // Ensure the image is built exactly once.
+        Self::with_config(None, None).await
+    }
+
+    /// Creates a new `TestContext` with a specific configuration and optional
+    /// named volume for data persistence across restarts.
+    pub async fn with_config(
+        config_override: Option<&str>,
+        volume_name: Option<&str>,
+    ) -> Result<TestContext> {
         Lazy::force(&E2E_IMAGE_BUILT);
 
-        let config_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../../config/config.e2e.toml")
-            .canonicalize()?;
+        let config_content = match config_override {
+            Some(content) => content.to_string(),
+            None => {
+                let config_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                    .join("../../config/config.e2e.toml")
+                    .canonicalize()?;
+                std::fs::read_to_string(&config_path)?
+            }
+        };
 
-        // Read the config file content
-        let config_content = std::fs::read_to_string(&config_path)?;
-
-        // Generate unique container name for isolation (Docker-friendly format)
-        let thread_id = format!("{:?}", std::thread::current().id());
-        let thread_id_clean = thread_id.replace("ThreadId(", "").replace(")", "");
-        let timestamp = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_millis();
-        let container_name = format!("rock-node-test-{}-{}", thread_id_clean, timestamp);
-
-        let container = GenericImage::new("rock-node-e2e", "latest")
+        let mut image = GenericImage::new("rock-node-e2e", "latest")
             .with_exposed_port(8080.tcp())
             .with_exposed_port(50051.tcp())
             .with_exposed_port(50052.tcp())
             .with_exposed_port(50053.tcp())
             .with_exposed_port(50054.tcp())
-            .with_wait_for(WaitFor::message_on_stdout(
-                "Rock Node running successfully!",
-            ))
-            .with_copy_to(
-                "/config/config.toml",
-                CopyDataSource::Data(config_content.into_bytes()),
-            )
+            .with_exposed_port(50055.tcp()) // Query service port
+            .with_wait_for(WaitFor::message_on_stdout("Rock Node running successfully!"))
+            .with_env_var("RUST_LOG", "info,rock_node_persistence_plugin=trace")
             .with_cmd(vec![
                 "--config-path".to_string(),
                 "/config/config.toml".to_string(),
             ])
-            .with_container_name(&container_name)
-            .start()
-            .await?;
+            .with_copy_to(
+                "/config/config.toml",
+                CopyDataSource::Data(config_content.into_bytes()),
+            );
+
+        if let Some(vol_name) = volume_name {
+            // Mount a named volume to persist data
+            let mount = Mount::volume_mount(vol_name, "/app/data");
+            image = image.with_mount(mount);
+        }
+
+        let container = image.start().await?;
 
         Ok(TestContext { container })
     }
 
-    /// Get the HTTP port of the container.
+    /// Get the HTTP port of the container for observability.
     pub async fn http_port(&self) -> Result<u16> {
         let port = self.container.get_host_port_ipv4(8080).await?;
         Ok(port)
     }
 
-    /// Returns a gRPC client for the `BlockStreamPublishService` running inside the
-    /// Rock-Node container.
-    ///
-    /// The port (50051) is defined in `config.e2e.toml` and mapped to a free host
-    /// port by `testcontainers`.  We look up that mapping and create a tonic
-    /// channel to it.
     pub async fn publisher_client(&self) -> Result<BlockStreamPublishServiceClient<Channel>> {
-        // Resolve the mapped host port for container port 50051.
         let port = self.container.get_host_port_ipv4(50051).await?;
         let endpoint = format!("http://localhost:{}", port);
-
         let channel = Channel::from_shared(endpoint)?.connect().await?;
-
         Ok(BlockStreamPublishServiceClient::new(channel))
     }
 
-    /// Returns a gRPC client for the `BlockStreamSubscribeService` running inside the
-    /// Rock-Node container.
     pub async fn subscriber_client(&self) -> Result<BlockStreamSubscribeServiceClient<Channel>> {
         let port = self.container.get_host_port_ipv4(50052).await?;
         let endpoint = format!("http://localhost:{}", port);
@@ -145,50 +128,76 @@ impl TestContext {
         Ok(BlockStreamSubscribeServiceClient::new(channel))
     }
 
-    /// Returns a gRPC client for the `BlockNodeService` (Server Status) running inside the
-    /// Rock-Node container.
-    pub async fn status_client(&self) -> Result<rock_node_protobufs::org::hiero::block::api::block_node_service_client::BlockNodeServiceClient<Channel>>{
-        let port = self.container.get_host_port_ipv4(50054).await?;
-        let endpoint = format!("http://localhost:{}", port);
-        let channel = Channel::from_shared(endpoint)?.connect().await?;
-        Ok(rock_node_protobufs::org::hiero::block::api::block_node_service_client::BlockNodeServiceClient::new(channel))
-    }
-
-    /// Returns a gRPC client for the `BlockAccessService` running inside the
-    /// Rock-Node container.
-    pub async fn access_client(&self) -> Result<rock_node_protobufs::org::hiero::block::api::block_access_service_client::BlockAccessServiceClient<Channel>>{
+    pub async fn access_client(
+        &self,
+    ) -> Result<
+        rock_node_protobufs::org::hiero::block::api::block_access_service_client::BlockAccessServiceClient<
+            Channel,
+        >,
+    > {
         let port = self.container.get_host_port_ipv4(50053).await?;
         let endpoint = format!("http://localhost:{}", port);
         let channel = Channel::from_shared(endpoint)?.connect().await?;
-        Ok(rock_node_protobufs::org::hiero::block::api::block_access_service_client::BlockAccessServiceClient::new(channel))
+        Ok(
+            rock_node_protobufs::org::hiero::block::api::block_access_service_client::BlockAccessServiceClient::new(
+                channel,
+            ),
+        )
+    }
+
+    pub async fn status_client(
+        &self,
+    ) -> Result<
+        rock_node_protobufs::org::hiero::block::api::block_node_service_client::BlockNodeServiceClient<
+            Channel,
+        >,
+    > {
+        let port = self.container.get_host_port_ipv4(50054).await?;
+        let endpoint = format!("http://localhost:{}", port);
+        let channel = Channel::from_shared(endpoint)?.connect().await?;
+        Ok(
+            rock_node_protobufs::org::hiero::block::api::block_node_service_client::BlockNodeServiceClient::new(
+                channel,
+            ),
+        )
+    }
+
+    pub async fn query_client(&self) -> Result<CryptoServiceClient<Channel>> {
+        let port = self.container.get_host_port_ipv4(50055).await?;
+        let endpoint = format!("http://localhost:{}", port);
+        let channel = Channel::from_shared(endpoint)?.connect().await?;
+        Ok(CryptoServiceClient::new(channel))
     }
 }
 
 /// Publishes blocks in the inclusive range `[start, end]` using the node's publish service.
-/// The function waits for the server to acknowledge each block before proceeding to the next.
 pub async fn publish_blocks(ctx: &TestContext, start: u64, end: u64) -> Result<()> {
     let mut client = ctx.publisher_client().await?;
+    let (tx, rx) = mpsc::channel(10); // Use a buffered channel
 
-    for i in start..=end {
-        let block_bytes = BlockBuilder::new(i).build();
-        let block_proto: rock_node_protobufs::com::hedera::hapi::block::stream::Block =
-            Message::decode(block_bytes.as_slice())?;
+    tokio::spawn(async move {
+        for i in start..=end {
+            let block_bytes = BlockBuilder::new(i).build();
+            let block_proto: rock_node_protobufs::com::hedera::hapi::block::stream::Block =
+                Message::decode(block_bytes.as_slice()).unwrap();
+            let req = PublishStreamRequest {
+                request: Some(PublishRequest::BlockItems(BlockItemSet {
+                    block_items: block_proto.items,
+                })),
+            };
+            if tx.send(req).await.is_err() {
+                break; // Receiver dropped
+            }
+        }
+    });
 
-        let (tx, rx) = mpsc::channel(1);
-        tx.send(PublishStreamRequest {
-            request: Some(PublishRequest::BlockItems(BlockItemSet {
-                block_items: block_proto.items,
-            })),
-        })
-        .await?;
-        drop(tx);
+    let mut responses = client
+        .publish_block_stream(ReceiverStream::new(rx))
+        .await?
+        .into_inner();
 
-        let mut responses = client
-            .publish_block_stream(ReceiverStream::new(rx))
-            .await?
-            .into_inner();
-        while responses.next().await.is_some() {}
-    }
+    // Drain responses to ensure all blocks are acknowledged
+    while responses.next().await.is_some() {}
 
     Ok(())
 }
