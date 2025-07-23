@@ -86,7 +86,9 @@ impl TestContext {
             .with_exposed_port(50053.tcp())
             .with_exposed_port(50054.tcp())
             .with_exposed_port(50055.tcp()) // Query service port
-            .with_wait_for(WaitFor::message_on_stdout("Rock Node running successfully!"))
+            .with_wait_for(WaitFor::message_on_stdout(
+                "Rock Node running successfully!",
+            ))
             .with_env_var("RUST_LOG", "info,rock_node_persistence_plugin=trace")
             .with_cmd(vec![
                 "--config-path".to_string(),
@@ -134,7 +136,7 @@ impl TestContext {
         rock_node_protobufs::org::hiero::block::api::block_access_service_client::BlockAccessServiceClient<
             Channel,
         >,
-    > {
+    >{
         let port = self.container.get_host_port_ipv4(50053).await?;
         let endpoint = format!("http://localhost:{}", port);
         let channel = Channel::from_shared(endpoint)?.connect().await?;
@@ -151,7 +153,7 @@ impl TestContext {
         rock_node_protobufs::org::hiero::block::api::block_node_service_client::BlockNodeServiceClient<
             Channel,
         >,
-    > {
+    >{
         let port = self.container.get_host_port_ipv4(50054).await?;
         let endpoint = format!("http://localhost:{}", port);
         let channel = Channel::from_shared(endpoint)?.connect().await?;
