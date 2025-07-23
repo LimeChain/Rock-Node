@@ -327,6 +327,8 @@ mod tests {
                     max_concurrent_streams: 0,
                     persistence_ack_timeout_seconds: 0,
                     stale_winner_timeout_seconds: 0,
+                    winner_cleanup_interval_seconds: 0,
+                    winner_cleanup_threshold_blocks: 0,
                 },
                 verification_service: VerificationServiceConfig { enabled: false },
                 block_access_service: BlockAccessServiceConfig {

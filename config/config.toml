@@ -21,6 +21,8 @@ database_path = "data/database"
     max_concurrent_streams = 250
     persistence_ack_timeout_seconds = 60
     stale_winner_timeout_seconds = 60
+    winner_cleanup_interval_seconds = 300
+    winner_cleanup_threshold_blocks = 1000
 
     [plugins.persistence_service]
     enabled = true
@@ -57,3 +59,4 @@ database_path = "data/database"
     enabled = true
     grpc_address = "0.0.0.0"
     grpc_port = 6793
+    

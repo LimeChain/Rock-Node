@@ -102,6 +102,39 @@ impl Plugin for PublishPlugin {
             }
         }
 
+        // Spawn the background cleanup task for stale block winners
+        let cleanup_interval = Duration::from_secs(config.winner_cleanup_interval_seconds);
+        let cleanup_threshold = config.winner_cleanup_threshold_blocks;
+        let state_clone_for_cleanup = shared_state.clone();
+
+        tokio::spawn(async move {
+            info!(
+                "Starting background block winner cleanup task. Interval: {:?}, Threshold: {} blocks.",
+                cleanup_interval, cleanup_threshold
+            );
+            loop {
+                tokio::time::sleep(cleanup_interval).await;
+                let latest_persisted = state_clone_for_cleanup.get_latest_persisted_block();
+
+                if latest_persisted > 0 && (latest_persisted as u64) > cleanup_threshold {
+                    let cleanup_before_block = (latest_persisted as u64) - cleanup_threshold;
+
+                    let initial_size = state_clone_for_cleanup.block_winners.len();
+                    state_clone_for_cleanup
+                        .block_winners
+                        .retain(|&k, _| k >= cleanup_before_block);
+                    let final_size = state_clone_for_cleanup.block_winners.len();
+                    let removed_count = initial_size - final_size;
+                    if removed_count > 0 {
+                        warn!(
+                            "Cleaned up {} stale block winner(s) for blocks before #{}",
+                            removed_count, cleanup_before_block
+                        );
+                    }
+                }
+            }
+        });
+
         let service = PublishServiceImpl {
             context: context.clone(),
             shared_state,

@@ -52,6 +52,8 @@ pub struct PublishServiceConfig {
     pub max_concurrent_streams: usize,
     pub persistence_ack_timeout_seconds: u64,
     pub stale_winner_timeout_seconds: u64,
+    pub winner_cleanup_interval_seconds: u64,
+    pub winner_cleanup_threshold_blocks: u64,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
