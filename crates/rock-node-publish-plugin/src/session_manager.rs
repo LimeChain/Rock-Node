@@ -224,12 +224,19 @@ impl SessionManager {
     async fn wait_for_persistence_ack(&mut self) -> Result<(), ()> {
         let mut rx_persisted = self.context.tx_block_persisted.subscribe();
         let block_to_await = self.current_block_number;
+        let ack_timeout = Duration::from_secs(
+            self.context
+                .config
+                .plugins
+                .publish_service
+                .persistence_ack_timeout_seconds,
+        );
 
         trace!(session_id = %self.id, block = block_to_await, "Awaiting persistence ACK...");
         let start_time = Instant::now();
 
         // This is only ever called by the PRIMARY session.
-        let timeout_result = tokio::time::timeout(Duration::from_secs(30), async {
+        let timeout_result = tokio::time::timeout(ack_timeout, async {
             while let Ok(persisted_event) = rx_persisted.recv().await {
                 if persisted_event.block_number == block_to_await {
                     return Some(persisted_event);

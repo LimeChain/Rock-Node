@@ -16,9 +16,7 @@ use uuid::Uuid;
 #[derive(Debug)]
 pub struct SubscriberServiceImpl {
     context: Arc<AppContext>,
-    // A signal that is cloned to each session to notify it of server shutdown.
     shutdown_notify: Arc<Notify>,
-    // Keep track of active sessions to gracefully terminate them.
     active_sessions: Arc<DashMap<Uuid, Arc<Notify>>>,
 }
 

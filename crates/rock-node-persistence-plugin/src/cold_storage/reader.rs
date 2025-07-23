@@ -29,7 +29,7 @@ struct IndexRecord {
 /// A memory-mapped index file.
 #[derive(Debug)]
 struct MappedIndex {
-    _file: File, // Keep file open to maintain the mmap
+    _file: File,
     mmap: Mmap,
     start_block: u64,
     end_block: u64,
@@ -48,7 +48,7 @@ impl MappedIndex {
         let offset = index * record_size;
 
         if offset + record_size > self.mmap.len() {
-            return None; // Bounds check
+            return None;
         }
 
         let record_bytes = &self.mmap[offset..offset + record_size];

@@ -120,7 +120,13 @@ impl SubscriberSession {
 
     async fn wait_for_new_block(&self, block_number_needed: u64) -> Result<(), SubscriberError> {
         let mut broadcast_rx = self.context.tx_block_persisted.subscribe();
-        let timeout_duration = Duration::from_secs(60);
+        let timeout_duration = Duration::from_secs(
+            self.context
+                .config
+                .plugins
+                .subscriber_service
+                .session_timeout_seconds,
+        );
 
         debug!(session_id = %self.id, "Waiting for block #{} or newer...", block_number_needed);
         loop {
@@ -319,6 +325,8 @@ mod tests {
                     grpc_address: "".to_string(),
                     grpc_port: 0,
                     max_concurrent_streams: 0,
+                    persistence_ack_timeout_seconds: 0,
+                    stale_winner_timeout_seconds: 0,
                 },
                 verification_service: VerificationServiceConfig { enabled: false },
                 block_access_service: BlockAccessServiceConfig {
@@ -337,6 +345,7 @@ mod tests {
                     grpc_address: "".to_string(),
                     grpc_port: 0,
                     max_concurrent_streams: 10,
+                    session_timeout_seconds: 0,
                     live_stream_queue_size: 10,
                     max_future_block_lookahead: 100,
                 },

@@ -248,7 +248,6 @@ impl Plugin for PersistencePlugin {
                         if let Some(event) = event_opt {
                             process_event(event, &context, &service).await;
                         } else {
-                            // A channel closed, which is a natural end to the loop.
                             info!("Upstream channel closed. PersistencePlugin event loop is terminating.");
                             break;
                         }
