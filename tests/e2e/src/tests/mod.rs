@@ -1,7 +1,7 @@
 pub mod block_access_suite;
 pub mod health_check;
 pub mod ingestion_suite;
-pub mod query_suite;
+pub mod query_suites;
 pub mod resiliency_suite;
 pub mod server_status_suite;
 pub mod subscription_suite;

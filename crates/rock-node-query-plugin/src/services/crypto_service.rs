@@ -50,35 +50,83 @@ impl CryptoService for CryptoServiceImpl {
         }
     }
 
-    // QUERY (Not Implemented)
-    async fn get_live_hash(&self, _: Request<Query>) -> Result<Response<TopLevelResponse>, Status> {
-        Err(Status::unimplemented("getLiveHash is obsolete"))
-    }
     async fn get_account_records(
         &self,
-        _: Request<Query>,
+        request: Request<Query>,
     ) -> Result<Response<TopLevelResponse>, Status> {
-        Err(Status::unimplemented("getAccountRecords not implemented"))
+        if let Some(query::Query::CryptoGetAccountRecords(q)) = request.into_inner().query {
+            let handler = CryptoQueryHandler::new(self.state_reader.clone());
+            let specific_response = handler.get_account_records(q).await?;
+            let top_level_response = TopLevelResponse {
+                response: Some(response::Response::CryptoGetAccountRecords(
+                    specific_response,
+                )),
+            };
+            Ok(Response::new(top_level_response))
+        } else {
+            Err(Status::invalid_argument(
+                "Incorrect query type provided for getAccountRecords",
+            ))
+        }
     }
     async fn crypto_get_balance(
         &self,
-        _: Request<Query>,
+        request: Request<Query>,
     ) -> Result<Response<TopLevelResponse>, Status> {
-        Err(Status::unimplemented("cryptoGetBalance not implemented"))
+        if let Some(query::Query::CryptogetAccountBalance(q)) = request.into_inner().query {
+            let handler = CryptoQueryHandler::new(self.state_reader.clone());
+            let specific_response = handler.get_account_balance(q).await?;
+            let top_level_response = TopLevelResponse {
+                response: Some(response::Response::CryptogetAccountBalance(
+                    specific_response,
+                )),
+            };
+            Ok(Response::new(top_level_response))
+        } else {
+            Err(Status::invalid_argument(
+                "Incorrect query type provided for cryptoGetBalance",
+            ))
+        }
     }
     async fn get_transaction_receipts(
         &self,
-        _: Request<Query>,
+        request: Request<Query>,
     ) -> Result<Response<TopLevelResponse>, Status> {
-        Err(Status::unimplemented(
-            "getTransactionReceipts not implemented",
-        ))
+        if let Some(query::Query::TransactionGetReceipt(q)) = request.into_inner().query {
+            let handler = CryptoQueryHandler::new(self.state_reader.clone());
+            let specific_response = handler.get_transaction_receipt(q).await?;
+            let top_level_response = TopLevelResponse {
+                response: Some(response::Response::TransactionGetReceipt(specific_response)),
+            };
+            Ok(Response::new(top_level_response))
+        } else {
+            Err(Status::invalid_argument(
+                "Incorrect query type provided for getTransactionReceipts",
+            ))
+        }
     }
     async fn get_tx_record_by_tx_id(
         &self,
-        _: Request<Query>,
+        request: Request<Query>,
     ) -> Result<Response<TopLevelResponse>, Status> {
-        Err(Status::unimplemented("getTxRecordByTxID not implemented"))
+        if let Some(query::Query::TransactionGetRecord(q)) = request.into_inner().query {
+            let handler = CryptoQueryHandler::new(self.state_reader.clone());
+            let specific_response = handler.get_transaction_record(q).await?;
+            let top_level_response = TopLevelResponse {
+                response: Some(response::Response::TransactionGetRecord(specific_response)),
+            };
+            Ok(Response::new(top_level_response))
+        } else {
+            Err(Status::invalid_argument(
+                "Incorrect query type provided for getTxRecordByTxID",
+            ))
+        }
+    }
+
+    // QUERY (Not Implemented)
+    async fn get_live_hash(&self, _: Request<Query>) -> Result<Response<TopLevelResponse>, Status> {
+        // As per the protobuf file, this query is obsolete.
+        Err(Status::unimplemented("getLiveHash is obsolete"))
     }
 
     // TRANSACTIONS (Not Supported)

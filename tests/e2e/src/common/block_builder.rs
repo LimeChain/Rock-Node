@@ -47,6 +47,7 @@ impl BlockBuilder {
         let account_value = Account {
             account_id: Some(account_id.clone()),
             memo: memo.to_string(),
+            tinybar_balance: account_num,
             ..Default::default()
         };
 
@@ -59,7 +60,7 @@ impl BlockBuilder {
         };
 
         let state_change = StateChange {
-            state_id: 2, // StateIdAccounts
+            state_id: 2,
             change_operation: Some(ChangeOperation::MapUpdate(MapUpdateChange {
                 key: Some(map_key),
                 value: Some(map_value),

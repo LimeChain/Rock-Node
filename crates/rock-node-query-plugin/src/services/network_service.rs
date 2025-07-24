@@ -20,6 +20,7 @@ impl NetworkServiceImpl {
 
 #[tonic::async_trait]
 impl NetworkService for NetworkServiceImpl {
+    // QUERIES (Not Implemented)
     async fn get_version_info(
         &self,
         _request: Request<Query>,
@@ -41,6 +42,7 @@ impl NetworkService for NetworkServiceImpl {
         Err(Status::unimplemented("Query not yet implemented"))
     }
 
+    // TRANSACTIONS (Not Supported)
     async fn unchecked_submit(
         &self,
         _request: Request<Transaction>,
