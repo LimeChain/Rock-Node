@@ -50,8 +50,38 @@ impl CryptoService for CryptoServiceImpl {
         }
     }
 
-    // --- Implement ALL other trait methods as stubs ---
+    // QUERY (Not Implemented)
+    async fn get_live_hash(&self, _: Request<Query>) -> Result<Response<TopLevelResponse>, Status> {
+        Err(Status::unimplemented("getLiveHash is obsolete"))
+    }
+    async fn get_account_records(
+        &self,
+        _: Request<Query>,
+    ) -> Result<Response<TopLevelResponse>, Status> {
+        Err(Status::unimplemented("getAccountRecords not implemented"))
+    }
+    async fn crypto_get_balance(
+        &self,
+        _: Request<Query>,
+    ) -> Result<Response<TopLevelResponse>, Status> {
+        Err(Status::unimplemented("cryptoGetBalance not implemented"))
+    }
+    async fn get_transaction_receipts(
+        &self,
+        _: Request<Query>,
+    ) -> Result<Response<TopLevelResponse>, Status> {
+        Err(Status::unimplemented(
+            "getTransactionReceipts not implemented",
+        ))
+    }
+    async fn get_tx_record_by_tx_id(
+        &self,
+        _: Request<Query>,
+    ) -> Result<Response<TopLevelResponse>, Status> {
+        Err(Status::unimplemented("getTxRecordByTxID not implemented"))
+    }
 
+    // TRANSACTIONS (Not Supported)
     async fn create_account(
         &self,
         _: Request<Transaction>,
@@ -123,34 +153,5 @@ impl CryptoService for CryptoServiceImpl {
             node_transaction_precheck_code: ResponseCodeEnum::NotSupported as i32,
             cost: 0,
         }))
-    }
-    async fn get_live_hash(&self, _: Request<Query>) -> Result<Response<TopLevelResponse>, Status> {
-        Err(Status::unimplemented("getLiveHash is obsolete"))
-    }
-    async fn get_account_records(
-        &self,
-        _: Request<Query>,
-    ) -> Result<Response<TopLevelResponse>, Status> {
-        Err(Status::unimplemented("getAccountRecords not implemented"))
-    }
-    async fn crypto_get_balance(
-        &self,
-        _: Request<Query>,
-    ) -> Result<Response<TopLevelResponse>, Status> {
-        Err(Status::unimplemented("cryptoGetBalance not implemented"))
-    }
-    async fn get_transaction_receipts(
-        &self,
-        _: Request<Query>,
-    ) -> Result<Response<TopLevelResponse>, Status> {
-        Err(Status::unimplemented(
-            "getTransactionReceipts not implemented",
-        ))
-    }
-    async fn get_tx_record_by_tx_id(
-        &self,
-        _: Request<Query>,
-    ) -> Result<Response<TopLevelResponse>, Status> {
-        Err(Status::unimplemented("getTxRecordByTxID not implemented"))
     }
 }
