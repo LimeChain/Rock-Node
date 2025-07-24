@@ -323,3 +323,208 @@ fn build_response_header(
         ..Default::default()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rock_node_protobufs::proto::{account_id, Account, AccountId, TransactionId};
+    use std::collections::HashMap;
+
+    /// A mock implementation of `StateReader` for controlled testing.
+    #[derive(Debug, Default)]
+    struct MockStateReader {
+        state: HashMap<Vec<u8>, Vec<u8>>,
+    }
+
+    impl MockStateReader {
+        fn insert(&mut self, key: Vec<u8>, value: Vec<u8>) {
+            self.state.insert(key, value);
+        }
+    }
+
+    impl StateReader for MockStateReader {
+        fn get_state_value(&self, key: &[u8]) -> anyhow::Result<Option<Vec<u8>>> {
+            Ok(self.state.get(key).cloned())
+        }
+    }
+
+    // Helper function to generate the database key, mirroring the handler's logic.
+    fn generate_db_key(account_id: &AccountId) -> Vec<u8> {
+        let state_id = StateIdentifier::StateIdAccounts as u32;
+        let map_key = MapChangeKey {
+            key_choice: Some(map_change_key::KeyChoice::AccountIdKey(account_id.clone())),
+        };
+        [state_id.to_be_bytes().as_slice(), &map_key.encode_to_vec()].concat()
+    }
+
+    #[tokio::test]
+    async fn test_get_account_info_found() {
+        let account_id = AccountId {
+            shard_num: 0,
+            realm_num: 0,
+            account: Some(account_id::Account::AccountNum(1001)),
+        };
+        let account = Account {
+            account_id: Some(account_id.clone()),
+            memo: "test_memo".to_string(),
+            ..Default::default()
+        };
+        let map_value = MapChangeValue {
+            value_choice: Some(map_change_value::ValueChoice::AccountValue(account)),
+        };
+
+        let mut mock_reader = MockStateReader::default();
+        let key = generate_db_key(&account_id);
+        mock_reader.insert(key, map_value.encode_to_vec());
+
+        let handler = CryptoQueryHandler::new(Arc::new(mock_reader));
+        let query = CryptoGetInfoQuery {
+            account_id: Some(account_id.clone()),
+            header: None,
+        };
+
+        let response = handler.get_account_info(query).await.unwrap();
+
+        assert_eq!(
+            response.header.unwrap().node_transaction_precheck_code,
+            ResponseCodeEnum::Ok as i32
+        );
+        let account_info = response.account_info.unwrap();
+        assert_eq!(account_info.memo, "test_memo");
+        assert_eq!(account_info.account_id.unwrap(), account_id);
+    }
+
+    #[tokio::test]
+    async fn test_get_account_info_not_found() {
+        let mock_reader = MockStateReader::default();
+        let handler = CryptoQueryHandler::new(Arc::new(mock_reader));
+        let query = CryptoGetInfoQuery {
+            account_id: Some(AccountId {
+                shard_num: 0,
+                realm_num: 0,
+                account: Some(account_id::Account::AccountNum(1002)),
+            }),
+            header: None,
+        };
+
+        let response = handler.get_account_info(query).await.unwrap();
+
+        assert_eq!(
+            response.header.unwrap().node_transaction_precheck_code,
+            ResponseCodeEnum::InvalidAccountId as i32
+        );
+        assert!(response.account_info.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_get_account_balance_found() {
+        let account_id = AccountId {
+            shard_num: 0,
+            realm_num: 0,
+            account: Some(account_id::Account::AccountNum(1003)),
+        };
+        let account = Account {
+            account_id: Some(account_id.clone()),
+            tinybar_balance: 5000,
+            ..Default::default()
+        };
+        let map_value = MapChangeValue {
+            value_choice: Some(map_change_value::ValueChoice::AccountValue(account)),
+        };
+
+        let mut mock_reader = MockStateReader::default();
+        let key = generate_db_key(&account_id);
+        mock_reader.insert(key, map_value.encode_to_vec());
+
+        let handler = CryptoQueryHandler::new(Arc::new(mock_reader));
+        let query = CryptoGetAccountBalanceQuery {
+            header: None,
+            balance_source: Some(crypto_get_account_balance_query::BalanceSource::AccountId(
+                account_id.clone(),
+            )),
+        };
+
+        let response = handler.get_account_balance(query).await.unwrap();
+
+        assert_eq!(
+            response.header.unwrap().node_transaction_precheck_code,
+            ResponseCodeEnum::Ok as i32
+        );
+        assert_eq!(response.balance, 5000);
+        assert_eq!(response.account_id.unwrap(), account_id);
+    }
+
+    #[tokio::test]
+    async fn test_get_account_balance_not_found() {
+        let mock_reader = MockStateReader::default();
+        let handler = CryptoQueryHandler::new(Arc::new(mock_reader));
+        let account_id = AccountId {
+            shard_num: 0,
+            realm_num: 0,
+            account: Some(account_id::Account::AccountNum(1004)),
+        };
+        let query = CryptoGetAccountBalanceQuery {
+            header: None,
+            balance_source: Some(crypto_get_account_balance_query::BalanceSource::AccountId(
+                account_id.clone(),
+            )),
+        };
+
+        let response = handler.get_account_balance(query).await.unwrap();
+        assert_eq!(
+            response.header.unwrap().node_transaction_precheck_code,
+            ResponseCodeEnum::InvalidAccountId as i32
+        );
+        assert_eq!(response.balance, 0);
+    }
+
+    #[tokio::test]
+    async fn test_get_account_records_returns_ok_empty() {
+        let mock_reader = MockStateReader::default();
+        let handler = CryptoQueryHandler::new(Arc::new(mock_reader));
+        let query = CryptoGetAccountRecordsQuery {
+            header: None,
+            account_id: Some(AccountId::default()),
+        };
+        let response = handler.get_account_records(query).await.unwrap();
+        assert_eq!(
+            response.header.unwrap().node_transaction_precheck_code,
+            ResponseCodeEnum::Ok as i32
+        );
+        assert!(response.records.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_get_transaction_receipt_not_found() {
+        let mock_reader = MockStateReader::default();
+        let handler = CryptoQueryHandler::new(Arc::new(mock_reader));
+        let query = TransactionGetReceiptQuery {
+            header: None,
+            transaction_id: Some(TransactionId::default()),
+            include_duplicates: false,
+            include_child_receipts: false,
+        };
+        let response = handler.get_transaction_receipt(query).await.unwrap();
+        assert_eq!(
+            response.header.unwrap().node_transaction_precheck_code,
+            ResponseCodeEnum::ReceiptNotFound as i32
+        );
+    }
+
+    #[tokio::test]
+    async fn test_get_transaction_record_not_found() {
+        let mock_reader = MockStateReader::default();
+        let handler = CryptoQueryHandler::new(Arc::new(mock_reader));
+        let query = TransactionGetRecordQuery {
+            header: None,
+            transaction_id: Some(TransactionId::default()),
+            include_duplicates: false,
+            include_child_records: false,
+        };
+        let response = handler.get_transaction_record(query).await.unwrap();
+        assert_eq!(
+            response.header.unwrap().node_transaction_precheck_code,
+            ResponseCodeEnum::RecordNotFound as i32
+        );
+    }
+}
