@@ -9,6 +9,7 @@ use rock_node_protobufs::org::hiero::block::api::{
 };
 use rock_node_protobufs::proto::{
     consensus_service_client::ConsensusServiceClient, crypto_service_client::CryptoServiceClient,
+    file_service_client::FileServiceClient,
 };
 use std::path::PathBuf;
 use std::process::Command;
@@ -178,6 +179,13 @@ impl TestContext {
         let endpoint = format!("http://localhost:{}", port);
         let channel = Channel::from_shared(endpoint)?.connect().await?;
         Ok(ConsensusServiceClient::new(channel))
+    }
+
+    pub async fn file_client(&self) -> Result<FileServiceClient<Channel>> {
+        let port = self.container.get_host_port_ipv4(50055).await?;
+        let endpoint = format!("http://localhost:{}", port);
+        let channel = Channel::from_shared(endpoint)?.connect().await?;
+        Ok(FileServiceClient::new(channel))
     }
 }
 

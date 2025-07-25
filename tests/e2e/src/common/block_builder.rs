@@ -1,6 +1,6 @@
 use prost::Message;
 use rock_node_protobufs::com::hedera::hapi::block::stream::output::{
-    map_change_key, map_change_value, MapChangeKey, MapChangeValue, StateChange, StateChanges,
+    map_change_key, map_change_value, MapChangeKey, MapChangeValue, StateChange, StateChanges, StateIdentifier,
 };
 use rock_node_protobufs::com::hedera::hapi::block::stream::output::{
     state_change::ChangeOperation, MapUpdateChange,
@@ -8,8 +8,9 @@ use rock_node_protobufs::com::hedera::hapi::block::stream::output::{
 use rock_node_protobufs::com::hedera::hapi::block::stream::{
     block_item::Item as BlockItemType, Block, BlockItem, BlockProof,
 };
-use rock_node_protobufs::proto::{account_id, Account, AccountId, Timestamp, Topic, TopicId};
-
+use rock_node_protobufs::proto::{
+    account_id, Account, AccountId, File, FileId, Timestamp, Topic, TopicId,
+};
 /// Utility to construct valid `Block` protobuf objects for testing purposes.
 #[derive(Debug)]
 pub struct BlockBuilder {
@@ -103,9 +104,53 @@ impl BlockBuilder {
             value_choice: Some(map_change_value::ValueChoice::TopicValue(topic_value)),
         };
 
-        const STATE_ID_TOPICS: u32 = 0;
         let state_change = StateChange {
-            state_id: STATE_ID_TOPICS,
+            state_id: StateIdentifier::StateIdTopics as u32,
+            change_operation: Some(ChangeOperation::MapUpdate(MapUpdateChange {
+                key: Some(map_key),
+                value: Some(map_value),
+            })),
+        };
+
+        let state_changes_item = BlockItem {
+            item: Some(BlockItemType::StateChanges(StateChanges {
+                consensus_timestamp: Some(Timestamp {
+                    seconds: self.block_number as i64,
+                    nanos: 0,
+                }),
+                state_changes: vec![state_change],
+            })),
+        };
+
+        self.items.push(state_changes_item);
+        self
+    }
+
+    /// Adds a state change for a simple file to the block.
+    pub fn with_file_state_change(mut self, file_num: i64, memo: &str, contents: &[u8]) -> Self {
+        let file_id = FileId {
+            shard_num: 0,
+            realm_num: 0,
+            file_num,
+        };
+
+        let file_value = File {
+            file_id: Some(file_id.clone()),
+            memo: memo.to_string(),
+            contents: contents.to_vec(),
+            ..Default::default()
+        };
+
+        let map_key = MapChangeKey {
+            key_choice: Some(map_change_key::KeyChoice::FileIdKey(file_id)),
+        };
+
+        let map_value = MapChangeValue {
+            value_choice: Some(map_change_value::ValueChoice::FileValue(file_value)),
+        };
+
+        let state_change = StateChange {
+            state_id: StateIdentifier::StateIdFiles as u32,
             change_operation: Some(ChangeOperation::MapUpdate(MapUpdateChange {
                 key: Some(map_key),
                 value: Some(map_value),

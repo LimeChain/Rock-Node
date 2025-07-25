@@ -1,7 +1,8 @@
+use crate::handlers::file_handler::FileQueryHandler;
 use rock_node_core::StateReader;
 use rock_node_protobufs::proto::{
-    file_service_server::FileService, Query, Response as TopLevelResponse, ResponseCodeEnum,
-    Transaction, TransactionResponse,
+    file_service_server::FileService, query, response, Query, Response as TopLevelResponse,
+    ResponseCodeEnum, Transaction, TransactionResponse,
 };
 use std::sync::Arc;
 use tonic::{Request, Response, Status};
@@ -20,19 +21,41 @@ impl FileServiceImpl {
 
 #[tonic::async_trait]
 impl FileService for FileServiceImpl {
-    // QUERY (Not Implemented)
+    // QUERIES
     async fn get_file_content(
         &self,
-        _request: Request<Query>,
+        request: Request<Query>,
     ) -> Result<Response<TopLevelResponse>, Status> {
-        Err(Status::unimplemented("Query not yet implemented"))
+        if let Some(query::Query::FileGetContents(q)) = request.into_inner().query {
+            let handler = FileQueryHandler::new(self.state_reader.clone());
+            let specific_response = handler.get_file_content(q).await?;
+            let top_level_response = TopLevelResponse {
+                response: Some(response::Response::FileGetContents(specific_response)),
+            };
+            Ok(Response::new(top_level_response))
+        } else {
+            Err(Status::invalid_argument(
+                "Incorrect query type provided for getFileContent",
+            ))
+        }
     }
 
     async fn get_file_info(
         &self,
-        _request: Request<Query>,
+        request: Request<Query>,
     ) -> Result<Response<TopLevelResponse>, Status> {
-        Err(Status::unimplemented("Query not yet implemented"))
+        if let Some(query::Query::FileGetInfo(q)) = request.into_inner().query {
+            let handler = FileQueryHandler::new(self.state_reader.clone());
+            let specific_response = handler.get_file_info(q).await?;
+            let top_level_response = TopLevelResponse {
+                response: Some(response::Response::FileGetInfo(specific_response)),
+            };
+            Ok(Response::new(top_level_response))
+        } else {
+            Err(Status::invalid_argument(
+                "Incorrect query type provided for getFileInfo",
+            ))
+        }
     }
 
     // TRANSACTIONS (Not Supported)
