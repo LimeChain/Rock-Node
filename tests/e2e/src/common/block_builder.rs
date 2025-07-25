@@ -8,7 +8,7 @@ use rock_node_protobufs::com::hedera::hapi::block::stream::output::{
 use rock_node_protobufs::com::hedera::hapi::block::stream::{
     block_item::Item as BlockItemType, Block, BlockItem, BlockProof,
 };
-use rock_node_protobufs::proto::{account_id, Account, AccountId, Timestamp};
+use rock_node_protobufs::proto::{account_id, Account, AccountId, Timestamp, Topic, TopicId};
 
 /// Utility to construct valid `Block` protobuf objects for testing purposes.
 #[derive(Debug)]
@@ -61,6 +61,51 @@ impl BlockBuilder {
 
         let state_change = StateChange {
             state_id: 2,
+            change_operation: Some(ChangeOperation::MapUpdate(MapUpdateChange {
+                key: Some(map_key),
+                value: Some(map_value),
+            })),
+        };
+
+        let state_changes_item = BlockItem {
+            item: Some(BlockItemType::StateChanges(StateChanges {
+                consensus_timestamp: Some(Timestamp {
+                    seconds: self.block_number as i64,
+                    nanos: 0,
+                }),
+                state_changes: vec![state_change],
+            })),
+        };
+
+        self.items.push(state_changes_item);
+        self
+    }
+
+    /// Adds a state change for a simple topic to the block.
+    pub fn with_topic_state_change(mut self, topic_num: i64, memo: &str) -> Self {
+        let topic_id = TopicId {
+            shard_num: 0,
+            realm_num: 0,
+            topic_num,
+        };
+
+        let topic_value = Topic {
+            topic_id: Some(topic_id.clone()),
+            memo: memo.to_string(),
+            ..Default::default()
+        };
+
+        let map_key = MapChangeKey {
+            key_choice: Some(map_change_key::KeyChoice::TopicIdKey(topic_id)),
+        };
+
+        let map_value = MapChangeValue {
+            value_choice: Some(map_change_value::ValueChoice::TopicValue(topic_value)),
+        };
+
+        const STATE_ID_TOPICS: u32 = 0;
+        let state_change = StateChange {
+            state_id: STATE_ID_TOPICS,
             change_operation: Some(ChangeOperation::MapUpdate(MapUpdateChange {
                 key: Some(map_key),
                 value: Some(map_value),

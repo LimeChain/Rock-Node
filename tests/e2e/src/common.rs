@@ -7,7 +7,9 @@ use rock_node_protobufs::org::hiero::block::api::block_stream_subscribe_service_
 use rock_node_protobufs::org::hiero::block::api::{
     publish_stream_request::Request as PublishRequest, BlockItemSet, PublishStreamRequest,
 };
-use rock_node_protobufs::proto::crypto_service_client::CryptoServiceClient;
+use rock_node_protobufs::proto::{
+    consensus_service_client::ConsensusServiceClient, crypto_service_client::CryptoServiceClient,
+};
 use std::path::PathBuf;
 use std::process::Command;
 use testcontainers::runners::AsyncRunner;
@@ -169,6 +171,13 @@ impl TestContext {
         let endpoint = format!("http://localhost:{}", port);
         let channel = Channel::from_shared(endpoint)?.connect().await?;
         Ok(CryptoServiceClient::new(channel))
+    }
+
+    pub async fn consensus_client(&self) -> Result<ConsensusServiceClient<Channel>> {
+        let port = self.container.get_host_port_ipv4(50055).await?;
+        let endpoint = format!("http://localhost:{}", port);
+        let channel = Channel::from_shared(endpoint)?.connect().await?;
+        Ok(ConsensusServiceClient::new(channel))
     }
 }
 

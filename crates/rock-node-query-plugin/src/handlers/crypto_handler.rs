@@ -180,6 +180,7 @@ impl CryptoQueryHandler {
         Ok(response)
     }
 
+    #[allow(deprecated)]
     pub async fn get_account_balance(
         &self,
         query: CryptoGetAccountBalanceQuery,
@@ -257,6 +258,7 @@ impl CryptoQueryHandler {
         })
     }
 
+    #[allow(unused)]
     pub async fn get_transaction_receipt(
         &self,
         query: TransactionGetReceiptQuery,

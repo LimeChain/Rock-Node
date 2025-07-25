@@ -1,7 +1,8 @@
+use crate::handlers::consensus_handler::ConsensusQueryHandler;
 use rock_node_core::StateReader;
 use rock_node_protobufs::proto::{
-    consensus_service_server::ConsensusService, Query, Response as TopLevelResponse,
-    ResponseCodeEnum, Transaction, TransactionResponse,
+    consensus_service_server::ConsensusService, query, response, Query,
+    Response as TopLevelResponse, ResponseCodeEnum, Transaction, TransactionResponse,
 };
 use std::sync::Arc;
 use tonic::{Request, Response, Status};
@@ -20,12 +21,22 @@ impl ConsensusServiceImpl {
 
 #[tonic::async_trait]
 impl ConsensusService for ConsensusServiceImpl {
-    // QUERIES (Not Implemented)
     async fn get_topic_info(
         &self,
-        _request: Request<Query>,
+        request: Request<Query>,
     ) -> Result<Response<TopLevelResponse>, Status> {
-        Err(Status::unimplemented("Query not yet implemented"))
+        if let Some(query::Query::ConsensusGetTopicInfo(q)) = request.into_inner().query {
+            let handler = ConsensusQueryHandler::new(self.state_reader.clone());
+            let specific_response = handler.get_topic_info(q).await?;
+            let top_level_response = TopLevelResponse {
+                response: Some(response::Response::ConsensusGetTopicInfo(specific_response)),
+            };
+            Ok(Response::new(top_level_response))
+        } else {
+            Err(Status::invalid_argument(
+                "Incorrect query type provided for getTopicInfo",
+            ))
+        }
     }
 
     // TRANSACTIONS (Not Supported)
