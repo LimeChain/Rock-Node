@@ -8,6 +8,8 @@ use std::process::Command;
 use std::time::Duration;
 use uuid::Uuid;
 
+/// Test Case: Node Restart Retains State
+/// Objective: Verify that a node can restart and retain its state.
 #[tokio::test]
 #[serial]
 async fn test_node_restart_retains_state() -> Result<()> {
@@ -29,10 +31,8 @@ async fn test_node_restart_retains_state() -> Result<()> {
 
         println!("Stopping container: {}", ctx.container.id());
         ctx.container.stop().await?;
-        // We don't remove the volume, just the container instance
     }
 
-    // Give Docker a moment to release resources
     tokio::time::sleep(Duration::from_secs(2)).await;
 
     // --- Second Run (re-attaching to the same volume) ---
@@ -43,7 +43,6 @@ async fn test_node_restart_retains_state() -> Result<()> {
         );
         let ctx_restarted = TestContext::with_config(None, Some(&volume_name)).await?;
 
-        // 1. Verify server status reflects persisted state
         let mut status_client = ctx_restarted.status_client().await?;
         let status_response = status_client
             .server_status(ServerStatusRequest::default())
@@ -53,7 +52,6 @@ async fn test_node_restart_retains_state() -> Result<()> {
         assert_eq!(status_response.first_available_block, 0);
         assert_eq!(status_response.last_available_block, 10);
 
-        // 2. Verify we can access an old block
         let mut access_client = ctx_restarted.access_client().await?;
         let access_response = access_client
             .get_block(BlockRequest {
@@ -63,7 +61,6 @@ async fn test_node_restart_retains_state() -> Result<()> {
             .into_inner();
         assert_eq!(access_response.status, block_response::Code::Success as i32);
 
-        // 3. Verify we can publish a new sequential block
         publish_blocks(&ctx_restarted, 11, 11).await?;
         let final_status_response = status_client
             .server_status(ServerStatusRequest::default())
@@ -71,7 +68,6 @@ async fn test_node_restart_retains_state() -> Result<()> {
             .into_inner();
         assert_eq!(final_status_response.last_available_block, 11);
 
-        // Cleanup the named volume
         let _ = Command::new("docker")
             .args(["volume", "rm", "-f", &volume_name])
             .output();
@@ -80,6 +76,8 @@ async fn test_node_restart_retains_state() -> Result<()> {
     Ok(())
 }
 
+/// Test Case: Hot to Cold Storage Archival
+/// Objective: Verify that blocks are archived to cold storage after a certain number of blocks.
 #[tokio::test]
 #[serial]
 async fn test_hot_to_cold_storage_archival() -> Result<()> {
@@ -151,7 +149,6 @@ database_path = "/app/data/db"
     println!("Waiting for archival cycle to run...");
     tokio::time::sleep(Duration::from_secs(35)).await;
 
-    // 1. Access a block that should now be in cold storage
     let mut access_client = ctx.access_client().await?;
     let response = access_client
         .get_block(BlockRequest {
@@ -165,7 +162,6 @@ database_path = "/app/data/db"
         "Should be able to access archived block #3"
     );
 
-    // 2. Check the metrics endpoint for archival cycles
     let http_port = ctx.http_port().await?;
     let metrics_url = format!("http://localhost:{}/metrics", http_port);
     let metrics_body = reqwest::get(&metrics_url).await?.text().await?;

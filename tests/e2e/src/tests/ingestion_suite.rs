@@ -65,7 +65,6 @@ async fn test_duplicate_block_rejected() -> Result<()> {
     let ctx = TestContext::new().await?;
     let mut client = ctx.publisher_client().await?;
 
-    // First, publish block 0 successfully
     let block_bytes = BlockBuilder::new(0).build();
     let block_proto: rock_node_protobufs::com::hedera::hapi::block::stream::Block =
         Message::decode(block_bytes.as_slice())?;
@@ -82,7 +81,6 @@ async fn test_duplicate_block_rejected() -> Result<()> {
         .publish_block_stream(ReceiverStream::new(rx1))
         .await?
         .into_inner();
-    // Drain the responses to ensure the block is processed and persisted.
     while let Some(resp) = responses.next().await {
         let resp = resp?;
         if matches!(resp.response, Some(PublishResponse::Acknowledgement(_))) {
@@ -90,7 +88,6 @@ async fn test_duplicate_block_rejected() -> Result<()> {
         }
     }
 
-    // Now, a new client tries to publish the same block's header
     let mut client2 = ctx.publisher_client().await?;
     let header_only = vec![block_proto.items[0].clone()];
     let (tx2, rx2) = mpsc::channel(1);
@@ -131,11 +128,9 @@ async fn test_duplicate_block_rejected() -> Result<()> {
 async fn test_multi_publisher_race_sends_skip_block() -> Result<()> {
     let ctx = TestContext::new().await?;
 
-    // Create two clients
     let mut client_a = ctx.publisher_client().await?;
     let mut client_b = ctx.publisher_client().await?;
 
-    // Prepare the request for block 0's header
     let header_request = {
         let block_bytes = BlockBuilder::new(0).build();
         let block_proto: rock_node_protobufs::com::hedera::hapi::block::stream::Block =
@@ -147,7 +142,6 @@ async fn test_multi_publisher_race_sends_skip_block() -> Result<()> {
         }
     };
 
-    // Client A sends the header first
     let (tx_a, rx_a) = mpsc::channel(4);
     tx_a.send(header_request.clone()).await?;
     let mut responses_a = client_a
@@ -155,10 +149,8 @@ async fn test_multi_publisher_race_sends_skip_block() -> Result<()> {
         .await?
         .into_inner();
 
-    // Give a moment for the server to process A's header
     tokio::time::sleep(Duration::from_millis(50)).await;
 
-    // Client B sends the same header
     let (tx_b, rx_b) = mpsc::channel(4);
     tx_b.send(header_request.clone()).await?;
     let mut responses_b = client_b
@@ -166,7 +158,6 @@ async fn test_multi_publisher_race_sends_skip_block() -> Result<()> {
         .await?
         .into_inner();
 
-    // Client B (the loser) should immediately get a SkipBlock response
     let b_response = tokio::time::timeout(Duration::from_secs(1), responses_b.next())
         .await?
         .unwrap();
@@ -178,7 +169,6 @@ async fn test_multi_publisher_race_sends_skip_block() -> Result<()> {
         "Client B should have received SkipBlock"
     );
 
-    // Client A (the winner) should not have received any message yet, as it's waiting for the full block
     let a_result = tokio::time::timeout(Duration::from_millis(200), responses_a.next()).await;
     assert!(
         a_result.is_err(),
@@ -204,8 +194,6 @@ async fn test_multi_publisher_broadcast_ack() -> Result<()> {
                 .unwrap()
                 .into_inner();
 
-            // --- Block 0 ---
-            // A sends block 0 and becomes primary
             let block0_bytes = BlockBuilder::new(0).build();
             let block0_proto: rock_node_protobufs::com::hedera::hapi::block::stream::Block =
                 Message::decode(block0_bytes.as_slice()).unwrap();
@@ -217,7 +205,6 @@ async fn test_multi_publisher_broadcast_ack() -> Result<()> {
             .await
             .unwrap();
 
-            // A should receive the ACK for block 0
             let resp0 = responses.next().await.unwrap().unwrap();
             assert!(matches!(
                 resp0.response,
@@ -227,8 +214,6 @@ async fn test_multi_publisher_broadcast_ack() -> Result<()> {
                 }))
             ));
 
-            // --- Block 1 ---
-            // A sends header for block 1 but will be told to skip
             let block1_header_bytes = BlockBuilder::new(1).items();
             tx.send(PublishStreamRequest {
                 request: Some(PublishRequest::BlockItems(BlockItemSet {
@@ -238,7 +223,6 @@ async fn test_multi_publisher_broadcast_ack() -> Result<()> {
             .await
             .unwrap();
 
-            // A should receive SkipBlock for block 1, then an ACK for block 1 (sent by B)
             let resp1_skip = responses.next().await.unwrap().unwrap();
             assert!(matches!(
                 resp1_skip.response,
@@ -267,11 +251,8 @@ async fn test_multi_publisher_broadcast_ack() -> Result<()> {
                 .unwrap()
                 .into_inner();
 
-            // Give A time to become primary for block 0
             tokio::time::sleep(Duration::from_millis(100)).await;
 
-            // --- Block 0 ---
-            // B sends header for block 0 and is told to skip
             let block0_header_bytes = BlockBuilder::new(0).items();
             tx.send(PublishStreamRequest {
                 request: Some(PublishRequest::BlockItems(BlockItemSet {
@@ -281,7 +262,6 @@ async fn test_multi_publisher_broadcast_ack() -> Result<()> {
             .await
             .unwrap();
 
-            // B should receive SkipBlock, then an ACK for block 0 (sent by A)
             let resp0_skip = responses.next().await.unwrap().unwrap();
             assert!(matches!(
                 resp0_skip.response,
@@ -297,8 +277,6 @@ async fn test_multi_publisher_broadcast_ack() -> Result<()> {
                 }))
             ));
 
-            // --- Block 1 ---
-            // B sends block 1 and becomes primary
             let block1_bytes = BlockBuilder::new(1).build();
             let block1_proto: rock_node_protobufs::com::hedera::hapi::block::stream::Block =
                 Message::decode(block1_bytes.as_slice()).unwrap();
@@ -310,7 +288,6 @@ async fn test_multi_publisher_broadcast_ack() -> Result<()> {
             .await
             .unwrap();
 
-            // B should receive the ACK for block 1
             let resp1 = responses.next().await.unwrap().unwrap();
             assert!(matches!(
                 resp1.response,

@@ -27,14 +27,12 @@ async fn test_get_account_info_successfully() -> Result<()> {
     let mut publish_client = ctx.publisher_client().await?;
     let mut query_client = ctx.query_client().await?;
 
-    // 1. Build a block with a state change for account 0.0.999
     let block_bytes = BlockBuilder::new(0)
         .with_account_state_change(999, "test-memo")
         .build();
     let block_proto: rock_node_protobufs::com::hedera::hapi::block::stream::Block =
         Message::decode(block_bytes.as_slice())?;
 
-    // 2. Publish the block
     let (tx, rx) = mpsc::channel(1);
     tx.send(PublishStreamRequest {
         request: Some(PublishRequest::BlockItems(BlockItemSet {
@@ -48,10 +46,8 @@ async fn test_get_account_info_successfully() -> Result<()> {
         .publish_block_stream(ReceiverStream::new(rx))
         .await?
         .into_inner();
-    // Drain responses to ensure persistence
     while responses.next().await.is_some() {}
 
-    // 3. Query for the account info
     let account_id = AccountId {
         shard_num: 0,
         realm_num: 0,
@@ -66,7 +62,6 @@ async fn test_get_account_info_successfully() -> Result<()> {
 
     let response = query_client.get_account_info(query).await?.into_inner();
 
-    // 4. Assert the response
     let crypto_response = match response.response {
         Some(rock_node_protobufs::proto::response::Response::CryptoGetInfo(info)) => info,
         other => panic!("Expected CryptoGetInfo response, got {:?}", other),
@@ -107,7 +102,6 @@ async fn test_get_account_balance_successfully() -> Result<()> {
     let mut publish_client = ctx.publisher_client().await?;
     let mut query_client = ctx.query_client().await?;
 
-    // 1. Build and publish a block that sets the balance for account 0.0.1001
     let block_bytes = BlockBuilder::new(0)
         .with_account_state_change(1001, "balance-test")
         .build();
@@ -129,7 +123,6 @@ async fn test_get_account_balance_successfully() -> Result<()> {
         .into_inner();
     while responses.next().await.is_some() {} // Drain acks
 
-    // 2. Query for the account's balance
     let account_id = AccountId {
         shard_num: 0,
         realm_num: 0,
@@ -148,7 +141,6 @@ async fn test_get_account_balance_successfully() -> Result<()> {
 
     let response = query_client.crypto_get_balance(query).await?.into_inner();
 
-    // 3. Assert the response is correct
     let balance_response = match response.response {
         Some(response::Response::CryptogetAccountBalance(resp)) => resp,
         other => panic!("Expected CryptoGetAccountBalanceResponse, got {:?}", other),
@@ -162,7 +154,6 @@ async fn test_get_account_balance_successfully() -> Result<()> {
             .node_transaction_precheck_code,
         ResponseCodeEnum::Ok as i32
     );
-    // The balance is set to the account number in the builder for simplicity
     assert_eq!(balance_response.balance, 1001);
 
     Ok(())

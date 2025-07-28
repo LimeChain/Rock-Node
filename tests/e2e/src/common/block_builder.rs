@@ -1,15 +1,17 @@
 use prost::Message;
 use rock_node_protobufs::com::hedera::hapi::block::stream::output::{
-    map_change_key, map_change_value, MapChangeKey, MapChangeValue, StateChange, StateChanges, StateIdentifier,
+    map_change_key, map_change_value, singleton_update_change, MapChangeKey, MapChangeValue,
+    StateChange, StateChanges, StateIdentifier,
 };
 use rock_node_protobufs::com::hedera::hapi::block::stream::output::{
-    state_change::ChangeOperation, MapUpdateChange,
+    state_change::ChangeOperation, MapUpdateChange, SingletonUpdateChange,
 };
 use rock_node_protobufs::com::hedera::hapi::block::stream::{
     block_item::Item as BlockItemType, Block, BlockItem, BlockProof,
 };
+use rock_node_protobufs::com::hedera::hapi::node::state::blockstream::BlockStreamInfo;
 use rock_node_protobufs::proto::{
-    account_id, Account, AccountId, File, FileId, Timestamp, Topic, TopicId,
+    account_id, Account, AccountId, File, FileId, SemanticVersion, Timestamp, Topic, TopicId,
 };
 /// Utility to construct valid `Block` protobuf objects for testing purposes.
 #[derive(Debug)]
@@ -22,8 +24,20 @@ impl BlockBuilder {
     /// Start building a new block with the required `BlockHeader` already in place.
     pub fn new(block_number: u64) -> Self {
         let header = rock_node_protobufs::com::hedera::hapi::block::stream::output::BlockHeader {
-            hapi_proto_version: None,
-            software_version: None,
+            hapi_proto_version: Some(SemanticVersion {
+                major: 0,
+                minor: 45,
+                patch: 1,
+                pre: "test".to_string(),
+                build: "e2e".to_string(),
+            }),
+            software_version: Some(SemanticVersion {
+                major: 0,
+                minor: 45,
+                patch: 1,
+                pre: "test".to_string(),
+                build: "e2e".to_string(),
+            }),
             number: block_number,
             block_timestamp: None,
             hash_algorithm: 0,
@@ -178,6 +192,38 @@ impl BlockBuilder {
 
     /// Finalise the block by appending a dummy `BlockProof` and returning the encoded bytes.
     pub fn build(mut self) -> Vec<u8> {
+        // Add a BlockStreamInfo state change, as this is where the version info is stored.
+        let block_stream_info = BlockStreamInfo {
+            creation_software_version: Some(SemanticVersion {
+                major: 0,
+                minor: 45,
+                patch: 1,
+                pre: "test".to_string(),
+                build: "e2e".to_string(),
+            }),
+            ..Default::default()
+        };
+
+        let state_change = StateChange {
+            state_id: StateIdentifier::StateIdBlockStreamInfo as u32,
+            change_operation: Some(ChangeOperation::SingletonUpdate(SingletonUpdateChange {
+                new_value: Some(singleton_update_change::NewValue::BlockStreamInfoValue(
+                    block_stream_info,
+                )),
+            })),
+        };
+
+        let state_changes_item = BlockItem {
+            item: Some(BlockItemType::StateChanges(StateChanges {
+                consensus_timestamp: Some(Timestamp {
+                    seconds: self.block_number as i64,
+                    nanos: 1, // Use a different nano to avoid collision with other state changes
+                }),
+                state_changes: vec![state_change],
+            })),
+        };
+        self.items.push(state_changes_item);
+
         let proof = BlockProof {
             block: self.block_number,
             ..Default::default()

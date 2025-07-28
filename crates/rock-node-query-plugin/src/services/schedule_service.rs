@@ -1,6 +1,7 @@
+use crate::handlers::schedule_handler::ScheduleQueryHandler;
 use rock_node_core::StateReader;
 use rock_node_protobufs::proto::{
-    schedule_service_server::ScheduleService, Query, Response as TopLevelResponse,
+    query, response, schedule_service_server::ScheduleService, Query, Response as TopLevelResponse,
     ResponseCodeEnum, Transaction, TransactionResponse,
 };
 use std::sync::Arc;
@@ -20,12 +21,22 @@ impl ScheduleServiceImpl {
 
 #[tonic::async_trait]
 impl ScheduleService for ScheduleServiceImpl {
-    // QUERIES (Not Implemented)
     async fn get_schedule_info(
         &self,
-        _request: Request<Query>,
+        request: Request<Query>,
     ) -> Result<Response<TopLevelResponse>, Status> {
-        Err(Status::unimplemented("Query not yet implemented"))
+        if let Some(query::Query::ScheduleGetInfo(q)) = request.into_inner().query {
+            let handler = ScheduleQueryHandler::new(self.state_reader.clone());
+            let specific_response = handler.get_schedule_info(q).await?;
+            let top_level_response = TopLevelResponse {
+                response: Some(response::Response::ScheduleGetInfo(specific_response)),
+            };
+            Ok(Response::new(top_level_response))
+        } else {
+            Err(Status::invalid_argument(
+                "Incorrect query type provided for getScheduleInfo",
+            ))
+        }
     }
 
     // TRANSACTIONS (Not Supported)

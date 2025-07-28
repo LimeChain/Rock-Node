@@ -1,7 +1,8 @@
+use crate::handlers::network_handler::NetworkQueryHandler;
 use rock_node_core::StateReader;
 use rock_node_protobufs::proto::{
-    network_service_server::NetworkService, Query, Response as TopLevelResponse, ResponseCodeEnum,
-    Transaction, TransactionResponse,
+    network_service_server::NetworkService, query, response, Query, Response as TopLevelResponse,
+    ResponseCodeEnum, Transaction, TransactionResponse,
 };
 use std::sync::Arc;
 use tonic::{Request, Response, Status};
@@ -20,26 +21,47 @@ impl NetworkServiceImpl {
 
 #[tonic::async_trait]
 impl NetworkService for NetworkServiceImpl {
-    // QUERIES (Not Implemented)
     async fn get_version_info(
         &self,
-        _request: Request<Query>,
+        request: Request<Query>,
     ) -> Result<Response<TopLevelResponse>, Status> {
-        Err(Status::unimplemented("Query not yet implemented"))
+        if let Some(query::Query::NetworkGetVersionInfo(q)) = request.into_inner().query {
+            let handler = NetworkQueryHandler::new(self.state_reader.clone());
+            let specific_response = handler.get_version_info(q).await?;
+            let top_level_response = TopLevelResponse {
+                response: Some(response::Response::NetworkGetVersionInfo(specific_response)),
+            };
+            Ok(Response::new(top_level_response))
+        } else {
+            Err(Status::invalid_argument(
+                "Incorrect query type provided for getVersionInfo",
+            ))
+        }
     }
 
     async fn get_execution_time(
         &self,
         _request: Request<Query>,
     ) -> Result<Response<TopLevelResponse>, Status> {
-        Err(Status::unimplemented("Query not yet implemented"))
+        Err(Status::unimplemented("getExecutionTime is deprecated"))
     }
 
     async fn get_account_details(
         &self,
-        _request: Request<Query>,
+        request: Request<Query>,
     ) -> Result<Response<TopLevelResponse>, Status> {
-        Err(Status::unimplemented("Query not yet implemented"))
+        if let Some(query::Query::AccountDetails(q)) = request.into_inner().query {
+            let handler = NetworkQueryHandler::new(self.state_reader.clone());
+            let specific_response = handler.get_account_details(q).await?;
+            let top_level_response = TopLevelResponse {
+                response: Some(response::Response::AccountDetails(specific_response)),
+            };
+            Ok(Response::new(top_level_response))
+        } else {
+            Err(Status::invalid_argument(
+                "Incorrect query type provided for getAccountDetails",
+            ))
+        }
     }
 
     // TRANSACTIONS (Not Supported)

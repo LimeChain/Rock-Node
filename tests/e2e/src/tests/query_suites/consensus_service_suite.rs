@@ -24,14 +24,12 @@ async fn test_get_topic_info_successfully() -> Result<()> {
     let mut publish_client = ctx.publisher_client().await?;
     let mut query_client = ctx.consensus_client().await?;
 
-    // 1. Build a block with a state change for topic 0.0.123
     let block_bytes = BlockBuilder::new(0)
         .with_topic_state_change(123, "test-topic-memo")
         .build();
     let block_proto: rock_node_protobufs::com::hedera::hapi::block::stream::Block =
         Message::decode(block_bytes.as_slice())?;
 
-    // 2. Publish the block
     let (tx, rx) = mpsc::channel(1);
     tx.send(PublishStreamRequest {
         request: Some(PublishRequest::BlockItems(BlockItemSet {
@@ -45,10 +43,8 @@ async fn test_get_topic_info_successfully() -> Result<()> {
         .publish_block_stream(ReceiverStream::new(rx))
         .await?
         .into_inner();
-    // Drain responses to ensure persistence
     while responses.next().await.is_some() {}
 
-    // 3. Query for the topic info
     let topic_id = TopicId {
         shard_num: 0,
         realm_num: 0,
@@ -63,7 +59,6 @@ async fn test_get_topic_info_successfully() -> Result<()> {
 
     let response = query_client.get_topic_info(query).await?.into_inner();
 
-    // 4. Assert the response
     let consensus_response = match response.response {
         Some(response::Response::ConsensusGetTopicInfo(info)) => info,
         other => panic!("Expected ConsensusGetTopicInfo response, got {:?}", other),

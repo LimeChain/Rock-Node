@@ -36,7 +36,6 @@ fn header_number(item_set: &rock_node_protobufs::org::hiero::block::api::BlockIt
 async fn test_historical_stream() -> Result<()> {
     let ctx = TestContext::new().await?;
 
-    // Pre-populate blocks 0..=20.
     publish_blocks(&ctx, 0, 20).await?;
 
     let mut sub_client = ctx.subscriber_client().await?;
@@ -79,7 +78,6 @@ async fn test_historical_stream() -> Result<()> {
 async fn test_historical_to_live_stream() -> Result<()> {
     let ctx = TestContext::new().await?;
 
-    // Publish first batch 0..=5 so they are in persistence before subscription.
     publish_blocks(&ctx, 0, 5).await?;
 
     let mut sub_client = ctx.subscriber_client().await?;
@@ -92,8 +90,6 @@ async fn test_historical_to_live_stream() -> Result<()> {
         .await?
         .into_inner();
 
-    // Determine the endpoint for the publish service and spawn a task that will
-    // publish the remaining blocks after a short delay.
     let publish_port = ctx.container.get_host_port_ipv4(50051).await?;
     let publish_endpoint = format!("http://localhost:{}", publish_port);
 
@@ -228,17 +224,15 @@ async fn test_multiple_concurrent_subscribers() -> Result<()> {
                 let block_num = header_number(&set);
                 received_blocks.push(block_num);
                 if block_num == 22 {
-                    break; // End the test for B after receiving a live block
+                    break;
                 }
             }
         }
         received_blocks
     });
 
-    // Give subscribers a moment to connect and start receiving historical data
     tokio::time::sleep(Duration::from_millis(200)).await;
 
-    // Publish live blocks
     publish_blocks(&ctx, 21, 22).await?;
 
     // --- Assertions ---
