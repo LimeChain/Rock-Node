@@ -11,8 +11,8 @@ use rock_node_protobufs::com::hedera::hapi::block::stream::{
 };
 use rock_node_protobufs::com::hedera::hapi::node::state::blockstream::BlockStreamInfo;
 use rock_node_protobufs::proto::{
-    account_id, Account, AccountId, File, FileId, Schedule, ScheduleId, SemanticVersion, Timestamp,
-    Topic, TopicId,
+    account_id, Account, AccountId, File, FileId, Nft, NftId, Schedule, ScheduleId,
+    SemanticVersion, Timestamp, Token, TokenId, Topic, TopicId,
 };
 /// Utility to construct valid `Block` protobuf objects for testing purposes.
 #[derive(Debug)]
@@ -210,6 +210,109 @@ impl BlockBuilder {
 
         let state_change = StateChange {
             state_id: StateIdentifier::StateIdSchedulesById as u32,
+            change_operation: Some(ChangeOperation::MapUpdate(MapUpdateChange {
+                key: Some(map_key),
+                value: Some(map_value),
+            })),
+        };
+
+        let state_changes_item = BlockItem {
+            item: Some(BlockItemType::StateChanges(StateChanges {
+                consensus_timestamp: Some(Timestamp {
+                    seconds: self.block_number as i64,
+                    nanos: 0,
+                }),
+                state_changes: vec![state_change],
+            })),
+        };
+
+        self.items.push(state_changes_item);
+        self
+    }
+
+    /// Adds a state change for a simple token to the block.
+    pub fn with_token_state_change(mut self, token_num: i64, symbol: &str, name: &str) -> Self {
+        let token_id = TokenId {
+            shard_num: 0,
+            realm_num: 0,
+            token_num,
+        };
+
+        let token_value = Token {
+            token_id: Some(token_id.clone()),
+            symbol: symbol.to_string(),
+            name: name.to_string(),
+            ..Default::default()
+        };
+
+        let map_key = MapChangeKey {
+            key_choice: Some(map_change_key::KeyChoice::TokenIdKey(token_id)),
+        };
+
+        let map_value = MapChangeValue {
+            value_choice: Some(map_change_value::ValueChoice::TokenValue(token_value)),
+        };
+
+        let state_change = StateChange {
+            state_id: StateIdentifier::StateIdTokens as u32,
+            change_operation: Some(ChangeOperation::MapUpdate(MapUpdateChange {
+                key: Some(map_key),
+                value: Some(map_value),
+            })),
+        };
+
+        let state_changes_item = BlockItem {
+            item: Some(BlockItemType::StateChanges(StateChanges {
+                consensus_timestamp: Some(Timestamp {
+                    seconds: self.block_number as i64,
+                    nanos: 0,
+                }),
+                state_changes: vec![state_change],
+            })),
+        };
+
+        self.items.push(state_changes_item);
+        self
+    }
+
+    /// Adds a state change for a simple NFT to the block.
+    pub fn with_nft_state_change(
+        mut self,
+        token_num: i64,
+        serial_number: i64,
+        owner_num: i64,
+    ) -> Self {
+        let nft_id = NftId {
+            token_id: Some(TokenId {
+                shard_num: 0,
+                realm_num: 0,
+                token_num,
+            }),
+            serial_number,
+        };
+
+        let owner_id = AccountId {
+            shard_num: 0,
+            realm_num: 0,
+            account: Some(account_id::Account::AccountNum(owner_num)),
+        };
+
+        let nft_value = Nft {
+            nft_id: Some(nft_id.clone()),
+            owner_id: Some(owner_id),
+            ..Default::default()
+        };
+
+        let map_key = MapChangeKey {
+            key_choice: Some(map_change_key::KeyChoice::NftIdKey(nft_id)),
+        };
+
+        let map_value = MapChangeValue {
+            value_choice: Some(map_change_value::ValueChoice::NftValue(nft_value)),
+        };
+
+        let state_change = StateChange {
+            state_id: StateIdentifier::StateIdNfts as u32,
             change_operation: Some(ChangeOperation::MapUpdate(MapUpdateChange {
                 key: Some(map_key),
                 value: Some(map_value),

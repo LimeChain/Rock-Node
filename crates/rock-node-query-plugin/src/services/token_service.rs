@@ -1,7 +1,8 @@
+use crate::handlers::token_handler::TokenQueryHandler;
 use rock_node_core::StateReader;
 use rock_node_protobufs::proto::{
-    token_service_server::TokenService, Query, Response as TopLevelResponse, ResponseCodeEnum,
-    Transaction, TransactionResponse,
+    query, response, token_service_server::TokenService, Query, Response as TopLevelResponse,
+    ResponseCodeEnum, Transaction, TransactionResponse,
 };
 use std::sync::Arc;
 use tonic::{Request, Response, Status};
@@ -20,18 +21,41 @@ impl TokenServiceImpl {
 
 #[tonic::async_trait]
 impl TokenService for TokenServiceImpl {
-    // QUERIES (Not Implemented)
+    // QUERIES
     async fn get_token_info(
         &self,
-        _request: Request<Query>,
+        request: Request<Query>,
     ) -> Result<Response<TopLevelResponse>, Status> {
-        Err(Status::unimplemented("Query not yet implemented"))
+        if let Some(query::Query::TokenGetInfo(q)) = request.into_inner().query {
+            let handler = TokenQueryHandler::new(self.state_reader.clone());
+            let specific_response = handler.get_token_info(q).await?;
+            let top_level_response = TopLevelResponse {
+                response: Some(response::Response::TokenGetInfo(specific_response)),
+            };
+            Ok(Response::new(top_level_response))
+        } else {
+            Err(Status::invalid_argument(
+                "Incorrect query type provided for getTokenInfo",
+            ))
+        }
     }
+
     async fn get_token_nft_info(
         &self,
-        _request: Request<Query>,
+        request: Request<Query>,
     ) -> Result<Response<TopLevelResponse>, Status> {
-        Err(Status::unimplemented("Query not yet implemented"))
+        if let Some(query::Query::TokenGetNftInfo(q)) = request.into_inner().query {
+            let handler = TokenQueryHandler::new(self.state_reader.clone());
+            let specific_response = handler.get_token_nft_info(q).await?;
+            let top_level_response = TopLevelResponse {
+                response: Some(response::Response::TokenGetNftInfo(specific_response)),
+            };
+            Ok(Response::new(top_level_response))
+        } else {
+            Err(Status::invalid_argument(
+                "Incorrect query type provided for getTokenNftInfo",
+            ))
+        }
     }
 
     // TRANSACTIONS (Not Supported)

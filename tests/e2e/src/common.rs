@@ -9,6 +9,7 @@ use rock_node_protobufs::org::hiero::block::api::{
 };
 use rock_node_protobufs::proto::network_service_client::NetworkServiceClient;
 use rock_node_protobufs::proto::schedule_service_client::ScheduleServiceClient;
+use rock_node_protobufs::proto::token_service_client::TokenServiceClient;
 use rock_node_protobufs::proto::{
     consensus_service_client::ConsensusServiceClient, crypto_service_client::CryptoServiceClient,
     file_service_client::FileServiceClient,
@@ -202,6 +203,13 @@ impl TestContext {
         let endpoint = format!("http://localhost:{}", port);
         let channel = Channel::from_shared(endpoint)?.connect().await?;
         Ok(ScheduleServiceClient::new(channel))
+    }
+
+    pub async fn token_client(&self) -> Result<TokenServiceClient<Channel>> {
+        let port = self.container.get_host_port_ipv4(50055).await?;
+        let endpoint = format!("http://localhost:{}", port);
+        let channel = Channel::from_shared(endpoint)?.connect().await?;
+        Ok(TokenServiceClient::new(channel))
     }
 }
 
