@@ -255,3 +255,228 @@ fn build_response_header(
         ..Default::default()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rock_node_protobufs::{
+        com::hedera::hapi::node::state::blockstream::BlockStreamInfo,
+        proto::{account_id, Account, AccountId, SemanticVersion, TokenId, TokenRelation},
+    };
+    use std::collections::HashMap;
+
+    /// A mock implementation of `StateReader` for controlled testing.
+    #[derive(Debug, Default)]
+    struct MockStateReader {
+        state: HashMap<Vec<u8>, Vec<u8>>,
+    }
+
+    impl MockStateReader {
+        fn insert(&mut self, key: Vec<u8>, value: Vec<u8>) {
+            self.state.insert(key, value);
+        }
+    }
+
+    impl StateReader for MockStateReader {
+        fn get_state_value(&self, key: &[u8]) -> anyhow::Result<Option<Vec<u8>>> {
+            Ok(self.state.get(key).cloned())
+        }
+    }
+
+    #[tokio::test]
+    async fn test_get_version_info_found() {
+        let mut mock_reader = MockStateReader::default();
+        let state_id = StateIdentifier::StateIdBlockStreamInfo as u32;
+        let version = SemanticVersion {
+            major: 1,
+            minor: 2,
+            patch: 3,
+            pre: "test".to_string(),
+            build: "test".to_string(),
+            ..Default::default()
+        };
+        let block_stream_info = BlockStreamInfo {
+            creation_software_version: Some(version.clone()),
+            ..Default::default()
+        };
+        mock_reader.insert(
+            state_id.to_be_bytes().to_vec(),
+            block_stream_info.encode_to_vec(),
+        );
+
+        let handler = NetworkQueryHandler::new(Arc::new(mock_reader));
+        let query = NetworkGetVersionInfoQuery { header: None };
+        let response = handler.get_version_info(query).await.unwrap();
+
+        assert_eq!(
+            response.header.unwrap().node_transaction_precheck_code,
+            ResponseCodeEnum::Ok as i32
+        );
+        assert_eq!(response.hapi_proto_version.unwrap(), version);
+        assert_eq!(response.hedera_services_version.unwrap(), version);
+    }
+
+    #[tokio::test]
+    async fn test_get_version_info_not_found() {
+        let mock_reader = MockStateReader::default();
+        let handler = NetworkQueryHandler::new(Arc::new(mock_reader));
+        let query = NetworkGetVersionInfoQuery { header: None };
+        let response = handler.get_version_info(query).await.unwrap();
+
+        assert_eq!(
+            response.header.unwrap().node_transaction_precheck_code,
+            ResponseCodeEnum::Ok as i32
+        );
+        assert!(response.hapi_proto_version.is_none());
+        assert!(response.hedera_services_version.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_get_account_details_found() {
+        let account_id = AccountId {
+            shard_num: 0,
+            realm_num: 0,
+            account: Some(account_id::Account::AccountNum(1001)),
+        };
+        let account = Account {
+            account_id: Some(account_id.clone()),
+            memo: "test_memo".to_string(),
+            ..Default::default()
+        };
+        let map_value = MapChangeValue {
+            value_choice: Some(map_change_value::ValueChoice::AccountValue(account)),
+        };
+
+        let mut mock_reader = MockStateReader::default();
+        let state_id = StateIdentifier::StateIdAccounts as u32;
+        let map_key = MapChangeKey {
+            key_choice: Some(map_change_key::KeyChoice::AccountIdKey(account_id.clone())),
+        };
+        let key = [state_id.to_be_bytes().as_slice(), &map_key.encode_to_vec()].concat();
+        mock_reader.insert(key, map_value.encode_to_vec());
+
+        let handler = NetworkQueryHandler::new(Arc::new(mock_reader));
+        let query = GetAccountDetailsQuery {
+            account_id: Some(account_id.clone()),
+            header: None,
+        };
+
+        let response = handler.get_account_details(query).await.unwrap();
+
+        assert_eq!(
+            response.header.unwrap().node_transaction_precheck_code,
+            ResponseCodeEnum::Ok as i32
+        );
+        let details = response.account_details.unwrap();
+        assert_eq!(details.memo, "test_memo");
+        assert_eq!(details.account_id.unwrap(), account_id);
+    }
+
+    #[tokio::test]
+    async fn test_get_account_details_with_token_rels() {
+        let account_id = AccountId {
+            shard_num: 0,
+            realm_num: 0,
+            account: Some(account_id::Account::AccountNum(1002)),
+        };
+        let token_id1 = TokenId {
+            token_num: 2001,
+            ..Default::default()
+        };
+        let token_id2 = TokenId {
+            token_num: 2002,
+            ..Default::default()
+        };
+
+        let account = Account {
+            account_id: Some(account_id.clone()),
+            number_associations: 2,
+            head_token_id: Some(token_id1.clone()),
+            ..Default::default()
+        };
+        let token_rel1 = TokenRelation {
+            account_id: Some(account_id.clone()),
+            token_id: Some(token_id1.clone()),
+            balance: 100,
+            next_token: Some(token_id2.clone()),
+            ..Default::default()
+        };
+        let token_rel2 = TokenRelation {
+            account_id: Some(account_id.clone()),
+            token_id: Some(token_id2.clone()),
+            balance: 200,
+            ..Default::default()
+        };
+
+        let mut mock_reader = MockStateReader::default();
+        // Insert Account
+        let acc_map_key = MapChangeKey {
+            key_choice: Some(map_change_key::KeyChoice::AccountIdKey(account_id.clone())),
+        };
+        let acc_map_val = MapChangeValue {
+            value_choice: Some(map_change_value::ValueChoice::AccountValue(account)),
+        };
+        let acc_key = [
+            (StateIdentifier::StateIdAccounts as u32)
+                .to_be_bytes()
+                .as_slice(),
+            &acc_map_key.encode_to_vec(),
+        ]
+        .concat();
+        mock_reader.insert(acc_key, acc_map_val.encode_to_vec());
+
+        // Insert TokenRels
+        let rel_state_id = StateIdentifier::StateIdTokenRelations as u32;
+        let rel1_map_key = MapChangeKey {
+            key_choice: Some(map_change_key::KeyChoice::TokenRelationshipKey(
+                rock_node_protobufs::proto::TokenAssociation {
+                    token_id: Some(token_id1.clone()),
+                    account_id: Some(account_id.clone()),
+                },
+            )),
+        };
+        let rel1_map_val = MapChangeValue {
+            value_choice: Some(map_change_value::ValueChoice::TokenRelationValue(
+                token_rel1,
+            )),
+        };
+        let rel1_key = [
+            rel_state_id.to_be_bytes().as_slice(),
+            &rel1_map_key.encode_to_vec(),
+        ]
+        .concat();
+        mock_reader.insert(rel1_key, rel1_map_val.encode_to_vec());
+
+        let rel2_map_key = MapChangeKey {
+            key_choice: Some(map_change_key::KeyChoice::TokenRelationshipKey(
+                rock_node_protobufs::proto::TokenAssociation {
+                    token_id: Some(token_id2.clone()),
+                    account_id: Some(account_id.clone()),
+                },
+            )),
+        };
+        let rel2_map_val = MapChangeValue {
+            value_choice: Some(map_change_value::ValueChoice::TokenRelationValue(
+                token_rel2,
+            )),
+        };
+        let rel2_key = [
+            rel_state_id.to_be_bytes().as_slice(),
+            &rel2_map_key.encode_to_vec(),
+        ]
+        .concat();
+        mock_reader.insert(rel2_key, rel2_map_val.encode_to_vec());
+
+        let handler = NetworkQueryHandler::new(Arc::new(mock_reader));
+        let query = GetAccountDetailsQuery {
+            account_id: Some(account_id.clone()),
+            header: None,
+        };
+
+        let response = handler.get_account_details(query).await.unwrap();
+        let details = response.account_details.unwrap();
+        assert_eq!(details.token_relationships.len(), 2);
+        assert_eq!(details.token_relationships[0].balance, 100);
+        assert_eq!(details.token_relationships[1].balance, 200);
+    }
+}

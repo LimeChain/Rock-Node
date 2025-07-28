@@ -8,6 +8,7 @@ use rock_node_protobufs::org::hiero::block::api::{
     publish_stream_request::Request as PublishRequest, BlockItemSet, PublishStreamRequest,
 };
 use rock_node_protobufs::proto::network_service_client::NetworkServiceClient;
+use rock_node_protobufs::proto::schedule_service_client::ScheduleServiceClient;
 use rock_node_protobufs::proto::{
     consensus_service_client::ConsensusServiceClient, crypto_service_client::CryptoServiceClient,
     file_service_client::FileServiceClient,
@@ -194,6 +195,13 @@ impl TestContext {
         let endpoint = format!("http://localhost:{}", port);
         let channel = Channel::from_shared(endpoint)?.connect().await?;
         Ok(NetworkServiceClient::new(channel))
+    }
+
+    pub async fn schedule_client(&self) -> Result<ScheduleServiceClient<Channel>> {
+        let port = self.container.get_host_port_ipv4(50055).await?;
+        let endpoint = format!("http://localhost:{}", port);
+        let channel = Channel::from_shared(endpoint)?.connect().await?;
+        Ok(ScheduleServiceClient::new(channel))
     }
 }
 

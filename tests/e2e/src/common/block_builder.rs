@@ -11,7 +11,8 @@ use rock_node_protobufs::com::hedera::hapi::block::stream::{
 };
 use rock_node_protobufs::com::hedera::hapi::node::state::blockstream::BlockStreamInfo;
 use rock_node_protobufs::proto::{
-    account_id, Account, AccountId, File, FileId, SemanticVersion, Timestamp, Topic, TopicId,
+    account_id, Account, AccountId, File, FileId, Schedule, ScheduleId, SemanticVersion, Timestamp,
+    Topic, TopicId,
 };
 /// Utility to construct valid `Block` protobuf objects for testing purposes.
 #[derive(Debug)]
@@ -165,6 +166,50 @@ impl BlockBuilder {
 
         let state_change = StateChange {
             state_id: StateIdentifier::StateIdFiles as u32,
+            change_operation: Some(ChangeOperation::MapUpdate(MapUpdateChange {
+                key: Some(map_key),
+                value: Some(map_value),
+            })),
+        };
+
+        let state_changes_item = BlockItem {
+            item: Some(BlockItemType::StateChanges(StateChanges {
+                consensus_timestamp: Some(Timestamp {
+                    seconds: self.block_number as i64,
+                    nanos: 0,
+                }),
+                state_changes: vec![state_change],
+            })),
+        };
+
+        self.items.push(state_changes_item);
+        self
+    }
+
+    /// Adds a state change for a simple schedule to the block.
+    pub fn with_schedule_state_change(mut self, schedule_num: i64, memo: &str) -> Self {
+        let schedule_id = ScheduleId {
+            shard_num: 0,
+            realm_num: 0,
+            schedule_num,
+        };
+
+        let schedule_value = Schedule {
+            schedule_id: Some(schedule_id.clone()),
+            memo: memo.to_string(),
+            ..Default::default()
+        };
+
+        let map_key = MapChangeKey {
+            key_choice: Some(map_change_key::KeyChoice::ScheduleIdKey(schedule_id)),
+        };
+
+        let map_value = MapChangeValue {
+            value_choice: Some(map_change_value::ValueChoice::ScheduleValue(schedule_value)),
+        };
+
+        let state_change = StateChange {
+            state_id: StateIdentifier::StateIdSchedulesById as u32,
             change_operation: Some(ChangeOperation::MapUpdate(MapUpdateChange {
                 key: Some(map_key),
                 value: Some(map_value),

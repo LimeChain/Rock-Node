@@ -37,7 +37,7 @@ jobs:
 
       - name: Start Rock Node in background
         run: |
-          cargo run -p rock-node -- --config-path config/config.toml &
+          cargo run -p rock-node -- --config-path config/config.toml
           echo $! > rocknode_pid
         env:
           RUST_LOG: info

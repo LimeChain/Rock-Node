@@ -54,7 +54,6 @@ async fn test_get_version_info_successfully() -> Result<()> {
         Some(response::Response::NetworkGetVersionInfo(resp)) => resp,
         other => panic!("Expected NetworkGetVersionInfo response, got {:?}", other),
     };
-    println!("version_response: {:?}", version_response);
     assert_eq!(
         version_response
             .header
