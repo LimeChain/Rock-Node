@@ -11,8 +11,8 @@ use rock_node_protobufs::com::hedera::hapi::block::stream::{
 };
 use rock_node_protobufs::com::hedera::hapi::node::state::blockstream::BlockStreamInfo;
 use rock_node_protobufs::proto::{
-    account_id, Account, AccountId, File, FileId, Nft, NftId, Schedule, ScheduleId,
-    SemanticVersion, Timestamp, Token, TokenId, Topic, TopicId,
+    account_id, contract_id, Account, AccountId, Bytecode, ContractId, File, FileId, Nft, NftId,
+    Schedule, ScheduleId, SemanticVersion, Timestamp, Token, TokenId, Topic, TopicId,
 };
 /// Utility to construct valid `Block` protobuf objects for testing purposes.
 #[derive(Debug)]
@@ -77,6 +77,93 @@ impl BlockBuilder {
 
         let state_change = StateChange {
             state_id: 2,
+            change_operation: Some(ChangeOperation::MapUpdate(MapUpdateChange {
+                key: Some(map_key),
+                value: Some(map_value),
+            })),
+        };
+
+        let state_changes_item = BlockItem {
+            item: Some(BlockItemType::StateChanges(StateChanges {
+                consensus_timestamp: Some(Timestamp {
+                    seconds: self.block_number as i64,
+                    nanos: 0,
+                }),
+                state_changes: vec![state_change],
+            })),
+        };
+
+        self.items.push(state_changes_item);
+        self
+    }
+
+    /// Adds a state change for a smart contract to the block.
+    pub fn with_contract_state_change(mut self, contract_num: i64, memo: &str) -> Self {
+        let account_id = AccountId {
+            shard_num: 0,
+            realm_num: 0,
+            account: Some(account_id::Account::AccountNum(contract_num)),
+        };
+
+        let account_value = Account {
+            account_id: Some(account_id.clone()),
+            memo: memo.to_string(),
+            smart_contract: true,
+            ..Default::default()
+        };
+
+        let map_key = MapChangeKey {
+            key_choice: Some(map_change_key::KeyChoice::AccountIdKey(account_id)),
+        };
+
+        let map_value = MapChangeValue {
+            value_choice: Some(map_change_value::ValueChoice::AccountValue(account_value)),
+        };
+
+        let state_change = StateChange {
+            state_id: StateIdentifier::StateIdAccounts as u32,
+            change_operation: Some(ChangeOperation::MapUpdate(MapUpdateChange {
+                key: Some(map_key),
+                value: Some(map_value),
+            })),
+        };
+
+        let state_changes_item = BlockItem {
+            item: Some(BlockItemType::StateChanges(StateChanges {
+                consensus_timestamp: Some(Timestamp {
+                    seconds: self.block_number as i64,
+                    nanos: 0,
+                }),
+                state_changes: vec![state_change],
+            })),
+        };
+
+        self.items.push(state_changes_item);
+        self
+    }
+
+    /// Adds a state change for contract bytecode to the block.
+    pub fn with_bytecode_state_change(mut self, contract_num: i64, bytecode: &[u8]) -> Self {
+        let contract_id = ContractId {
+            shard_num: 0,
+            realm_num: 0,
+            contract: Some(contract_id::Contract::ContractNum(contract_num)),
+        };
+
+        let bytecode_value = Bytecode {
+            code: bytecode.to_vec(),
+        };
+
+        let map_key = MapChangeKey {
+            key_choice: Some(map_change_key::KeyChoice::ContractIdKey(contract_id)),
+        };
+
+        let map_value = MapChangeValue {
+            value_choice: Some(map_change_value::ValueChoice::BytecodeValue(bytecode_value)),
+        };
+
+        let state_change = StateChange {
+            state_id: StateIdentifier::StateIdContractBytecode as u32,
             change_operation: Some(ChangeOperation::MapUpdate(MapUpdateChange {
                 key: Some(map_key),
                 value: Some(map_value),

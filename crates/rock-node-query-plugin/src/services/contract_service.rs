@@ -1,10 +1,12 @@
 use rock_node_core::StateReader;
 use rock_node_protobufs::proto::{
-    smart_contract_service_server::SmartContractService, Query, Response as TopLevelResponse,
-    ResponseCodeEnum, Transaction, TransactionResponse,
+    query, response, smart_contract_service_server::SmartContractService, Query,
+    Response as TopLevelResponse, ResponseCodeEnum, Transaction, TransactionResponse,
 };
 use std::sync::Arc;
 use tonic::{Request, Response, Status};
+
+use crate::handlers::contract_handler::ContractQueryHandler;
 
 /// The gRPC server implementation for the HAPI `SmartContractService`.
 #[derive(Debug)]
@@ -20,25 +22,52 @@ impl SmartContractServiceImpl {
 
 #[tonic::async_trait]
 impl SmartContractService for SmartContractServiceImpl {
-    // QUERIES (Not Implemented)
+    // QUERIES
     async fn contract_call_local_method(
         &self,
         _request: Request<Query>,
     ) -> Result<Response<TopLevelResponse>, Status> {
         Err(Status::unimplemented("Query not yet implemented"))
     }
+
     async fn get_contract_info(
         &self,
-        _request: Request<Query>,
+        request: Request<Query>,
     ) -> Result<Response<TopLevelResponse>, Status> {
-        Err(Status::unimplemented("Query not yet implemented"))
+        if let Some(query::Query::ContractGetInfo(q)) = request.into_inner().query {
+            let handler = ContractQueryHandler::new(self.state_reader.clone());
+            let specific_response = handler.get_contract_info(q).await?;
+            let top_level_response = TopLevelResponse {
+                response: Some(response::Response::ContractGetInfo(specific_response)),
+            };
+            Ok(Response::new(top_level_response))
+        } else {
+            Err(Status::invalid_argument(
+                "Incorrect query type provided for getContractInfo",
+            ))
+        }
     }
+
     async fn contract_get_bytecode(
         &self,
-        _request: Request<Query>,
+        request: Request<Query>,
     ) -> Result<Response<TopLevelResponse>, Status> {
-        Err(Status::unimplemented("Query not yet implemented"))
+        if let Some(query::Query::ContractGetBytecode(q)) = request.into_inner().query {
+            let handler = ContractQueryHandler::new(self.state_reader.clone());
+            let specific_response = handler.get_contract_bytecode(q).await?;
+            let top_level_response = TopLevelResponse {
+                response: Some(response::Response::ContractGetBytecodeResponse(
+                    specific_response,
+                )),
+            };
+            Ok(Response::new(top_level_response))
+        } else {
+            Err(Status::invalid_argument(
+                "Incorrect query type provided for contractGetBytecode",
+            ))
+        }
     }
+
     async fn get_by_solidity_id(
         &self,
         _request: Request<Query>,
