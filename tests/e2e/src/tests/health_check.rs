@@ -25,7 +25,6 @@ async fn test_node_starts_and_health_check_is_ok() -> Result<()> {
 #[tokio::test]
 #[serial]
 async fn test_multiple_containers_independence() -> Result<()> {
-    // Create first independent container
     let ctx1 = TestContext::new().await?;
     let port1 = ctx1.http_port().await?;
 

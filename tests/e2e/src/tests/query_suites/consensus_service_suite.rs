@@ -6,30 +6,30 @@ use rock_node_protobufs::{
         publish_stream_request::Request as PublishRequest, BlockItemSet, PublishStreamRequest,
     },
     proto::{
-        account_id::Account, query::Query, AccountId, CryptoGetInfoQuery, Query as TopLevelQuery,
-        ResponseCodeEnum,
+        query::Query, response, ConsensusGetTopicInfoQuery, Query as TopLevelQuery,
+        ResponseCodeEnum, TopicId,
     },
 };
 use serial_test::serial;
 use tokio::sync::mpsc;
-use tokio_stream::wrappers::ReceiverStream;
-use tokio_stream::StreamExt;
+use tokio_stream::{wrappers::ReceiverStream, StreamExt};
 
+/// Test Case: Get Topic Info
+/// Objective: Verify that the `getTopicInfo` query returns the correct topic info
+/// for a topic after its state has been updated.
 #[tokio::test]
 #[serial]
-async fn test_state_query_after_publish() -> Result<()> {
+async fn test_get_topic_info_successfully() -> Result<()> {
     let ctx = TestContext::new().await?;
     let mut publish_client = ctx.publisher_client().await?;
-    let mut query_client = ctx.query_client().await?;
+    let mut query_client = ctx.consensus_client().await?;
 
-    // 1. Build a block with a state change for account 0.0.999
     let block_bytes = BlockBuilder::new(0)
-        .with_account_state_change(999, "test-memo")
+        .with_topic_state_change(123, "test-topic-memo")
         .build();
     let block_proto: rock_node_protobufs::com::hedera::hapi::block::stream::Block =
         Message::decode(block_bytes.as_slice())?;
 
-    // 2. Publish the block
     let (tx, rx) = mpsc::channel(1);
     tx.send(PublishStreamRequest {
         request: Some(PublishRequest::BlockItems(BlockItemSet {
@@ -43,32 +43,29 @@ async fn test_state_query_after_publish() -> Result<()> {
         .publish_block_stream(ReceiverStream::new(rx))
         .await?
         .into_inner();
-    // Drain responses to ensure persistence
     while responses.next().await.is_some() {}
 
-    // 3. Query for the account info
-    let account_id = AccountId {
+    let topic_id = TopicId {
         shard_num: 0,
         realm_num: 0,
-        account: Some(Account::AccountNum(999)),
+        topic_num: 123,
     };
     let query = TopLevelQuery {
-        query: Some(Query::CryptoGetInfo(CryptoGetInfoQuery {
-            account_id: Some(account_id),
+        query: Some(Query::ConsensusGetTopicInfo(ConsensusGetTopicInfoQuery {
+            topic_id: Some(topic_id),
             header: None,
         })),
     };
 
-    let response = query_client.get_account_info(query).await?.into_inner();
+    let response = query_client.get_topic_info(query).await?.into_inner();
 
-    // 4. Assert the response
-    let crypto_response = match response.response {
-        Some(rock_node_protobufs::proto::response::Response::CryptoGetInfo(info)) => info,
-        other => panic!("Expected CryptoGetInfo response, got {:?}", other),
+    let consensus_response = match response.response {
+        Some(response::Response::ConsensusGetTopicInfo(info)) => info,
+        other => panic!("Expected ConsensusGetTopicInfo response, got {:?}", other),
     };
 
     assert_eq!(
-        crypto_response
+        consensus_response
             .header
             .as_ref()
             .unwrap()
@@ -77,17 +74,14 @@ async fn test_state_query_after_publish() -> Result<()> {
         "Response code should be OK"
     );
 
-    let account_info = crypto_response
-        .account_info
-        .expect("Response should contain AccountInfo");
+    let topic_info = consensus_response
+        .topic_info
+        .expect("Response should contain TopicInfo");
     assert_eq!(
-        account_info.memo, "test-memo",
-        "The account memo is incorrect"
+        topic_info.memo, "test-topic-memo",
+        "The topic memo is incorrect"
     );
-    assert_eq!(
-        account_info.account_id.unwrap().account.unwrap(),
-        Account::AccountNum(999)
-    );
+    assert_eq!(consensus_response.topic_id.unwrap().topic_num, 123);
 
     Ok(())
 }

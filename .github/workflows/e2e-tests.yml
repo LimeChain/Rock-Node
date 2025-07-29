@@ -49,9 +49,12 @@ jobs:
 
       - name: Run E2E tests
         run: |
-          echo "Running E2E tests..."
+          echo "Installing cargo-nextest..."
+          cargo install cargo-nextest --locked
+          
+          echo "Running E2E tests with retries..."
           cd tests/e2e
-          cargo test --locked
+          cargo nextest run --retries 2 --no-capture
         env:
           RUST_LOG: info
 

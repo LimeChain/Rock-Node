@@ -1,4 +1,9 @@
-use crate::service::CryptoServiceImpl;
+use crate::services::{
+    consensus_service::ConsensusServiceImpl, contract_service::SmartContractServiceImpl,
+    crypto_service::CryptoServiceImpl, file_service::FileServiceImpl,
+    network_service::NetworkServiceImpl, schedule_service::ScheduleServiceImpl,
+    token_service::TokenServiceImpl,
+};
 use async_trait::async_trait;
 use rock_node_core::{
     app_context::AppContext,
@@ -6,7 +11,13 @@ use rock_node_core::{
     plugin::Plugin,
     state_reader::StateReaderProvider,
 };
-use rock_node_protobufs::proto::crypto_service_server::CryptoServiceServer;
+use rock_node_protobufs::proto::{
+    consensus_service_server::ConsensusServiceServer, crypto_service_server::CryptoServiceServer,
+    file_service_server::FileServiceServer, network_service_server::NetworkServiceServer,
+    schedule_service_server::ScheduleServiceServer,
+    smart_contract_service_server::SmartContractServiceServer,
+    token_service_server::TokenServiceServer,
+};
 use std::{
     any::TypeId,
     sync::{
@@ -83,8 +94,21 @@ impl Plugin for QueryPlugin {
             )
         })?;
 
-        let crypto_service = CryptoServiceImpl::new(state_reader);
-        let server = CryptoServiceServer::new(crypto_service);
+        let crypto_service = CryptoServiceImpl::new(state_reader.clone());
+        let file_service = FileServiceImpl::new(state_reader.clone());
+        let consensus_service = ConsensusServiceImpl::new(state_reader.clone());
+        let network_service = NetworkServiceImpl::new(state_reader.clone());
+        let schedule_service = ScheduleServiceImpl::new(state_reader.clone());
+        let token_service = TokenServiceImpl::new(state_reader.clone());
+        let smart_contract_service = SmartContractServiceImpl::new(state_reader.clone());
+
+        let crypto_service_server = CryptoServiceServer::new(crypto_service);
+        let file_service_server = FileServiceServer::new(file_service);
+        let consensus_service_server = ConsensusServiceServer::new(consensus_service);
+        let network_service_server = NetworkServiceServer::new(network_service);
+        let schedule_service_server = ScheduleServiceServer::new(schedule_service);
+        let token_service_server = TokenServiceServer::new(token_service);
+        let smart_contract_service_server = SmartContractServiceServer::new(smart_contract_service);
 
         let (shutdown_tx, mut shutdown_rx) = watch::channel(());
         self.shutdown_tx = Some(shutdown_tx);
@@ -98,7 +122,13 @@ impl Plugin for QueryPlugin {
             );
 
             let server_future = tonic::transport::Server::builder()
-                .add_service(server)
+                .add_service(crypto_service_server)
+                .add_service(file_service_server)
+                .add_service(consensus_service_server)
+                .add_service(network_service_server)
+                .add_service(schedule_service_server)
+                .add_service(token_service_server)
+                .add_service(smart_contract_service_server)
                 .serve_with_shutdown(socket_addr, async move {
                     shutdown_rx.changed().await.ok();
                     info!("Gracefully shutting down Query gRPC server...");
