@@ -52,17 +52,15 @@ Before you begin, ensure you have the following installed:
 
 ### Configuration
 
-The application uses TOML configuration files. A default configuration is provided in `config/config.toml`. You can modify this file to suit your needs.
+Rock-Node ships with a comprehensive default configuration at `config/config.toml`. **Every value can be overridden via environment variables** – perfect for container or cloud deployments.
 
-Example configuration:
-```toml
-[core]
-log_level = "INFO"
-database_path = "data/"
+See the full [Configuration Reference](docs/CONFIGURATION.md) for a table-by-table mapping of TOML keys to their corresponding environment-variable names, default values and descriptions.
 
-[plugins.observability]
-enabled = true
-listen_address = "0.0.0.0:9600"
+Quick override example:
+
+```bash
+# run with TRACE log level without touching the TOML file
+ROCK_NODE__CORE__LOG_LEVEL=TRACE cargo run
 ```
 
 ### Docker Deployment

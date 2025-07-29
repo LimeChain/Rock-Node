@@ -2,7 +2,7 @@ use anyhow::Result;
 use clap::Parser;
 use rock_node_block_access_plugin::BlockAccessPlugin;
 use rock_node_core::{
-    app_context::AppContext, capability::CapabilityRegistry, config::Config,
+    app_context::AppContext, capability::CapabilityRegistry, config::Config as RockConfig,
     database::DatabaseManager, database_provider::DatabaseManagerProvider, events, BlockDataCache,
     MetricsRegistry, Plugin,
 };
@@ -22,7 +22,10 @@ use std::{
     time::Duration,
 };
 use tokio::sync::{broadcast, mpsc};
-use tracing::{error, info};
+use tracing::{error, info, trace};
+// External configuration and environment handling
+use config as config_rs;
+use dotenvy::dotenv;
 
 fn print_section(name: &str, section: &toml::Value, depth: usize) {
     let dash_char = if name == "plugins" && depth == 0 {
@@ -105,17 +108,24 @@ async fn main() -> Result<()> {
     let args = Args::parse();
 
     // --- Step 2: Load Config and Initialize Logging (ONCE) ---
-    let config_str = std::fs::read_to_string(&args.config_path).map_err(|e| {
-        anyhow::anyhow!(
-            "Failed to read config file at '{}': {}",
-            args.config_path.display(),
-            e
-        )
-    })?;
+    // NOTE: We no longer need to read the config TOML manually; the `config` crate will handle it.
+    //       We'll still validate that the file exists early to provide a clear error message.
+    if !args.config_path.exists() {
+        anyhow::bail!("Config file not found at '{}'", args.config_path.display());
+    }
 
-    let config_value: toml::Value = config_str.parse::<toml::Value>()?;
+    // Load environment variables from .env (if present) and the process environment.
+    dotenv().ok();
 
-    let config: Config = toml::from_str(&config_str)?;
+    // Build layered configuration: file values first, then environment variable overrides.
+    let settings = config_rs::Config::builder()
+        .add_source(config_rs::File::from(args.config_path.clone()))
+        .add_source(config_rs::Environment::with_prefix("ROCK_NODE").separator("__"))
+        .build()?;
+
+    // Deserialize twice: once into a TOML Value for pretty-printing, and once into our typed struct.
+    let merged_config_value: toml::Value = settings.clone().try_deserialize()?;
+    let config: RockConfig = settings.try_deserialize()?;
     let config = Arc::new(config); // Wrap config in an Arc early
     let default_log_level = &config.core.log_level;
 
@@ -133,8 +143,8 @@ async fn main() -> Result<()> {
 
     // --- Step 3: Print Banner and Show Config ---
     println!("{}", BANNER);
-    info!("Configuration loaded successfully.");
-    print_config(&config_value);
+    info!("Configuration loaded successfully (after env overrides).");
+    print_config(&merged_config_value);
 
     // --- Step 4: Initialize Core Shared Services ---
     info!("Initializing shared services...");
