@@ -171,7 +171,7 @@ impl SubscriberSession {
                     "Start block {} cannot be after end block {}",
                     start_block, req_end
                 ),
-                Code::ReadStreamInvalidEndBlockNumber,
+                Code::InvalidEndBlockNumber,
             ));
         }
         if let Some(earliest_num) = earliest {
@@ -181,7 +181,7 @@ impl SubscriberSession {
                         "Requested start block {} is earlier than the first available block {}",
                         start_block, earliest_num
                     ),
-                    Code::ReadStreamInvalidStartBlockNumber,
+                    Code::InvalidStartBlockNumber,
                 ));
             }
         }
@@ -206,7 +206,7 @@ impl SubscriberSession {
 
     async fn finalize_stream(&self, result: Result<(), SubscriberError>) {
         let (final_code, outcome_label) = match result {
-            Ok(()) => (Code::ReadStreamSuccess, "completed"),
+            Ok(()) => (Code::Success, "completed"),
             Err(e) => (e.to_status_code(), e.to_metric_label()),
         };
         self.context
@@ -218,7 +218,7 @@ impl SubscriberSession {
     }
 
     async fn send_final_status(&self, code: Code) {
-        if let Code::ReadStreamUnknown = code {
+        if let Code::Unknown = code {
             return;
         }
         info!(session_id = %self.id, "SENDING FINAL STATUS: {:?}", code);
@@ -420,7 +420,7 @@ mod tests {
         assert_eq!(block_count, 6);
         assert_eq!(
             final_msg.response,
-            Some(ResponseType::Status(Code::ReadStreamSuccess.into()))
+            Some(ResponseType::Status(Code::Success.into()))
         );
     }
 
@@ -479,7 +479,7 @@ mod tests {
         let final_msg = rx.recv().await.unwrap().unwrap();
         assert_eq!(
             final_msg.response,
-            Some(ResponseType::Status(Code::ReadStreamSuccess.into()))
+            Some(ResponseType::Status(Code::Success.into()))
         );
     }
 
@@ -508,7 +508,7 @@ mod tests {
         assert_eq!(
             final_msg.response,
             Some(ResponseType::Status(
-                Code::ReadStreamInvalidEndBlockNumber.into()
+                Code::InvalidEndBlockNumber.into()
             ))
         );
     }
@@ -558,7 +558,7 @@ mod tests {
         let final_msg = rx.recv().await.unwrap().unwrap();
         assert_eq!(
             final_msg.response,
-            Some(ResponseType::Status(Code::ReadStreamNotAvailable.into()))
+            Some(ResponseType::Status(Code::NotAvailable.into()))
         );
 
         // The channel should now be closed

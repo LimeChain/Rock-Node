@@ -31,12 +31,12 @@ impl SubscriberError {
     pub fn to_status_code(&self) -> Code {
         match self {
             SubscriberError::Validation(_, code) => *code,
-            SubscriberError::Persistence(_) => Code::ReadStreamNotAvailable,
-            SubscriberError::StreamLagged => Code::ReadStreamNotAvailable,
-            SubscriberError::TimeoutWaitingForBlock(_) => Code::ReadStreamNotAvailable,
-            SubscriberError::ServerShutdown => Code::ReadStreamNotAvailable,
-            SubscriberError::ClientDisconnected => Code::ReadStreamUnknown,
-            SubscriberError::Internal(_) => Code::ReadStreamUnknown,
+            SubscriberError::Persistence(_) => Code::Error,
+            SubscriberError::StreamLagged => Code::Error,
+            SubscriberError::TimeoutWaitingForBlock(_) => Code::Error,
+            SubscriberError::ServerShutdown => Code::Error,
+            SubscriberError::ClientDisconnected => Code::Error,
+            SubscriberError::Internal(_) => Code::Error,
         }
     }
 

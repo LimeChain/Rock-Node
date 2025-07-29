@@ -61,7 +61,7 @@ async fn test_historical_stream() -> Result<()> {
                 received += 1;
             }
             Some(SubResponse::Status(code)) => {
-                assert_eq!(code, SubCode::ReadStreamSuccess as i32);
+                assert_eq!(code, SubCode::Success as i32);
                 break;
             }
             other => panic!("Unexpected response: {:?}", other),
@@ -135,7 +135,7 @@ async fn test_historical_to_live_stream() -> Result<()> {
                 expected += 1;
             }
             Some(SubResponse::Status(code)) => {
-                assert_eq!(code, SubCode::ReadStreamSuccess as i32);
+                assert_eq!(code, SubCode::Success as i32);
                 break;
             }
             other => panic!("Unexpected response: {:?}", other),
@@ -165,7 +165,7 @@ async fn test_invalid_end_block_number() -> Result<()> {
     let first = stream.next().await.expect("Expected a response")?;
     match first.response {
         Some(SubResponse::Status(code)) => {
-            assert_eq!(code, SubCode::ReadStreamInvalidEndBlockNumber as i32);
+            assert_eq!(code, SubCode::InvalidEndBlockNumber as i32);
         }
         other => panic!("Unexpected response: {:?}", other),
     }

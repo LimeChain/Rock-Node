@@ -110,28 +110,43 @@ message BlockContentsProofResponse {
         /**
          * The response code is unspecified.
          */
-        BLOCK_CONTENT_PROOF_UNKNOWN = 0;
+        UNKNOWN = 0;
 
         /**
          * The block content proof was successfully retrieved.
          */
-        BLOCK_CONTENT_PROOF_SUCCESS = 1;
+        SUCCESS = 1;
+
+        /**
+         * The request cannot be fulfilled.<br/>
+         * The client sent a malformed or structurally incorrect request.
+         * <p>
+         * The client MAY retry the request after correcting the form and
+         * structure.
+         */
+        INVALID_REQUEST = 2;
+
+        /**
+         * The Block-Node had an error and cannot continue processing.<br/>
+         * The client may retry again later.
+         */
+        ERROR = 3;
 
         /**
          * The specified block item was not found.
          */
-        BLOCK_CONTENT_PROOF_ITEM_NOT_FOUND = 2;
+        ITEM_NOT_FOUND = 4;
 
         /**
          * The block content proof is not available for the specified block.
          */
-        BLOCK_CONTENT_PROOF_NOT_AVAILABLE = 3;
+        NOT_AVAILABLE = 5;
 
         /**
          * Duplicate hash items were found, causing ambiguity.
          * Clients MUST use the block item index to resolve the ambiguity.
          */
-        BLOCK_CONTENT_PROOF_DUPLICATE_HASH_ITEM_FOUND = 4;
+        DUPLICATE_HASH_ITEM_FOUND = 6;
     }
 
     /**
@@ -199,22 +214,22 @@ message StateProofResponse {
         /**
          * The response code is unspecified.
          */
-        STATE_PROOF_UNKNOWN = 0;
+        UNKNOWN = 0;
 
         /**
          * The state proof was successfully retrieved.
          */
-        STATE_PROOF_SUCCESS = 1;
+        SUCCESS = 1;
 
         /**
          * The specified state key was not found.
          */
-        STATE_PROOF_KEY_NOT_FOUND = 2;
+        KEY_NOT_FOUND = 2;
 
         /**
          * The state proof is not available for the specified block.
          */
-        STATE_PROOF_NOT_AVAILABLE = 3;
+        NOT_AVAILABLE = 3;
     }
 
     /**

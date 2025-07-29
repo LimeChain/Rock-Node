@@ -40,7 +40,7 @@ fn main() -> Result<()> {
     if !consensus_node_proto_src.exists() {
         println!("cargo:info=Cloning hiero-consensus-node repository...");
         let repo_url = "https://github.com/hiero-ledger/hiero-consensus-node.git";
-        let cn_tag_hash = "efb0134e921b32ed6302da9c93874d65492e876f";
+        let cn_tag_hash = "c86619410f0e0da3719c39c9447a96438200166d";
         run_command(
             Command::new("git")
                 .arg("clone")
@@ -71,6 +71,25 @@ fn main() -> Result<()> {
         let src_path = consensus_node_proto_src.join(dir);
         if src_path.exists() {
             copy(&src_path, &unified_proto_dir, &CopyOptions::new())?;
+        }
+    }
+
+    // Remove duplicated .proto files that are overridden by local workspace definitions
+    let duplicate_block_protos = [
+        "block/block_access_service.proto",
+        "block/block_stream_publish_service.proto",
+        "block/block_stream_subscribe_service.proto",
+        "block/node_service.proto",
+        "block/proof_service.proto",
+        "block/reconnect_service.proto",
+        "block/state_service.proto",
+        "block/shared_message_types.proto",
+    ];
+
+    for rel_path in &duplicate_block_protos {
+        let file_path = unified_proto_dir.join(rel_path);
+        if file_path.exists() {
+            std::fs::remove_file(&file_path)?;
         }
     }
 

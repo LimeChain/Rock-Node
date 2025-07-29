@@ -22,8 +22,7 @@ use std::{
     time::Duration,
 };
 use tokio::sync::{broadcast, mpsc};
-use tracing::{error, info, trace};
-// External configuration and environment handling
+use tracing::{error, info};
 use config as config_rs;
 use dotenvy::dotenv;
 

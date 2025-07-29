@@ -268,7 +268,6 @@ impl SessionManager {
                     response: Some(publish_stream_response::Response::Acknowledgement(
                         BlockAcknowledgement {
                             block_number: block_to_await,
-                            block_already_exists: false,
                             block_root_hash: Vec::new(),
                         },
                     )),

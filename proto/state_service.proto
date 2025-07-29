@@ -63,22 +63,29 @@ message StateSnapshotResponse {
          * This status indicates the server software failed to set a status,
          * and SHALL be considered a software defect.
          */
-        STATE_SNAPSHOT_UNKNOWN = 0;
-
-        /**
-         * The requesting client account lacks sufficient HBAR to pay the
-         * service fee for this request.<br/>
-         * The client MAY retry the request, but MUST increase the client
-         * account balance with this block node server before doing so.
-         */
-        STATE_SNAPSHOT_INSUFFICIENT_BALANCE = 1;
+        UNKNOWN = 0;
 
         /**
          * The request succeeded.<br/>
          * The full snapshot data MAY be read via the endpoint provided in the
          * `snapshot_reference` field for the duration specified.
          */
-        STATE_SNAPSHOT_SUCCESS = 2;
+        SUCCESS = 1;
+
+        /**
+         * The request cannot be fulfilled.<br/>
+         * The client sent a malformed or structurally incorrect request.
+         * <p>
+         * The client MAY retry the request after correcting the form and
+         * structure.
+         */
+        INVALID_REQUEST = 2;
+
+        /**
+         * The Block-Node had an error and cannot continue processing.<br/>
+         * The Publisher may retry again later.
+         */
+        ERROR = 3;
     }
 
     /**
