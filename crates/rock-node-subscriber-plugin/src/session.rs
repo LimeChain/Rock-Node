@@ -507,9 +507,7 @@ mod tests {
         let final_msg = rx.recv().await.unwrap().unwrap();
         assert_eq!(
             final_msg.response,
-            Some(ResponseType::Status(
-                Code::InvalidEndBlockNumber.into()
-            ))
+            Some(ResponseType::Status(Code::InvalidEndBlockNumber.into()))
         );
     }
 

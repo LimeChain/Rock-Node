@@ -1,5 +1,7 @@
 use anyhow::Result;
 use clap::Parser;
+use config as config_rs;
+use dotenvy::dotenv;
 use rock_node_block_access_plugin::BlockAccessPlugin;
 use rock_node_core::{
     app_context::AppContext, capability::CapabilityRegistry, config::Config as RockConfig,
@@ -23,8 +25,6 @@ use std::{
 };
 use tokio::sync::{broadcast, mpsc};
 use tracing::{error, info};
-use config as config_rs;
-use dotenvy::dotenv;
 
 fn print_section(name: &str, section: &toml::Value, depth: usize) {
     let dash_char = if name == "plugins" && depth == 0 {
