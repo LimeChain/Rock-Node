@@ -3,7 +3,7 @@
 # ====================================================================================
 # Stage 1: Common Builder
 # ====================================================================================
-FROM rust:1.78.0-bullseye AS builder
+FROM rust:1.88.0-bullseye AS builder
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential protobuf-compiler libclang-dev git cmake && \

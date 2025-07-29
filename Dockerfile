@@ -1,7 +1,7 @@
 # ====================================================================================
 # Stage 1: Builder
 # ====================================================================================
-FROM rust:1.78.0-bullseye AS builder
+FROM rust:1.88.0-bullseye AS builder
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
