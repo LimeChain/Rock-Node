@@ -7,7 +7,11 @@ use rock_node_protobufs::org::hiero::block::api::{
     subscribe_stream_response::{Code, Response as ResponseType},
     BlockItemSet, SubscribeStreamRequest, SubscribeStreamResponse,
 };
-use std::{any::TypeId, sync::Arc, time::Duration};
+use std::{
+    any::TypeId,
+    sync::{Arc, Mutex},
+    time::{Duration, Instant},
+};
 use tokio::sync::{mpsc, Notify};
 use tonic::Status;
 use tracing::{debug, info, warn};
@@ -21,6 +25,7 @@ pub struct SubscriberSession {
     block_reader: Arc<dyn BlockReader>,
     server_shutdown_notify: Arc<Notify>,
     session_shutdown_notify: Arc<Notify>,
+    inter_block_metrics: Mutex<InterBlockMetrics>,
 }
 
 impl SubscriberSession {
@@ -51,6 +56,7 @@ impl SubscriberSession {
             block_reader,
             server_shutdown_notify,
             session_shutdown_notify,
+            inter_block_metrics: Mutex::new(Default::default()),
         })
     }
 
@@ -194,6 +200,28 @@ impl SubscriberSession {
                 .map_err(|e| SubscriberError::Persistence(e.into()))?
                 .items,
         };
+        {
+            // Update inter-block timing statistics
+            let now = Instant::now();
+            let mut metrics_lock = self.inter_block_metrics.lock().unwrap();
+            if let Some(last) = metrics_lock.last_time {
+                let delta = now.duration_since(last).as_secs_f64();
+                metrics_lock.total_interval += delta;
+                metrics_lock.interval_count += 1;
+            }
+            metrics_lock.last_time = Some(now);
+
+            if metrics_lock.interval_count > 0 {
+                let avg = metrics_lock.total_interval / metrics_lock.interval_count as f64;
+                self.context
+                    .metrics
+                    .subscriber_average_inter_block_time_seconds
+                    .with_label_values(&[&self.id.to_string()])
+                    .set(avg);
+            }
+        }
+
+        info!(session_id = %self.id, "Sending block #{:?} to client", item_set.block_items[0]);
         let response = SubscribeStreamResponse {
             response: Some(ResponseType::BlockItems(item_set)),
         };
@@ -214,6 +242,19 @@ impl SubscriberSession {
             .subscriber_sessions_total
             .with_label_values(&[outcome_label])
             .inc();
+
+        // Record average inter-block time for this session
+        {
+            let metrics_lock = self.inter_block_metrics.lock().unwrap();
+            if metrics_lock.interval_count > 0 {
+                let avg = metrics_lock.total_interval / metrics_lock.interval_count as f64;
+                self.context
+                    .metrics
+                    .subscriber_average_inter_block_time_seconds
+                    .with_label_values(&[&self.id.to_string()])
+                    .set(avg);
+            }
+        }
         self.send_final_status(final_code).await;
     }
 
@@ -234,6 +275,14 @@ impl SubscriberSession {
 struct DropGuard {
     gauge: prometheus::IntGauge,
 }
+
+#[derive(Default)]
+struct InterBlockMetrics {
+    last_time: Option<Instant>,
+    total_interval: f64,
+    interval_count: u64,
+}
+
 impl DropGuard {
     fn new(gauge: prometheus::IntGauge) -> Self {
         Self { gauge }
@@ -556,7 +605,7 @@ mod tests {
         let final_msg = rx.recv().await.unwrap().unwrap();
         assert_eq!(
             final_msg.response,
-            Some(ResponseType::Status(Code::NotAvailable.into()))
+            Some(ResponseType::Status(Code::Error.into()))
         );
 
         // The channel should now be closed

@@ -1,5 +1,6 @@
 use prometheus::{
-    self, CounterVec, Encoder, HistogramVec, IntCounter, IntGauge, Opts, Registry, TextEncoder,
+    self, CounterVec, Encoder, GaugeVec, HistogramVec, IntCounter, IntGauge, Opts, Registry,
+    TextEncoder,
 };
 
 /// A registry for all Prometheus metrics in the application.
@@ -30,11 +31,15 @@ pub struct MetricsRegistry {
     pub publish_blocks_received_total: CounterVec,
     pub publish_items_processed_total: IntCounter,
     pub publish_persistence_duration_seconds: HistogramVec,
+    pub publish_lifecycle_duration_seconds: HistogramVec,
+    pub publish_header_to_proof_duration_seconds: HistogramVec,
+    pub publish_average_header_to_proof_time_seconds: GaugeVec,
     pub publish_responses_sent_total: CounterVec,
 
     // --- Persistence Plugin Metrics ---
     pub persistence_writes_total: CounterVec,
     pub persistence_write_duration_seconds: HistogramVec,
+    pub persistence_event_duration_seconds: HistogramVec,
     pub persistence_reads_total: CounterVec,
     pub persistence_read_duration_seconds: HistogramVec,
     pub persistence_archival_cycles_total: IntCounter,
@@ -46,6 +51,7 @@ pub struct MetricsRegistry {
     pub subscriber_active_sessions: IntGauge,
     pub subscriber_blocks_sent_total: CounterVec,
     pub subscriber_sessions_total: CounterVec,
+    pub subscriber_average_inter_block_time_seconds: GaugeVec,
 }
 
 impl MetricsRegistry {
@@ -150,6 +156,37 @@ impl MetricsRegistry {
         )?;
         registry.register(Box::new(publish_persistence_duration_seconds.clone()))?;
 
+        let publish_lifecycle_duration_seconds = HistogramVec::new(
+            Opts::new(
+                "rocknode_publish_lifecycle_duration_seconds",
+                "Duration from receiving a block header to sending acknowledgement (or timeout) back to publisher.",
+            )
+            .into(),
+            &["outcome"],
+        )?;
+        registry.register(Box::new(publish_lifecycle_duration_seconds.clone()))?;
+
+        let publish_header_to_proof_duration_seconds = HistogramVec::new(
+            Opts::new(
+                "rocknode_publish_header_to_proof_duration_seconds",
+                "Duration from receiving a block header to receiving its corresponding proof.",
+            )
+            .into(),
+            &[],
+        )?;
+        registry.register(Box::new(publish_header_to_proof_duration_seconds.clone()))?;
+
+        let publish_average_header_to_proof_time_seconds = GaugeVec::new(
+            Opts::new(
+                "rocknode_publish_average_header_to_proof_time_seconds",
+                "Average time between header and proof for each publisher session.",
+            ),
+            &["session_id"],
+        )?;
+        registry.register(Box::new(
+            publish_average_header_to_proof_time_seconds.clone(),
+        ))?;
+
         let publish_responses_sent_total = CounterVec::new(
             Opts::new(
                 "rocknode_publish_responses_sent_total",
@@ -177,6 +214,16 @@ impl MetricsRegistry {
             &["type"],
         )?;
         registry.register(Box::new(persistence_write_duration_seconds.clone()))?;
+
+        let persistence_event_duration_seconds = HistogramVec::new(
+            Opts::new(
+                "rocknode_persistence_event_duration_seconds",
+                "Duration from receiving a block event to emitting BlockPersisted, end-to-end latency.",
+            )
+            .into(),
+            &[], // no labels
+        )?;
+        registry.register(Box::new(persistence_event_duration_seconds.clone()))?;
 
         let persistence_reads_total = CounterVec::new(
             Opts::new(
@@ -252,6 +299,17 @@ impl MetricsRegistry {
         )?;
         registry.register(Box::new(subscriber_sessions_total.clone()))?;
 
+        let subscriber_average_inter_block_time_seconds = GaugeVec::new(
+            Opts::new(
+                "rocknode_subscriber_average_inter_block_time_seconds",
+                "Average time between blocks (seconds) for each subscriber session.",
+            ),
+            &["session_id"],
+        )?;
+        registry.register(Box::new(
+            subscriber_average_inter_block_time_seconds.clone(),
+        ))?;
+
         Ok(Self {
             registry,
             blocks_acknowledged,
@@ -266,9 +324,13 @@ impl MetricsRegistry {
             publish_blocks_received_total,
             publish_items_processed_total,
             publish_persistence_duration_seconds,
+            publish_lifecycle_duration_seconds,
+            publish_header_to_proof_duration_seconds,
+            publish_average_header_to_proof_time_seconds,
             publish_responses_sent_total,
             persistence_writes_total,
             persistence_write_duration_seconds,
+            persistence_event_duration_seconds,
             persistence_reads_total,
             persistence_read_duration_seconds,
             persistence_archival_cycles_total,
@@ -278,6 +340,7 @@ impl MetricsRegistry {
             subscriber_active_sessions,
             subscriber_blocks_sent_total,
             subscriber_sessions_total,
+            subscriber_average_inter_block_time_seconds,
         })
     }
 

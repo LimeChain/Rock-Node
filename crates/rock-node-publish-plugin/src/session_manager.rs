@@ -24,8 +24,11 @@ pub struct SessionManager {
     shared_state: Arc<SharedState>,
     state: SessionState,
     current_block_number: u64,
+    block_start_time: Option<Instant>,
     item_buffer: Vec<rock_node_protobufs::com::hedera::hapi::block::stream::BlockItem>,
     response_tx: mpsc::Sender<Result<PublishStreamResponse, Status>>,
+    header_proof_total_duration: f64,
+    header_proof_count: u64,
 }
 
 impl SessionManager {
@@ -40,8 +43,11 @@ impl SessionManager {
             shared_state,
             state: SessionState::New,
             current_block_number: 0,
+            block_start_time: None,
             item_buffer: Vec::new(),
             response_tx,
+            header_proof_total_duration: 0.0,
+            header_proof_count: 0,
         }
     }
 
@@ -66,6 +72,28 @@ impl SessionManager {
 
                     if let Some(BlockItemType::BlockProof(_)) = &item.item {
                         if self.state == SessionState::Primary {
+                            // Measure header -> proof duration
+                            if let Some(start) = self.block_start_time {
+                                let duration = start.elapsed().as_secs_f64();
+                                // Histogram (no labels)
+                                self.context
+                                    .metrics
+                                    .publish_header_to_proof_duration_seconds
+                                    .with_label_values(&[])
+                                    .observe(duration);
+                                // Update running average for this session
+                                self.header_proof_total_duration += duration;
+                                self.header_proof_count += 1;
+                                let avg = self.header_proof_total_duration
+                                    / self.header_proof_count as f64;
+                                self.context
+                                    .metrics
+                                    .publish_average_header_to_proof_time_seconds
+                                    .with_label_values(&[&self.id.to_string()])
+                                    .set(avg);
+                            }
+
+                            info!(session_id = %self.id, "Received block proof. Publishing block.");
                             // Await the full publish-and-persist cycle.
                             // If it fails, terminate the stream.
                             if !self.publish_complete_block().await {
@@ -88,6 +116,7 @@ impl SessionManager {
         self.item_buffer.clear();
         self.state = SessionState::New;
         self.current_block_number = 0;
+        self.block_start_time = None;
     }
 
     async fn handle_block_header(&mut self, block_number: i64) -> bool {
@@ -154,6 +183,8 @@ impl SessionManager {
             .or_insert(self.id);
         if *winner_entry == self.id {
             self.state = SessionState::Primary;
+            // Record the start time for lifecycle duration measurement
+            self.block_start_time = Some(Instant::now());
             self.context
                 .metrics
                 .publish_blocks_received_total
@@ -211,6 +242,7 @@ impl SessionManager {
         }
 
         if self.wait_for_persistence_ack().await.is_ok() {
+            info!(session_id = %self.id, block_number = self.current_block_number, "Block persisted. Resetting session for next block.");
             self.reset_for_next_block();
             true
         } else {
@@ -257,6 +289,16 @@ impl SessionManager {
                     .publish_persistence_duration_seconds
                     .with_label_values(&["acknowledged"])
                     .observe(duration);
+
+                // Record full lifecycle duration if we captured a start time
+                if let Some(start_life) = self.block_start_time {
+                    let lifecycle_duration = start_life.elapsed().as_secs_f64();
+                    self.context
+                        .metrics
+                        .publish_lifecycle_duration_seconds
+                        .with_label_values(&["acknowledged"])
+                        .observe(lifecycle_duration);
+                }
                 self.context.metrics.blocks_acknowledged.inc();
 
                 // Update shared state *before* broadcasting
@@ -298,6 +340,16 @@ impl SessionManager {
                     .publish_persistence_duration_seconds
                     .with_label_values(&["timeout"])
                     .observe(duration);
+
+                // Record full lifecycle duration with timeout outcome if start time exists
+                if let Some(start_life) = self.block_start_time {
+                    let lifecycle_duration = start_life.elapsed().as_secs_f64();
+                    self.context
+                        .metrics
+                        .publish_lifecycle_duration_seconds
+                        .with_label_values(&["timeout"])
+                        .observe(lifecycle_duration);
+                }
 
                 // IMPORTANT: Remove the failed winner to allow a new race
                 self.shared_state.block_winners.remove(&block_to_await);

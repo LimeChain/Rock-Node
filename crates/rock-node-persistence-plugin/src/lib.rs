@@ -273,6 +273,13 @@ impl Plugin for PersistencePlugin {
 }
 
 async fn process_event(event: InboundEvent, context: &AppContext, service: &PersistenceService) {
+    // Start timer for end-to-end persistence latency
+    let latency_timer = context
+        .metrics
+        .persistence_event_duration_seconds
+        .with_label_values(&[])
+        .start_timer();
+
     let block_number = event.block_number();
     let cache_key = event.cache_key();
     if let Some(data) = context.block_data_cache.get(&cache_key) {
@@ -306,4 +313,5 @@ async fn process_event(event: InboundEvent, context: &AppContext, service: &Pers
     }
     // Still mark for removal even if processing failed, to prevent cache leaks.
     context.block_data_cache.mark_for_removal(cache_key).await;
+    latency_timer.observe_duration();
 }

@@ -150,6 +150,43 @@
             "refId": "A"
           }
         ]
+      },
+      {
+        "id": 4,
+        "title": "Average Inter-Block Time by Session",
+        "type": "timeseries",
+        "datasource": { "type": "prometheus", "uid": "rocknode-prometheus" },
+        "gridPos": { "h": 16, "w": 24, "x": 0, "y": 24 },
+        "options": {
+          "legend": {
+            "displayMode": "list",
+            "placement": "bottom",
+            "showLegend": true
+          },
+          "tooltip": {
+            "mode": "multi"
+          }
+        },
+        "fieldConfig": {
+          "defaults": {
+            "unit": "s",
+            "custom": {
+              "drawStyle": "line",
+              "lineWidth": 2,
+              "showPoints": "auto"
+            }
+          }
+        },
+        "targets": [
+          {
+            "datasource": { "type": "prometheus", "uid": "rocknode-prometheus" },
+            "expr": "rocknode_subscriber_average_inter_block_time_seconds",
+            "legendFormat": "{{session_id}}",
+            "refId": "A",
+            "editorMode": "builder",
+            "range": true
+          }
+        ]
       }
     ],
     "refresh": "10s",
