@@ -55,6 +55,52 @@ impl BlockStreamPublishService for PublishServiceImpl {
             }
             info!(%session_id, "Session handler task finished.");
 
+            // When the session finishes, it may have been the recorded winner for
+            // some in-flight blocks. Iterate over the `block_winners` map and
+            // remove any entries that still reference this session so that
+            // other connected publishers can compete for those blocks.
+            // While doing so, proactively broadcast a `ResendBlock` message so
+            // that the remaining sessions know they can attempt to publish the
+            // block again without waiting for the periodic cleanup task.
+
+            use rock_node_protobufs::org::hiero::block::api::{
+                publish_stream_response::{ResendBlock, Response},
+                PublishStreamResponse,
+            };
+
+            // Collect affected blocks first to avoid holding the dashmap lock
+            // for the entire broadcast operation.
+            let mut affected_blocks = Vec::new();
+            for entry in shared_state_clone.block_winners.iter() {
+                if *entry.value() == session_id {
+                    affected_blocks.push(*entry.key());
+                }
+            }
+
+            // Remove the entries and notify the other sessions.
+            for block_number in affected_blocks {
+                // Remove winner so another session can take over.
+                shared_state_clone.block_winners.remove(&block_number);
+
+                // Build the ResendBlock message
+                let resend_msg = PublishStreamResponse {
+                    response: Some(Response::ResendBlock(ResendBlock { block_number })),
+                };
+
+                // Broadcast to all *other* active sessions.
+                for session_entry in shared_state_clone.active_sessions.iter() {
+                    if *session_entry.key() != session_id {
+                        let _ = session_entry.value().send(Ok(resend_msg.clone())).await;
+                    }
+                }
+
+                // Metrics: record that we have emitted a ResendBlock
+                metrics_clone
+                    .publish_responses_sent_total
+                    .with_label_values(&["ResendBlock"])
+                    .inc();
+            }
+
             // Unregister the session upon completion
             shared_state_clone.active_sessions.remove(&session_id);
             metrics_clone.active_publish_sessions.dec();

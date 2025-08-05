@@ -14,7 +14,6 @@ pub mod com {
     pub mod hedera {
         pub mod hapi {
             pub mod block {
-                tonic::include_proto!("com.hedera.hapi.block");
                 pub mod stream {
                     tonic::include_proto!("com.hedera.hapi.block.stream");
                     pub mod input {

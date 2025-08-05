@@ -201,7 +201,7 @@ impl Plugin for PublishPlugin {
             let end_stream_msg = PublishStreamResponse {
                 response: Some(publish_stream_response::Response::EndStream(
                     publish_stream_response::EndOfStream {
-                        status: end_of_stream::Code::InternalError as i32,
+                        status: end_of_stream::Code::Error as i32,
                         block_number: block_number_to_send,
                     },
                 )),

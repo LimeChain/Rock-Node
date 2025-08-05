@@ -24,6 +24,7 @@ fn code_to_string(code: block_response::Code) -> &'static str {
         block_response::Code::NotFound => "NotFound",
         block_response::Code::NotAvailable => "NotAvailable",
         block_response::Code::Unknown => "Unknown",
+        block_response::Code::Error => todo!(),
     }
 }
 
