@@ -38,16 +38,10 @@ jobs:
       - name: Check formatting
         run: cargo fmt --all -- --check
 
-      # -----------------------------------------------------------------
-      # STEPS FOR CODE COVERAGE START HERE
-      # -----------------------------------------------------------------
-
       - name: Install grcov
         run: cargo install grcov
 
       - name: Run unit tests with coverage
-        # This step replaces your original 'Run unit tests' step.
-        # It sets environment variables to enable coverage data collection.
         env:
           CARGO_INCREMENTAL: "0"
           RUSTFLAGS: "-Cinstrument-coverage"
@@ -69,7 +63,8 @@ jobs:
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v4
         with:
-          # The token is required for private repositories, but optional for public ones.
           token: ${{ secrets.CODECOV_TOKEN }}
           files: ./lcov.info
           fail_ci_if_error: true
+          verbose: true
+
