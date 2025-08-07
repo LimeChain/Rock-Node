@@ -10,7 +10,7 @@ use rock_node_core::{
 use rock_node_protobufs::com::hedera::hapi::block::stream::{block_item, Block};
 use rocksdb::WriteBatch;
 use std::sync::Arc;
-use tracing::{trace, warn};
+use tracing::{debug, trace, warn};
 
 #[derive(Debug, Clone)]
 pub struct PersistenceService {
@@ -105,21 +105,31 @@ impl BlockWriter for PersistenceService {
         let block_number = get_block_number(block)?;
         let mut batch = WriteBatch::default();
 
+        // Initialize earliest persisted if this is the very first block.
         if self.state.get_true_earliest_persisted()?.is_none() {
             self.state
                 .set_true_earliest_persisted(block_number, &mut batch)?;
         }
 
-        let is_contiguous = match self.get_highest_contiguous_block_number() {
-            Ok(0) if self.get_latest_persisted_block_number()?.is_none() => true,
-            Ok(current_contiguous) => block_number == current_contiguous + 1,
-            Err(_) => false,
-        };
-
-        if is_contiguous {
+        // --- Gap-Aware Logic ---
+        let current_contiguous = self.state.get_highest_contiguous()?;
+        if block_number == current_contiguous + 1 {
+            // This block is the next in sequence, advance the contiguous watermark.
             self.state
                 .set_highest_contiguous(block_number, &mut batch)?;
+            debug!("Advanced highest contiguous block to #{}", block_number);
+        } else if block_number <= current_contiguous {
+            // This is a duplicate or an out-of-order block that has already been processed.
+            warn!("Ignoring already processed block #{}", block_number);
+            return Ok(());
+        } else {
+            // A gap has been created. Do not advance the contiguous watermark.
+            debug!(
+                "Detected gap while writing block #{}. Highest contiguous remains #{}.",
+                block_number, current_contiguous
+            );
         }
+        // --- End Gap-Aware Logic ---
 
         self.hot_tier
             .add_block_to_batch(block, block_number, &mut batch)?;

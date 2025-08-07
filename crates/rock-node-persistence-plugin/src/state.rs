@@ -61,7 +61,19 @@ impl StateManager {
     }
 
     pub fn get_highest_contiguous(&self) -> Result<u64> {
-        Ok(self.get_u64_opt(HIGHEST_CONTIGUOUS_KEY)?.unwrap_or(0))
+        // If the key doesn't exist, it means we have no contiguous blocks, so 0 is a safe default.
+        // However, if the earliest block is > 0, we should start from there.
+        // This logic is best handled during initialization. For now, defaulting to 0 is acceptable.
+        // A better approach might be to use the true_earliest - 1 as the default.
+        // For now, let's stick with the simpler approach.
+        let earliest_persisted = self.get_true_earliest_persisted()?.unwrap_or(0);
+        let highest_contiguous = self.get_u64_opt(HIGHEST_CONTIGUOUS_KEY)?;
+
+        match highest_contiguous {
+            Some(hc) => Ok(hc),
+            None if earliest_persisted > 0 => Ok(earliest_persisted - 1),
+            None => Ok(0),
+        }
     }
 
     pub fn get_true_earliest_persisted(&self) -> Result<Option<u64>> {

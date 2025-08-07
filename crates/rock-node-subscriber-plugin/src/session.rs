@@ -299,10 +299,10 @@ mod tests {
     use super::*;
     use rock_node_core::{
         config::{
-            BlockAccessServiceConfig, Config, CoreConfig, ObservabilityConfig,
-            PersistenceServiceConfig, PluginConfigs, PublishServiceConfig, QueryServiceConfig,
-            ServerStatusServiceConfig, StateManagementServiceConfig, SubscriberServiceConfig,
-            VerificationServiceConfig,
+            BackfillConfig, BlockAccessServiceConfig, Config, CoreConfig, IngressServiceConfig,
+            ObservabilityConfig, PersistenceServiceConfig, PluginConfigs, PublishServiceConfig,
+            QueryServiceConfig, ServerStatusServiceConfig, StateManagementServiceConfig,
+            SubscriberServiceConfig, VerificationServiceConfig,
         },
         events::BlockPersisted,
         AppContext, BlockReaderProvider, CapabilityRegistry, MetricsRegistry,
@@ -357,6 +357,7 @@ mod tests {
             core: CoreConfig {
                 log_level: "debug".to_string(),
                 database_path: "".to_string(),
+                start_block_number: 0,
             },
             plugins: PluginConfigs {
                 observability: ObservabilityConfig {
@@ -404,6 +405,20 @@ mod tests {
                     enabled: false,
                     grpc_address: "".to_string(),
                     grpc_port: 0,
+                },
+                ingress_service: IngressServiceConfig {
+                    enabled: false,
+                    grpc_address: "".to_string(),
+                    grpc_port: 0,
+                    max_concurrent_streams: 0,
+                    persistence_ack_timeout_seconds: 0,
+                    stale_winner_timeout_seconds: 0,
+                    winner_cleanup_interval_seconds: 0,
+                    winner_cleanup_threshold_blocks: 0,
+                    backfill: BackfillConfig {
+                        enabled: false,
+                        peers: vec![],
+                    },
                 },
             },
         };

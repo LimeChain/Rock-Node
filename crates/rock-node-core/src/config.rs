@@ -10,6 +10,7 @@ pub struct Config {
 pub struct CoreConfig {
     pub log_level: String,
     pub database_path: String,
+    pub start_block_number: u64,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -17,6 +18,7 @@ pub struct PluginConfigs {
     pub observability: ObservabilityConfig,
     pub persistence_service: PersistenceServiceConfig,
     pub publish_service: PublishServiceConfig,
+    pub ingress_service: IngressServiceConfig,
     pub verification_service: VerificationServiceConfig,
     pub block_access_service: BlockAccessServiceConfig,
     pub server_status_service: ServerStatusServiceConfig,
@@ -54,6 +56,25 @@ pub struct PublishServiceConfig {
     pub stale_winner_timeout_seconds: u64,
     pub winner_cleanup_interval_seconds: u64,
     pub winner_cleanup_threshold_blocks: u64,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct IngressServiceConfig {
+    pub enabled: bool,
+    pub grpc_address: String,
+    pub grpc_port: u16,
+    pub max_concurrent_streams: usize,
+    pub persistence_ack_timeout_seconds: u64,
+    pub stale_winner_timeout_seconds: u64,
+    pub winner_cleanup_interval_seconds: u64,
+    pub winner_cleanup_threshold_blocks: u64,
+    pub backfill: BackfillConfig,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct BackfillConfig {
+    pub enabled: bool,
+    pub peers: Vec<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]

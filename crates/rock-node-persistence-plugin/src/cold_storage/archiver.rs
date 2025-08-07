@@ -8,7 +8,7 @@ use rock_node_core::{config::PersistenceServiceConfig, metrics::MetricsRegistry}
 use rocksdb::WriteBatch;
 use std::sync::Arc;
 use tokio::sync::Notify;
-use tracing::{trace, warn};
+use tracing::{debug, trace, warn};
 
 #[derive(Debug)]
 pub struct Archiver {
@@ -76,6 +76,20 @@ impl Archiver {
             // Not enough blocks to trigger an archival run.
             return Ok(());
         }
+
+        // --- Gap-Aware Check ---
+        // TODO: We still need to archive batches ahead that are contiguous, but not yet persisted.
+        let highest_contiguous = self.state.get_highest_contiguous()?;
+        let end_of_batch_to_archive = earliest_hot_u64 + self.config.archive_batch_size - 1;
+
+        if end_of_batch_to_archive > highest_contiguous {
+            debug!(
+                "Archival paused. Batch end #{} is beyond highest contiguous block #{}. Waiting for backfill.",
+                end_of_batch_to_archive, highest_contiguous
+            );
+            return Ok(());
+        }
+        // --- End Gap-Aware Check ---
 
         let timer = self
             .metrics
