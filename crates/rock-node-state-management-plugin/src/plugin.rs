@@ -112,6 +112,23 @@ impl StateManagementPlugin {
             .app_context
             .clone()
             .context("AppContext not initialized")?;
+
+        // --- Conditional Start Logic ---
+        if context.config.core.start_block_number > 0 {
+            info!(
+                "StateManagementPlugin is DISABLED because core.start_block_number is non-zero ({}). State can only be built from genesis.", 
+                context.config.core.start_block_number
+            );
+            // TODO: In the future, a StateSnapshotPlugin could load a snapshot here,
+            // allowing the StateManagementPlugin to start from a non-genesis block.
+            return Ok(());
+        }
+        if !context.config.plugins.state_management_service.enabled {
+            info!("StateManagementPlugin is disabled in configuration. Skipping start.");
+            return Ok(());
+        }
+        // --- End Conditional Start Logic ---
+
         let state_manager = self
             .state_manager
             .clone()
@@ -148,10 +165,11 @@ impl StateManagementPlugin {
                             Ok(event) => {
                                 let expected_block = last_processed_block.map_or(0, |n| n + 1);
                                 if event.block_number < expected_block {
-                                    continue;
+                                    continue; // Ignore old events
                                 }
                                 if event.block_number > expected_block {
                                     warn!("State fell behind. Expected {}, got {}. Attempting to catch up.", expected_block, event.block_number);
+                                    // Catch up logic: process blocks from storage until the gap is closed.
                                     for b in expected_block..event.block_number {
                                         if let Err(e) = state_manager.apply_state_from_storage(b).await {
                                             error!("Failed to apply state for block #{} from storage: {:?}. Halting.", b, e);
@@ -159,6 +177,7 @@ impl StateManagementPlugin {
                                         }
                                     }
                                 }
+                                // Process the current event after any catch-up.
                                 if let Err(e) = state_manager.apply_state_from_block_event(event).await {
                                     error!("Failed to apply state for block event {}: {:?}. Halting.", event.block_number, e);
                                     break;

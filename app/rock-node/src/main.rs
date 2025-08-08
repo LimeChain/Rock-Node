@@ -107,25 +107,20 @@ async fn main() -> Result<()> {
     let args = Args::parse();
 
     // --- Step 2: Load Config and Initialize Logging (ONCE) ---
-    // NOTE: We no longer need to read the config TOML manually; the `config` crate will handle it.
-    //       We'll still validate that the file exists early to provide a clear error message.
     if !args.config_path.exists() {
         anyhow::bail!("Config file not found at '{}'", args.config_path.display());
     }
 
-    // Load environment variables from .env (if present) and the process environment.
     dotenv().ok();
 
-    // Build layered configuration: file values first, then environment variable overrides.
     let settings = config_rs::Config::builder()
         .add_source(config_rs::File::from(args.config_path.clone()))
         .add_source(config_rs::Environment::with_prefix("ROCK_NODE").separator("__"))
         .build()?;
 
-    // Deserialize twice: once into a TOML Value for pretty-printing, and once into our typed struct.
     let merged_config_value: toml::Value = settings.clone().try_deserialize()?;
     let config: RockConfig = settings.try_deserialize()?;
-    let config = Arc::new(config); // Wrap config in an Arc early
+    let config = Arc::new(config);
     let default_log_level = &config.core.log_level;
 
     tracing_subscriber::fmt()
@@ -158,10 +153,9 @@ async fn main() -> Result<()> {
         let mut providers = service_providers.write().map_err(|e| {
             anyhow::anyhow!("Failed to acquire write lock on service providers: {}", e)
         })?;
-        // Create the provider wrapper and store an Arc to IT.
         let db_manager_provider = DatabaseManagerProvider::new(db_manager);
         providers.insert(
-            TypeId::of::<DatabaseManagerProvider>(), // The key is the TypeId of the PROVIDER
+            TypeId::of::<DatabaseManagerProvider>(),
             Arc::new(db_manager_provider),
         );
         info!("DatabaseManagerProvider registered as a core service provider.");
@@ -186,36 +180,32 @@ async fn main() -> Result<()> {
 
     // --- Step 6: Assemble Plugins ---
     let mut plugins: Vec<Box<dyn Plugin>> = vec![];
-    let verification_service_enabled = app_context.config.plugins.verification_service.enabled;
 
-    if verification_service_enabled {
+    // Conditionally wire the pipeline based on the verifier's configuration.
+    // This resolves the ownership error by ensuring rx_items is only moved once.
+    if app_context.config.plugins.verification_service.enabled {
         info!("VerifierPlugin is ENABLED. Wiring Verifier -> Persistence.");
+        // Persistence plugin does not need the raw items receiver
         plugins.push(Box::new(PersistencePlugin::new(None, rx_verified)));
+        // Verifier plugin gets the raw items receiver
         plugins.push(Box::new(VerifierPlugin::new(rx_items)));
     } else {
         info!("VerifierPlugin is DISABLED. Wiring directly to Persistence.");
+        // Persistence plugin gets the raw items receiver directly
         plugins.push(Box::new(PersistencePlugin::new(
             Some(rx_items),
             rx_verified,
         )));
     }
 
+    // Add the rest of the plugins
     plugins.push(Box::new(PublishPlugin::new()));
     plugins.push(Box::new(SubscriberPlugin::new()));
     plugins.push(Box::new(BlockAccessPlugin::new()));
     plugins.push(Box::new(StatusPlugin::new()));
     plugins.push(Box::new(ObservabilityPlugin::new()));
-
-    // ---- Conditionally add the new State Plugin ----
-    if app_context.config.plugins.state_management_service.enabled {
-        info!("StateManagementPlugin is ENABLED.");
-        plugins.push(Box::new(StateManagementPlugin::new()));
-        // Query Plugin is dependent on the StateManagementPlugin!
-        plugins.push(Box::new(QueryPlugin::new()));
-    } else {
-        info!("StateManagementPlugin is DISABLED.");
-    }
-    // ---------------------------------------------
+    plugins.push(Box::new(StateManagementPlugin::new()));
+    plugins.push(Box::new(QueryPlugin::new()));
 
     // --- Step 7: Initialize and Start Plugins ---
     info!("{}", "-".repeat(16));
@@ -246,7 +236,6 @@ async fn main() -> Result<()> {
         }
     }
 
-    // A small delay to allow background tasks to finish logging, etc.
     tokio::time::sleep(Duration::from_millis(250)).await;
     info!("All plugins stopped. Exiting.");
 

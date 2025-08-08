@@ -5,6 +5,7 @@
 [core]
 log_level = "info"
 database_path = "/app/data" # Use the path inside the container
+start_block_number = 0
 
 [plugins]
 
@@ -33,6 +34,17 @@ persistence_ack_timeout_seconds = 60
 stale_winner_timeout_seconds = 60
 winner_cleanup_interval_seconds = 300
 winner_cleanup_threshold_blocks = 1000
+
+[plugins.ingress_service]
+enabled = true
+grpc_address = "0.0.0.0"
+grpc_port = 6896
+max_concurrent_streams = 100
+persistence_ack_timeout_seconds = 60
+stale_winner_timeout_seconds = 10
+winner_cleanup_interval_seconds = 150
+winner_cleanup_threshold_blocks = 1000
+backfill = { enabled = false, peers = [] }
 
 [plugins.subscriber_service]
 enabled = true
