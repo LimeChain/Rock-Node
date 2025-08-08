@@ -7,7 +7,7 @@ members = [
     "crates/rock-node-persistence-plugin",
     "crates/rock-node-verifier-plugin",
     "crates/rock-node-observability-plugin",
-    "crates/rock-node-publish-plugin",
+    "crates/rock-node-ingress-plugin",
     "crates/rock-node-subscriber-plugin",
     "crates/rock-node-state-management-plugin",
     "crates/rock-node-query-plugin",
@@ -24,4 +24,4 @@ tonic = { version = "0.13.1", features = ["transport"] }
 prost = "0.13.5"
 config = "0.13"
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] } 
+tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }

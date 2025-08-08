@@ -12,12 +12,11 @@ pub struct AppContext {
     pub service_providers: Arc<RwLock<HashMap<TypeId, Arc<dyn Any + Send + Sync>>>>,
     pub block_data_cache: Arc<super::cache::BlockDataCache>,
 
-    // Can be mpsc as only one system (verifier or persistence) will own the receiver
+    // Primary pipeline channels
     pub tx_block_items_received: mpsc::Sender<super::events::BlockItemsReceived>,
-
-    // Can be mpsc as it's a 1-to-1 pipeline step
     pub tx_block_verified: mpsc::Sender<super::events::BlockVerified>,
-
-    // MUST be broadcast to allow multiple concurrent sessions to wait for their specific ACKs
     pub tx_block_persisted: broadcast::Sender<super::events::BlockPersisted>,
+
+    // New channel for the filtered stream
+    pub tx_filtered_block_ready: broadcast::Sender<super::events::FilteredBlockReady>,
 }

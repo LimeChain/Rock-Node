@@ -442,6 +442,7 @@ mod tests {
                 tx_block_items_received: tokio::sync::mpsc::channel(1).0,
                 tx_block_verified: tokio::sync::mpsc::channel(1).0,
                 tx_block_persisted: tx_persisted.clone(),
+                tx_filtered_block_ready: todo!(),
             }),
             tx_persisted,
         )

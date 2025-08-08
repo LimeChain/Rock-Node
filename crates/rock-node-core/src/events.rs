@@ -30,3 +30,18 @@ pub struct BlockPersisted {
     pub block_number: u64,
     pub cache_key: Uuid,
 }
+
+/// Represents a block after filtering logic has been applied.
+/// It could be a slimmed-down version of the original block.
+#[derive(Debug, Clone)]
+pub struct FilteredBlock {
+    pub block_number: u64,
+    // In the future, this could contain a Vec of specific, filtered items.
+    // For now, we just signal that the block was processed.
+}
+
+/// Published by the Ingress Plugin's filter task after processing a block.
+#[derive(Debug, Clone)]
+pub struct FilteredBlockReady {
+    pub filtered_block: FilteredBlock,
+}

@@ -2178,9 +2178,9 @@ dependencies = [
  "dotenvy",
  "rock-node-block-access-plugin",
  "rock-node-core",
+ "rock-node-ingress-plugin",
  "rock-node-observability-plugin",
  "rock-node-persistence-plugin",
- "rock-node-publish-plugin",
  "rock-node-query-plugin",
  "rock-node-server-status-plugin",
  "rock-node-state-management-plugin",
@@ -2224,6 +2224,24 @@ dependencies = [
  "serde",
  "thiserror 1.0.69",
  "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "rock-node-ingress-plugin"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "dashmap",
+ "futures-util",
+ "prost",
+ "rock-node-core",
+ "rock-node-protobufs",
+ "tokio",
+ "tokio-stream",
+ "tonic",
  "tracing",
  "uuid",
 ]
@@ -2275,24 +2293,6 @@ dependencies = [
  "tonic",
  "tonic-build",
  "walkdir",
-]
-
-[[package]]
-name = "rock-node-publish-plugin"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "dashmap",
- "futures-util",
- "prost",
- "rock-node-core",
- "rock-node-protobufs",
- "tokio",
- "tokio-stream",
- "tonic",
- "tracing",
- "uuid",
 ]
 
 [[package]]

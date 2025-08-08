@@ -8,9 +8,9 @@ use rock_node_core::{
     database::DatabaseManager, database_provider::DatabaseManagerProvider, events, BlockDataCache,
     MetricsRegistry, Plugin,
 };
+use rock_node_ingress_plugin::IngressPlugin;
 use rock_node_observability_plugin::ObservabilityPlugin;
 use rock_node_persistence_plugin::PersistencePlugin;
-use rock_node_publish_plugin::PublishPlugin;
 use rock_node_query_plugin::QueryPlugin;
 use rock_node_server_status_plugin::StatusPlugin;
 use rock_node_state_management_plugin::StateManagementPlugin;
@@ -165,6 +165,7 @@ async fn main() -> Result<()> {
     let (tx_items, rx_items) = mpsc::channel::<events::BlockItemsReceived>(100);
     let (tx_verified, rx_verified) = mpsc::channel::<events::BlockVerified>(100);
     let (tx_persisted, _) = broadcast::channel::<events::BlockPersisted>(100);
+    let (tx_filtered, _) = broadcast::channel::<events::FilteredBlockReady>(100);
 
     info!("Building application context...");
     let app_context = AppContext {
@@ -176,30 +177,26 @@ async fn main() -> Result<()> {
         tx_block_items_received: tx_items,
         tx_block_verified: tx_verified,
         tx_block_persisted: tx_persisted,
+        tx_filtered_block_ready: tx_filtered,
     };
 
     // --- Step 6: Assemble Plugins ---
     let mut plugins: Vec<Box<dyn Plugin>> = vec![];
 
-    // Conditionally wire the pipeline based on the verifier's configuration.
-    // This resolves the ownership error by ensuring rx_items is only moved once.
     if app_context.config.plugins.verification_service.enabled {
         info!("VerifierPlugin is ENABLED. Wiring Verifier -> Persistence.");
-        // Persistence plugin does not need the raw items receiver
         plugins.push(Box::new(PersistencePlugin::new(None, rx_verified)));
-        // Verifier plugin gets the raw items receiver
         plugins.push(Box::new(VerifierPlugin::new(rx_items)));
     } else {
         info!("VerifierPlugin is DISABLED. Wiring directly to Persistence.");
-        // Persistence plugin gets the raw items receiver directly
         plugins.push(Box::new(PersistencePlugin::new(
             Some(rx_items),
             rx_verified,
         )));
     }
 
-    // Add the rest of the plugins
-    plugins.push(Box::new(PublishPlugin::new()));
+    // Add the new IngressPlugin and other plugins
+    plugins.push(Box::new(IngressPlugin::new())); // REPLACED PublishPlugin
     plugins.push(Box::new(SubscriberPlugin::new()));
     plugins.push(Box::new(BlockAccessPlugin::new()));
     plugins.push(Box::new(StatusPlugin::new()));
@@ -226,7 +223,6 @@ async fn main() -> Result<()> {
 
     // --- Step 8: Graceful Shutdown ---
     info!("Shutdown signal received. Stopping plugins...");
-    // Iterate in reverse order of startup to handle dependencies correctly.
     for plugin in plugins.iter_mut().rev() {
         if plugin.is_running() {
             info!("Stopping plugin '{}'...", plugin.name());

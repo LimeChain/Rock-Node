@@ -1,0 +1,34 @@
+[package]
+name = "rock-node-ingress-plugin"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+rock-node-core = { path = "../rock-node-core" }
+rock-node-protobufs = { path = "../rock-node-protobufs" }
+
+# Async runtime and utilities
+tokio = { version = "1", features = ["full"] }
+tokio-stream = "0.1"
+futures-util = "0.3"
+
+# gRPC library - enabling both server and client
+tonic = { version = "0.13.1", features = ["transport"] }
+
+# For easy error handling
+anyhow = "1"
+
+# For logging
+tracing = "0.1"
+
+# For unique session IDs
+uuid = { version = "1", features = ["v4"] }
+
+# For concurrent hash maps
+dashmap = "5.5"
+
+# For protobufs
+prost = "0.13.5"
+
+# Add async-trait for the Plugin trait
+async-trait = "0.1"
