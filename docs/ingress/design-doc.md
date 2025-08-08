@@ -52,16 +52,16 @@ graph TD
 
         subgraph "Core Services & Channels"
             direction LR
-            BlockAccessClient("gRPC Client for BlockAccessService")
+            SubscribeServiceClient("gRPC Client for SubscribeService")
             PrimaryChannel("Primary Channel<br/>(Full Blocks)")
             FilteredChannel("Filtered Channel<br/>(Slim/Empty Blocks)")
             PersistencePlugin("Persistence Plugin")
         end
 
         Publishers -- "gRPC: publishBlockStream" --> IngressPlugin
-        PeerNodes -- "gRPC: getBlock" --> BlockAccessClient
+        PeerNodes -- "gRPC: subscribeStreamRequest" --> SubscribeService
 
-        IngressPlugin -- "Uses" --> BlockAccessClient
+        IngressPlugin -- "Uses" --> SubscribeService
         IngressPlugin -- "Writes Full Blocks to" --> PrimaryChannel
         IngressPlugin -- "Writes Filtered Blocks to" --> FilteredChannel
 
@@ -100,7 +100,7 @@ graph TD
             <br/>[backfill_manager.rs]<br/>
             - Periodically scans persistence for gaps.
             - Manages a queue of missing block ranges.
-            - Uses a `BlockAccessService` gRPC client to fetch blocks from peers.
+            - Uses a `SubscribeService` gRPC client to fetch blocks from peers.
         ")
 
         FilterTask("
@@ -159,7 +159,7 @@ This is a new, long-running background task responsible for data completeness.
 
 - **Work Queue**: It will maintain a priority queue of gaps to fill, likely prioritizing older gaps first to move data to cold storage.
 
-- **Fetching**: It will iterate through the configured list of peers in `config.toml`. For each missing block, it will make a unary `getBlock` request using a `BlockAccessService` gRPC client. If a peer does not have the block or returns an error, it will try the next peer in the list.
+- **Fetching**: It will iterate through the configured list of peers in `config.toml`. For each missing block, it will make a streaming `subscribeStreamRequest` request using a `SubscribeService` gRPC client. If a peer does not have the block or returns an error, it will try the next peer in the list.
 
 - **Configuration**: If the `backfill.peers` list in the configuration is empty, the BackfillManager will not start, and a WARN level log message will be emitted.
 
@@ -236,8 +236,6 @@ sequenceDiagram
     PersistencePlugin->>BlockDataCache: 5. get(cache_key) -> BlockData
     Note right of PersistencePlugin: Writes block to disk...
     PersistencePlugin->>BlockDataCache: 6. mark_for_removal(cache_key)
-
-    ---
 
     Note over IngressPlugin, PersistencePlugin: Data Flow with Verification Disabled
 

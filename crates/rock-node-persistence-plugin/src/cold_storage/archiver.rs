@@ -78,7 +78,7 @@ impl Archiver {
         }
 
         // --- Gap-Aware Check ---
-        // TODO: We still need to archive batches ahead that are contiguous, but not yet persisted.
+        // TODO: We still need to archive batches ahead that are contiguous, but not yet persisted. We just can't archive ones that are not full batch.
         let highest_contiguous = self.state.get_highest_contiguous()?;
         let end_of_batch_to_archive = earliest_hot_u64 + self.config.archive_batch_size - 1;
 
