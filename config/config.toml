@@ -4,6 +4,7 @@
 [core]
 log_level = "INFO"
 database_path = "data/database"
+start_block_number = 0
 
 # =========================================
 # Plugin-Specific Configurations

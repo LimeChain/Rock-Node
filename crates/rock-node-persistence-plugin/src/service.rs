@@ -19,6 +19,7 @@ pub struct PersistenceService {
     archiver: Arc<Archiver>,
     state: Arc<StateManager>,
     metrics: Arc<MetricsRegistry>,
+    start_block_number: u64,
 }
 
 impl PersistenceService {
@@ -28,6 +29,7 @@ impl PersistenceService {
         archiver: Arc<Archiver>,
         state: Arc<StateManager>,
         metrics: Arc<MetricsRegistry>,
+        start_block_number: u64,
     ) -> Self {
         Self {
             hot_tier,
@@ -35,6 +37,7 @@ impl PersistenceService {
             archiver,
             state,
             metrics,
+            start_block_number,
         }
     }
 }
@@ -105,17 +108,15 @@ impl BlockWriter for PersistenceService {
         let block_number = get_block_number(block)?;
         let mut batch = WriteBatch::default();
 
-        let genesis_block_number = self.archiver.config.genesis_block_number;
-
         if self.state.get_true_earliest_persisted()?.is_none() {
             self.state
                 .set_true_earliest_persisted(block_number, &mut batch)?;
         }
 
         let is_contiguous = match self.get_highest_contiguous_block_number() {
-            // On a clean slate, only accept the configured genesis block number as contiguous.
+            // On a clean slate, only accept the configured start block number as contiguous.
             Ok(0) if self.get_latest_persisted_block_number()?.is_none() => {
-                block_number == genesis_block_number
+                block_number == self.start_block_number
             }
             Ok(current_contiguous) => block_number == current_contiguous + 1,
             Err(_) => false,

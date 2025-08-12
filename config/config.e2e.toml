@@ -5,6 +5,7 @@
 [core]
 log_level = "info"
 database_path = "/app/data" # Use the path inside the container
+start_block_number = 0
 
 [plugins]
 

@@ -103,6 +103,7 @@ impl Plugin for PersistencePlugin {
         let db_handle = db_manager.db_handle();
         let config_arc = Arc::new(context.config.plugins.persistence_service.clone());
         let metrics_arc = context.metrics.clone();
+        let start_block_number = context.config.core.start_block_number;
 
         let state_manager = Arc::new(state::StateManager::new(db_handle.clone()));
         let hot_tier = Arc::new(hot_tier::HotTier::new(db_handle.clone()));
@@ -151,6 +152,7 @@ impl Plugin for PersistencePlugin {
             archiver.clone(),
             state_manager,
             metrics_arc,
+            start_block_number,
         );
         let service_arc = Arc::new(service.clone());
         self.service = Some(service);
