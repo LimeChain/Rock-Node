@@ -1,4 +1,5 @@
 pub mod block_access_suite;
+pub mod gap_ingestion_suite;
 pub mod health_check;
 pub mod ingestion_suite;
 pub mod query_suites;

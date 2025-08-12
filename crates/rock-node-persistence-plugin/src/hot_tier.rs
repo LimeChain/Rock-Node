@@ -57,6 +57,24 @@ impl HotTier {
         }
     }
 
+    /// Checks if a full batch of blocks exists in the hot tier without any gaps.
+    pub fn is_batch_complete(&self, start_block: u64, batch_size: u64) -> Result<bool> {
+        let cf = self
+            .db
+            .cf_handle(CF_HOT_BLOCKS)
+            .ok_or_else(|| anyhow!("Could not get handle for CF: {}", CF_HOT_BLOCKS))?;
+        for i in 0..batch_size {
+            if self
+                .db
+                .get_cf(cf, (start_block + i).to_be_bytes())?
+                .is_none()
+            {
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    }
+
     pub fn read_block_batch(&self, start_block: u64, count: u64) -> Result<Vec<Block>> {
         let mut blocks = Vec::with_capacity(count as usize);
         for i in 0..count {
@@ -65,7 +83,7 @@ impl HotTier {
                 blocks.push(Block::decode(block_bytes.as_slice())?);
             } else {
                 return Err(anyhow!(
-                    "Missing block #{} in hot tier during batch read",
+                    "Missing block #{} in hot tier during batch read for archival",
                     block_number
                 ));
             }

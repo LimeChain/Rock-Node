@@ -8,7 +8,7 @@ use rock_node_core::{config::PersistenceServiceConfig, metrics::MetricsRegistry}
 use rocksdb::WriteBatch;
 use std::sync::Arc;
 use tokio::sync::Notify;
-use tracing::{trace, warn};
+use tracing::{info, trace, warn};
 
 #[derive(Debug)]
 pub struct Archiver {
@@ -44,89 +44,101 @@ impl Archiver {
         }
     }
 
-    /// Wakes up the archiver task. This is cheap and can be called frequently.
     pub fn notify_check(&self) {
         self.trigger.notify_one();
     }
 
     pub fn run_archival_cycle(&self) -> Result<()> {
-        let latest_hot_opt = self.state.get_latest_persisted()?;
-        let earliest_hot_opt = self.state.get_earliest_hot()?;
-
-        let (latest_hot_u64, earliest_hot_u64) =
-            if let (Some(latest), Some(earliest)) = (latest_hot_opt, earliest_hot_opt) {
-                (latest, earliest)
-            } else {
-                // Not enough data to archive, which is normal.
-                return Ok(());
+        // This loop will continue to process batches as long as the hot tier is oversized
+        // and there are contiguous blocks to archive.
+        loop {
+            let earliest_hot = match self.state.get_earliest_hot()? {
+                Some(num) => num,
+                None => return Ok(()), // Nothing to archive
             };
 
-        if latest_hot_u64 <= earliest_hot_u64 {
-            return Ok(());
+            let latest_persisted = self.state.get_latest_persisted()?.unwrap_or(0);
+            let hot_tier_total_blocks = latest_persisted.saturating_sub(earliest_hot) + 1;
+            self.metrics
+                .persistence_hot_tier_block_count
+                .set(hot_tier_total_blocks as i64);
+
+            // The condition to archive is when the number of blocks in the hot tier
+            // STRICTLY EXCEEDS the target count.
+            if hot_tier_total_blocks <= self.config.hot_storage_block_count {
+                return Ok(());
+            }
+
+            let batch_size = self.config.archive_batch_size;
+
+            if self
+                .hot_tier
+                .is_batch_complete(earliest_hot, batch_size)?
+            {
+                trace!(
+                    "Found complete batch starting at {}. Archiving.",
+                    earliest_hot
+                );
+                self.archive_batch(earliest_hot, batch_size)?;
+                // After a successful archive, we immediately continue the loop
+                // to see if another batch can be processed right away.
+            } else {
+                trace!(
+                    "Batch starting at {} is incomplete. Marking as skipped.",
+                    earliest_hot
+                );
+                let mut batch = WriteBatch::default();
+                self.state.add_skipped_batch(earliest_hot, &mut batch)?;
+                self.hot_tier.commit_batch(batch)?;
+                // If the very first batch is incomplete, we can't do any more work in this cycle.
+                break;
+            }
         }
 
-        let current_block_count = latest_hot_u64.saturating_sub(earliest_hot_u64) + 1;
-        self.metrics
-            .persistence_hot_tier_block_count
-            .set(current_block_count as i64);
+        Ok(())
+    }
 
-        if current_block_count
-            < self.config.hot_storage_block_count + self.config.archive_batch_size
-        {
-            // Not enough blocks to trigger an archival run.
-            return Ok(());
-        }
-
+    fn archive_batch(&self, start_block: u64, count: u64) -> Result<()> {
         let timer = self
             .metrics
             .persistence_archival_cycle_duration_seconds
             .with_label_values(&[])
             .start_timer();
 
-        trace!(
-            "Hot tier count ({}) exceeds trigger, starting archival...",
-            current_block_count
-        );
-
-        let num_to_archive = self.config.archive_batch_size;
-        let blocks_to_archive = self
-            .hot_tier
-            .read_block_batch(earliest_hot_u64, num_to_archive)?;
-        trace!(
-            "Read {} blocks from hot tier for archival.",
-            blocks_to_archive.len()
-        );
+        let blocks_to_archive = self.hot_tier.read_block_batch(start_block, count)?;
+        if blocks_to_archive.is_empty() {
+            warn!(
+                "Attempted to archive batch from {} but read 0 blocks. Aborting.",
+                start_block
+            );
+            return Ok(());
+        }
 
         let new_index_path = self.cold_writer.write_archive(&blocks_to_archive)?;
-        trace!(
-            "Successfully wrote blocks to cold archive: {:?}",
-            new_index_path.file_name().unwrap_or_default()
-        );
-
         if let Err(e) = self.cold_reader.load_index_file(&new_index_path) {
-            warn!("CRITICAL: Failed to live-load new index file {:?}: {}. A restart may be required to see these blocks.", new_index_path, e);
-        } else {
-            trace!("Cold reader index successfully updated in real-time.");
+            warn!(
+                "CRITICAL: Failed to live-load new index file {:?}: {}. A restart may be required.",
+                new_index_path, e
+            );
         }
 
-        let end_block_to_archive = earliest_hot_u64 + num_to_archive;
+        let new_earliest_hot = start_block + count;
         let mut batch = WriteBatch::default();
-        for i in 0..num_to_archive {
+        for i in 0..count {
             self.hot_tier
-                .add_delete_to_batch(earliest_hot_u64 + i, &mut batch)?;
+                .add_delete_to_batch(start_block + i, &mut batch)?;
         }
-        self.state
-            .set_earliest_hot(end_block_to_archive, &mut batch)?;
+        self.state.set_earliest_hot(new_earliest_hot, &mut batch)?;
+        self.state.remove_skipped_batch(start_block, &mut batch)?;
 
         self.hot_tier.commit_batch(batch)?;
-        trace!(
-            "Archival cycle complete. New earliest hot block is #{}.",
-            end_block_to_archive
-        );
 
+        info!(
+            "Archival cycle complete. New earliest hot block is #{}.",
+            new_earliest_hot
+        );
         timer.observe_duration();
         self.metrics.persistence_archival_cycles_total.inc();
-
         Ok(())
     }
 }

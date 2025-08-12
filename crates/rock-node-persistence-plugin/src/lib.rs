@@ -136,6 +136,9 @@ impl Plugin for PersistencePlugin {
             }
         }
 
+        // Seed highest_contiguous based on configured start block if unset.
+        state_manager.initialize_highest_contiguous(start_block_number.saturating_sub(1))?;
+
         let archiver = Arc::new(cold_storage::archiver::Archiver::new(
             config_arc,
             hot_tier.clone(),

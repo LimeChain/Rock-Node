@@ -138,38 +138,8 @@ impl SessionManager {
                 .publish_blocks_received_total
                 .with_label_values(&["duplicate"])
                 .inc();
-            self.context
-                .metrics
-                .publish_responses_sent_total
-                .with_label_values(&["EndStream_DuplicateBlock"])
-                .inc();
             let response = response_from_code(
                 publish_stream_response::end_of_stream::Code::DuplicateBlock,
-                latest_persisted as u64,
-            );
-            let _ = self.send_response(response).await;
-            return false;
-        }
-
-        if block_number > latest_persisted + 1 {
-            info!(
-                session_id = %self.id,
-                received_block = block_number,
-                expected_block = latest_persisted + 1,
-                "Rejecting future block. RockNode is BEHIND."
-            );
-            self.context
-                .metrics
-                .publish_blocks_received_total
-                .with_label_values(&["future_block"])
-                .inc();
-            self.context
-                .metrics
-                .publish_responses_sent_total
-                .with_label_values(&["EndStream_Behind"])
-                .inc();
-            let response = response_from_code(
-                publish_stream_response::end_of_stream::Code::Behind,
                 latest_persisted as u64,
             );
             let _ = self.send_response(response).await;
@@ -183,7 +153,6 @@ impl SessionManager {
             .or_insert(self.id);
         if *winner_entry == self.id {
             self.state = SessionState::Primary;
-            // Record the start time for lifecycle duration measurement
             self.block_start_time = Some(Instant::now());
             self.context
                 .metrics
@@ -246,8 +215,6 @@ impl SessionManager {
             self.reset_for_next_block();
             true
         } else {
-            // ACK failed or timed out. The logic inside wait_for_persistence_ack handles retries.
-            // Terminate this session's attempt.
             false
         }
     }
@@ -267,7 +234,6 @@ impl SessionManager {
         trace!(session_id = %self.id, block = block_to_await, "Awaiting persistence ACK...");
         let start_time = Instant::now();
 
-        // This is only ever called by the PRIMARY session.
         let timeout_result = tokio::time::timeout(ack_timeout, async {
             while let Ok(persisted_event) = rx_persisted.recv().await {
                 if persisted_event.block_number == block_to_await {
@@ -290,7 +256,6 @@ impl SessionManager {
                     .with_label_values(&["acknowledged"])
                     .observe(duration);
 
-                // Record full lifecycle duration if we captured a start time
                 if let Some(start_life) = self.block_start_time {
                     let lifecycle_duration = start_life.elapsed().as_secs_f64();
                     self.context
@@ -301,11 +266,9 @@ impl SessionManager {
                 }
                 self.context.metrics.blocks_acknowledged.inc();
 
-                // Update shared state *before* broadcasting
                 self.shared_state
                     .set_latest_persisted_block(block_to_await as i64);
 
-                // Create the acknowledgement message
                 let ack_msg = PublishStreamResponse {
                     response: Some(publish_stream_response::Response::Acknowledgement(
                         BlockAcknowledgement {
@@ -315,7 +278,6 @@ impl SessionManager {
                     )),
                 };
 
-                // Broadcast to all active sessions
                 for session_entry in self.shared_state.active_sessions.iter() {
                     let _ = session_entry.value().send(Ok(ack_msg.clone())).await;
                 }
@@ -326,7 +288,6 @@ impl SessionManager {
                     .with_label_values(&["Acknowledgement"])
                     .inc();
 
-                // Clean up the winner map for this block
                 self.shared_state.block_winners.remove(&block_to_await);
                 Ok(())
             }
@@ -341,7 +302,6 @@ impl SessionManager {
                     .with_label_values(&["timeout"])
                     .observe(duration);
 
-                // Record full lifecycle duration with timeout outcome if start time exists
                 if let Some(start_life) = self.block_start_time {
                     let lifecycle_duration = start_life.elapsed().as_secs_f64();
                     self.context
@@ -351,10 +311,8 @@ impl SessionManager {
                         .observe(lifecycle_duration);
                 }
 
-                // IMPORTANT: Remove the failed winner to allow a new race
                 self.shared_state.block_winners.remove(&block_to_await);
 
-                // Create the ResendBlock message
                 let resend_msg = PublishStreamResponse {
                     response: Some(publish_stream_response::Response::ResendBlock(
                         ResendBlock {
@@ -363,10 +321,8 @@ impl SessionManager {
                     )),
                 };
 
-                // Broadcast to all other sessions to trigger a new race for this block
                 for session_entry in self.shared_state.active_sessions.iter() {
                     if *session_entry.key() != self.id {
-                        // Don't ask the failed session to resend
                         let _ = session_entry.value().send(Ok(resend_msg.clone())).await;
                     }
                 }
@@ -377,7 +333,6 @@ impl SessionManager {
                     .with_label_values(&["ResendBlock"])
                     .inc();
 
-                // Terminate this session's attempt.
                 Err(())
             }
         }
