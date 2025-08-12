@@ -10,6 +10,8 @@ pub struct Config {
 pub struct CoreConfig {
     pub log_level: String,
     pub database_path: String,
+    #[serde(default)]
+    pub genesis_block_number: u64,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
