@@ -44,3 +44,6 @@ regex = "1.10"
 
 # Add async-trait for async methods in traits
 async-trait = "0.1"
+
+[dev-dependencies]
+tempfile = "3"

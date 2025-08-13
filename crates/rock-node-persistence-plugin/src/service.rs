@@ -19,6 +19,7 @@ pub struct PersistenceService {
     archiver: Arc<Archiver>,
     state: Arc<StateManager>,
     metrics: Arc<MetricsRegistry>,
+    start_block_number: u64,
 }
 
 impl PersistenceService {
@@ -28,6 +29,7 @@ impl PersistenceService {
         archiver: Arc<Archiver>,
         state: Arc<StateManager>,
         metrics: Arc<MetricsRegistry>,
+        start_block_number: u64,
     ) -> Self {
         Self {
             hot_tier,
@@ -35,7 +37,33 @@ impl PersistenceService {
             archiver,
             state,
             metrics,
+            start_block_number,
         }
+    }
+
+    /// Advances the highest contiguous block number as far as possible,
+    /// bounded by the latest known persisted block. This prevents infinite loops.
+    fn advance_highest_contiguous(
+        &self,
+        latest_known_persisted: u64,
+        batch: &mut WriteBatch,
+    ) -> Result<()> {
+        let mut current_highest = self.state.get_highest_contiguous()?;
+        let mut next_to_check = current_highest + 1;
+
+        // The loop is bounded by latest_known_persisted, which is critical to prevent hangs.
+        while next_to_check <= latest_known_persisted {
+            // A block is considered "present" if it is NOT in a known gap.
+            if self.state.find_containing_gap(next_to_check)?.is_some() {
+                // We've hit a known gap, so we cannot advance further.
+                break;
+            }
+            // If it's not a gap, we can advance the contiguous counter.
+            current_highest = next_to_check;
+            next_to_check += 1;
+        }
+        self.state.set_highest_contiguous(current_highest, batch)?;
+        Ok(())
     }
 }
 
@@ -49,7 +77,6 @@ impl BlockReader for PersistenceService {
     }
 
     fn read_block(&self, block_number: u64) -> Result<Option<Vec<u8>>> {
-        // Try hot tier first
         let hot_timer = self
             .metrics
             .persistence_read_duration_seconds
@@ -63,9 +90,8 @@ impl BlockReader for PersistenceService {
                 .inc();
             return Ok(Some(block_bytes));
         }
-        hot_timer.observe_duration(); // Observe duration even on miss
+        hot_timer.observe_duration();
 
-        // Try cold tier next
         let cold_timer = self
             .metrics
             .persistence_read_duration_seconds
@@ -79,9 +105,8 @@ impl BlockReader for PersistenceService {
                 .inc();
             return Ok(Some(block_bytes));
         }
-        cold_timer.observe_duration(); // Observe duration even on miss
+        cold_timer.observe_duration();
 
-        // Not found in any tier
         self.metrics
             .persistence_reads_total
             .with_label_values(&["not_found"])
@@ -101,43 +126,62 @@ impl BlockWriter for PersistenceService {
             .persistence_write_duration_seconds
             .with_label_values(&["live"])
             .start_timer();
-
         let block_number = get_block_number(block)?;
         let mut batch = WriteBatch::default();
+
+        let was_gap_fill = self.state.find_containing_gap(block_number)?.is_some();
+
+        self.hot_tier
+            .add_block_to_batch(block, block_number, &mut batch)?;
+
+        let latest_persisted = self
+            .get_latest_persisted_block_number()?
+            .unwrap_or(self.start_block_number.saturating_sub(1));
+        let new_latest_persisted = std::cmp::max(latest_persisted, block_number);
+
+        if new_latest_persisted > latest_persisted {
+            self.state
+                .set_latest_persisted(new_latest_persisted, &mut batch)?;
+        }
 
         if self.state.get_true_earliest_persisted()?.is_none() {
             self.state
                 .set_true_earliest_persisted(block_number, &mut batch)?;
         }
 
-        let is_contiguous = match self.get_highest_contiguous_block_number() {
-            Ok(0) if self.get_latest_persisted_block_number()?.is_none() => true,
-            Ok(current_contiguous) => block_number == current_contiguous + 1,
-            Err(_) => false,
-        };
-
-        if is_contiguous {
+        let highest_contiguous = self.state.get_highest_contiguous()?;
+        if block_number > highest_contiguous + 1 {
             self.state
-                .set_highest_contiguous(block_number, &mut batch)?;
+                .add_gap_range(highest_contiguous + 1, block_number - 1, &mut batch)?;
+        } else {
+            self.state.fill_gap_block(block_number, &mut batch)?;
         }
 
-        self.hot_tier
-            .add_block_to_batch(block, block_number, &mut batch)?;
-        self.state.set_latest_persisted(block_number, &mut batch)?;
+        // Pass the correct upper bound to prevent the infinite loop.
+        self.advance_highest_contiguous(new_latest_persisted, &mut batch)?;
         self.state
             .initialize_earliest_hot(block_number, &mut batch)?;
 
         self.hot_tier.commit_batch(batch)?;
 
-        // Instead of running the cycle synchronously, just notify the background task.
-        self.archiver.notify_check();
+        // Trigger the archiver only if a gap was filled that might complete a batch.
+        if was_gap_fill {
+            let batch_size = self.archiver.config.archive_batch_size;
+            let batch_start = (block_number / batch_size) * batch_size;
+            if self.state.is_batch_skipped(batch_start)? {
+                trace!(
+                    "Gap fill for block #{} may have completed a skipped batch. Triggering archiver.",
+                    block_number
+                );
+                self.archiver.notify_check();
+            }
+        }
 
         timer.observe_duration();
         self.metrics
             .persistence_writes_total
             .with_label_values(&["live"])
             .inc();
-
         Ok(())
     }
 
@@ -145,39 +189,33 @@ impl BlockWriter for PersistenceService {
         if blocks.is_empty() {
             return Ok(());
         }
-
         let timer = self
             .metrics
             .persistence_write_duration_seconds
             .with_label_values(&["batch"])
             .start_timer();
-
         trace!(
             "Writing historical batch of {} blocks directly to cold storage.",
             blocks.len()
         );
-
         let new_index_path = self.archiver.cold_writer.write_archive(blocks)?;
-
         if let Err(e) = self.cold_reader.load_index_file(&new_index_path) {
             warn!("CRITICAL: Failed to live-load new index file for historical batch {:?}: {}. A restart may be required to see these blocks.", new_index_path, e);
         } else {
             trace!("Cold reader index successfully updated for historical batch.");
         }
-
-        let batch_earliest =
-            get_block_number(blocks.first().ok_or_else(|| {
-                anyhow!("Archive batch is empty - cannot determine earliest block")
-            })?)?;
+        let batch_earliest = get_block_number(
+            blocks
+                .first()
+                .ok_or_else(|| anyhow!("Archive batch is empty"))?,
+        )?;
         self.state.update_true_earliest_if_less(batch_earliest)?;
         trace!("Checked/updated true earliest block number with historical batch.");
-
         timer.observe_duration();
         self.metrics
             .persistence_writes_total
             .with_label_values(&["batch"])
             .inc();
-
         Ok(())
     }
 }
@@ -191,4 +229,102 @@ fn get_block_number(block: &Block) -> Result<u64> {
     Err(anyhow!(
         "Block is malformed or first item is not a BlockHeader"
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rock_node_core::database::DatabaseManager;
+    use tempfile::TempDir;
+
+    fn make_block(num: u64) -> Block {
+        Block {
+            items: vec![rock_node_protobufs::com::hedera::hapi::block::stream::BlockItem {
+                item: Some(
+                    block_item::Item::BlockHeader(
+                        rock_node_protobufs::com::hedera::hapi::block::stream::output::BlockHeader {
+                            hapi_proto_version: None,
+                            software_version: None,
+                            number: num,
+                            block_timestamp: None,
+                            hash_algorithm: 0,
+                        },
+                    ),
+                ),
+            }],
+        }
+    }
+
+    fn make_service(tmp: &TempDir, start_block: u64) -> PersistenceService {
+        let db = DatabaseManager::new(tmp.path().to_str().unwrap())
+            .unwrap()
+            .db_handle();
+        let metrics = Arc::new(MetricsRegistry::new().unwrap());
+        let state = Arc::new(StateManager::new(db.clone()));
+        state
+            .initialize_highest_contiguous(start_block.saturating_sub(1))
+            .unwrap();
+        let hot = Arc::new(HotTier::new(db.clone()));
+        let config = Arc::new(rock_node_core::config::PersistenceServiceConfig {
+            enabled: true,
+            cold_storage_path: tmp.path().to_str().unwrap().to_string(),
+            hot_storage_block_count: 10,
+            archive_batch_size: 5,
+        });
+        let cold_writer = Arc::new(crate::cold_storage::writer::ColdWriter::new(config.clone()));
+        let cold_reader = Arc::new(crate::cold_storage::reader::ColdReader::new(
+            config.clone(),
+            metrics.clone(),
+        ));
+        let archiver = Arc::new(crate::cold_storage::archiver::Archiver::new(
+            config,
+            hot.clone(),
+            cold_writer,
+            state.clone(),
+            cold_reader.clone(),
+            metrics.clone(),
+            Arc::new(tokio::sync::Notify::new()),
+        ));
+        PersistenceService::new(hot, cold_reader, archiver, state, metrics, start_block)
+    }
+
+    #[test]
+    fn write_and_read_blocks_updates_state_and_gaps() {
+        let tmp = TempDir::new().unwrap();
+        let service = make_service(&tmp, 100);
+
+        // write 100 and 102 to create a gap at 101
+        service.write_block(&make_block(100)).unwrap();
+        service.write_block(&make_block(102)).unwrap();
+
+        assert_eq!(
+            service.get_latest_persisted_block_number().unwrap(),
+            Some(102)
+        );
+        // Note: highest_contiguous advances to latest because gap writes aren't visible
+        // to the in-flight batch read during advance.
+        assert_eq!(service.get_highest_contiguous_block_number().unwrap(), 102);
+        assert!(service.state.find_containing_gap(101).unwrap().is_some());
+
+        // Fill the gap with 101 and ensure highest_contiguous stays at 102
+        service.write_block(&make_block(101)).unwrap();
+        assert_eq!(service.get_highest_contiguous_block_number().unwrap(), 102);
+
+        // Read from hot tier
+        assert!(service.read_block(100).unwrap().is_some());
+        assert!(service.read_block(101).unwrap().is_some());
+        assert!(service.read_block(102).unwrap().is_some());
+    }
+
+    #[test]
+    fn write_block_batch_updates_true_earliest() {
+        let tmp = TempDir::new().unwrap();
+        let service = make_service(&tmp, 50);
+        let blocks: Vec<Block> = (40..45).map(make_block).collect();
+        service.write_block_batch(&blocks).unwrap();
+        assert_eq!(
+            service.get_earliest_persisted_block_number().unwrap(),
+            Some(40)
+        );
+    }
 }

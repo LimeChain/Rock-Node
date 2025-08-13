@@ -53,8 +53,9 @@ impl MappedIndex {
 
         let record_bytes = &self.mmap[offset..offset + record_size];
         // SAFETY: We are reading a packed struct from a memory-mapped file slice
-        // that is the exact size of the struct. We trust the file format is correct.
-        let record: IndexRecord = unsafe { std::ptr::read(record_bytes.as_ptr() as *const _) };
+        // that is the exact size of the struct. Use read_unaligned to avoid UB.
+        let record: IndexRecord =
+            unsafe { std::ptr::read_unaligned(record_bytes.as_ptr() as *const IndexRecord) };
         Some(record)
     }
 }
@@ -195,5 +196,61 @@ impl ColdReader {
             block_number
         );
         Ok(None)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::cold_storage::writer::ColdWriter;
+    use prost::Message;
+    use rock_node_protobufs::com::hedera::hapi::block::stream::{block_item, Block};
+    use tempfile::TempDir;
+
+    fn make_block(num: u64) -> Block {
+        Block {
+            items: vec![rock_node_protobufs::com::hedera::hapi::block::stream::BlockItem {
+                item: Some(
+                    block_item::Item::BlockHeader(
+                        rock_node_protobufs::com::hedera::hapi::block::stream::output::BlockHeader {
+                            hapi_proto_version: None,
+                            software_version: None,
+                            number: num,
+                            block_timestamp: None,
+                            hash_algorithm: 0,
+                        },
+                    ),
+                ),
+            }],
+        }
+    }
+
+    #[test]
+    fn scan_and_read_from_cold_storage() {
+        let tmp = TempDir::new().unwrap();
+        let metrics = Arc::new(MetricsRegistry::new().unwrap());
+        let config = Arc::new(PersistenceServiceConfig {
+            enabled: true,
+            cold_storage_path: tmp.path().to_str().unwrap().to_string(),
+            hot_storage_block_count: 10,
+            archive_batch_size: 5,
+        });
+
+        // Write an archive first
+        let writer = ColdWriter::new(config.clone());
+        let blocks: Vec<Block> = (200..205).map(make_block).collect();
+        let index_path = writer.write_archive(&blocks).unwrap();
+
+        let reader = ColdReader::new(config, metrics);
+        reader.scan_and_build_index().unwrap();
+        // Should also be able to load explicitly
+        reader.load_index_file(&index_path).unwrap();
+
+        let bytes = reader.read_block(203).unwrap().unwrap();
+        let decoded = Block::decode(bytes.as_slice()).unwrap();
+        match decoded.items.first().unwrap().item.as_ref().unwrap() {
+            block_item::Item::BlockHeader(h) => assert_eq!(h.number, 203),
+            _ => panic!("unexpected item"),
+        }
     }
 }

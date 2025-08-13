@@ -357,6 +357,7 @@ mod tests {
             core: CoreConfig {
                 log_level: "debug".to_string(),
                 database_path: "".to_string(),
+                start_block_number: 0,
             },
             plugins: PluginConfigs {
                 observability: ObservabilityConfig {

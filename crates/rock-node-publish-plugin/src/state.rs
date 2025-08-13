@@ -45,3 +45,20 @@ impl SharedState {
             .store(block_number, Ordering::Relaxed);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn shared_state_initial_values_and_setters() {
+        let state = SharedState::new();
+        assert_eq!(state.get_latest_persisted_block(), -1);
+        state.set_latest_persisted_block(42);
+        assert_eq!(state.get_latest_persisted_block(), 42);
+
+        // active_sessions and block_winners should be empty initially
+        assert_eq!(state.active_sessions.len(), 0);
+        assert_eq!(state.block_winners.len(), 0);
+    }
+}

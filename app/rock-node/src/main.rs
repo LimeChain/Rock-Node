@@ -205,17 +205,8 @@ async fn main() -> Result<()> {
     plugins.push(Box::new(BlockAccessPlugin::new()));
     plugins.push(Box::new(StatusPlugin::new()));
     plugins.push(Box::new(ObservabilityPlugin::new()));
-
-    // ---- Conditionally add the new State Plugin ----
-    if app_context.config.plugins.state_management_service.enabled {
-        info!("StateManagementPlugin is ENABLED.");
-        plugins.push(Box::new(StateManagementPlugin::new()));
-        // Query Plugin is dependent on the StateManagementPlugin!
-        plugins.push(Box::new(QueryPlugin::new()));
-    } else {
-        info!("StateManagementPlugin is DISABLED.");
-    }
-    // ---------------------------------------------
+    plugins.push(Box::new(StateManagementPlugin::new()));
+    plugins.push(Box::new(QueryPlugin::new()));
 
     // --- Step 7: Initialize and Start Plugins ---
     info!("{}", "-".repeat(16));

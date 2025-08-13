@@ -112,6 +112,15 @@ impl StateManagementPlugin {
             .app_context
             .clone()
             .context("AppContext not initialized")?;
+
+        // Check if start_block_number is non-zero
+        if context.config.core.start_block_number > 0 {
+            warn!("StateManagementPlugin is disabled because the configured start_block_number is greater than 0.");
+            warn!("The plugin will be able to restore from a state snapshot in a future update.");
+            // TODO: Implement state snapshot restoration to support non-zero genesis blocks.
+            return Ok(());
+        }
+
         let state_manager = self
             .state_manager
             .clone()
