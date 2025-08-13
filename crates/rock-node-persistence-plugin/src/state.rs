@@ -342,7 +342,11 @@ mod tests {
         let mut batch = WriteBatch::default();
         state.fill_gap_block(5, &mut batch).unwrap();
         db.write(batch).unwrap();
-        let (k, v) = db.iterator_cf(cf_gaps, IteratorMode::Start).next().unwrap().unwrap();
+        let (k, v) = db
+            .iterator_cf(cf_gaps, IteratorMode::Start)
+            .next()
+            .unwrap()
+            .unwrap();
         assert_eq!(u64::from_be_bytes(k.as_ref().try_into().unwrap()), 6);
         assert_eq!(u64::from_be_bytes(v.as_ref().try_into().unwrap()), 12);
 
@@ -362,7 +366,11 @@ mod tests {
         let mut batch = WriteBatch::default();
         state.add_gap_range(7, 9, &mut batch).unwrap();
         db.write(batch).unwrap();
-        let (k, v) = db.iterator_cf(cf_gaps, IteratorMode::Start).next().unwrap().unwrap();
+        let (k, v) = db
+            .iterator_cf(cf_gaps, IteratorMode::Start)
+            .next()
+            .unwrap()
+            .unwrap();
         assert_eq!(u64::from_be_bytes(k.as_ref().try_into().unwrap()), 6);
         assert_eq!(u64::from_be_bytes(v.as_ref().try_into().unwrap()), 12);
     }

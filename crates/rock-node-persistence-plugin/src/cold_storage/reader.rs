@@ -203,8 +203,8 @@ impl ColdReader {
 mod tests {
     use super::*;
     use crate::cold_storage::writer::ColdWriter;
-    use rock_node_protobufs::com::hedera::hapi::block::stream::{block_item, Block};
     use prost::Message;
+    use rock_node_protobufs::com::hedera::hapi::block::stream::{block_item, Block};
     use tempfile::TempDir;
 
     fn make_block(num: u64) -> Block {

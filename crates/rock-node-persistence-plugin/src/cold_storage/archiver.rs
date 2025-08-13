@@ -168,7 +168,9 @@ mod tests {
     #[test]
     fn archival_cycle_moves_complete_batch_and_updates_state() {
         let tmp_dir = TempDir::new().unwrap();
-        let db = DatabaseManager::new(tmp_dir.path().to_str().unwrap()).unwrap().db_handle();
+        let db = DatabaseManager::new(tmp_dir.path().to_str().unwrap())
+            .unwrap()
+            .db_handle();
         let state = Arc::new(StateManager::new(db.clone()));
         let hot = Arc::new(HotTier::new(db.clone()));
         let metrics = Arc::new(MetricsRegistry::new().unwrap());
@@ -216,7 +218,9 @@ mod tests {
 
         // Cold reader should be able to read an archived block
         let bytes = cold_reader.read_block(101).unwrap().unwrap();
-        let decoded = rock_node_protobufs::com::hedera::hapi::block::stream::Block::decode(bytes.as_slice()).unwrap();
+        let decoded =
+            rock_node_protobufs::com::hedera::hapi::block::stream::Block::decode(bytes.as_slice())
+                .unwrap();
         match decoded.items.first().unwrap().item.as_ref().unwrap() {
             rock_node_protobufs::com::hedera::hapi::block::stream::block_item::Item::BlockHeader(h) => assert_eq!(h.number, 101),
             _ => panic!("unexpected item"),

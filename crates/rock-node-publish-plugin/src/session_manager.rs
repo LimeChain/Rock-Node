@@ -385,39 +385,96 @@ mod tests {
         app_context::AppContext,
         cache::BlockDataCache,
         capability::CapabilityRegistry,
-        config::{Config, CoreConfig, PluginConfigs, PublishServiceConfig, PersistenceServiceConfig, ServerStatusServiceConfig, StateManagementServiceConfig, SubscriberServiceConfig, VerificationServiceConfig, BlockAccessServiceConfig, QueryServiceConfig},
+        config::{
+            BlockAccessServiceConfig, Config, CoreConfig, PersistenceServiceConfig, PluginConfigs,
+            PublishServiceConfig, QueryServiceConfig, ServerStatusServiceConfig,
+            StateManagementServiceConfig, SubscriberServiceConfig, VerificationServiceConfig,
+        },
         metrics::MetricsRegistry,
     };
     use tokio::sync::{broadcast, mpsc};
 
-    fn make_context() -> (AppContext, mpsc::Receiver<rock_node_core::events::BlockItemsReceived>, mpsc::Receiver<rock_node_core::events::BlockVerified>, broadcast::Receiver<rock_node_core::events::BlockPersisted>) {
+    fn make_context() -> (
+        AppContext,
+        mpsc::Receiver<rock_node_core::events::BlockItemsReceived>,
+        mpsc::Receiver<rock_node_core::events::BlockVerified>,
+        broadcast::Receiver<rock_node_core::events::BlockPersisted>,
+    ) {
         let config = Config {
-            core: CoreConfig { log_level: "info".to_string(), database_path: ":memory:".to_string(), start_block_number: 0 },
+            core: CoreConfig {
+                log_level: "info".to_string(),
+                database_path: ":memory:".to_string(),
+                start_block_number: 0,
+            },
             plugins: PluginConfigs {
-                observability: rock_node_core::config::ObservabilityConfig { enabled: false, listen_address: "127.0.0.1:0".to_string() },
-                persistence_service: PersistenceServiceConfig { enabled: true, cold_storage_path: "/tmp".to_string(), hot_storage_block_count: 10, archive_batch_size: 5 },
-                publish_service: PublishServiceConfig { enabled: true, grpc_address: "127.0.0.1".to_string(), grpc_port: 0, max_concurrent_streams: 8, persistence_ack_timeout_seconds: 1, stale_winner_timeout_seconds: 1, winner_cleanup_interval_seconds: 60, winner_cleanup_threshold_blocks: 100 },
+                observability: rock_node_core::config::ObservabilityConfig {
+                    enabled: false,
+                    listen_address: "127.0.0.1:0".to_string(),
+                },
+                persistence_service: PersistenceServiceConfig {
+                    enabled: true,
+                    cold_storage_path: "/tmp".to_string(),
+                    hot_storage_block_count: 10,
+                    archive_batch_size: 5,
+                },
+                publish_service: PublishServiceConfig {
+                    enabled: true,
+                    grpc_address: "127.0.0.1".to_string(),
+                    grpc_port: 0,
+                    max_concurrent_streams: 8,
+                    persistence_ack_timeout_seconds: 1,
+                    stale_winner_timeout_seconds: 1,
+                    winner_cleanup_interval_seconds: 60,
+                    winner_cleanup_threshold_blocks: 100,
+                },
                 verification_service: VerificationServiceConfig { enabled: true },
-                block_access_service: BlockAccessServiceConfig { enabled: true, grpc_address: "127.0.0.1".to_string(), grpc_port: 0 },
-                server_status_service: ServerStatusServiceConfig { enabled: true, grpc_address: "127.0.0.1".to_string(), grpc_port: 0 },
+                block_access_service: BlockAccessServiceConfig {
+                    enabled: true,
+                    grpc_address: "127.0.0.1".to_string(),
+                    grpc_port: 0,
+                },
+                server_status_service: ServerStatusServiceConfig {
+                    enabled: true,
+                    grpc_address: "127.0.0.1".to_string(),
+                    grpc_port: 0,
+                },
                 state_management_service: StateManagementServiceConfig { enabled: true },
-                subscriber_service: SubscriberServiceConfig { enabled: true, grpc_address: "127.0.0.1".to_string(), grpc_port: 0, max_concurrent_streams: 8, session_timeout_seconds: 1, live_stream_queue_size: 64, max_future_block_lookahead: 5 },
-                query_service: QueryServiceConfig { enabled: true, grpc_address: "127.0.0.1".to_string(), grpc_port: 0 },
+                subscriber_service: SubscriberServiceConfig {
+                    enabled: true,
+                    grpc_address: "127.0.0.1".to_string(),
+                    grpc_port: 0,
+                    max_concurrent_streams: 8,
+                    session_timeout_seconds: 1,
+                    live_stream_queue_size: 64,
+                    max_future_block_lookahead: 5,
+                },
+                query_service: QueryServiceConfig {
+                    enabled: true,
+                    grpc_address: "127.0.0.1".to_string(),
+                    grpc_port: 0,
+                },
             },
         };
         let (tx_persisted, rx_persisted) = broadcast::channel(16);
         let (tx_items, rx_items) = mpsc::channel(16);
         let (tx_verified, rx_verified) = mpsc::channel(16);
-        (AppContext {
-            config: std::sync::Arc::new(config),
-            metrics: std::sync::Arc::new(MetricsRegistry::new().unwrap()),
-            capability_registry: std::sync::Arc::new(CapabilityRegistry::new()),
-            service_providers: std::sync::Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
-            block_data_cache: std::sync::Arc::new(BlockDataCache::new()),
-            tx_block_items_received: tx_items,
-            tx_block_verified: tx_verified,
-            tx_block_persisted: tx_persisted,
-        }, rx_items, rx_verified, rx_persisted)
+        (
+            AppContext {
+                config: std::sync::Arc::new(config),
+                metrics: std::sync::Arc::new(MetricsRegistry::new().unwrap()),
+                capability_registry: std::sync::Arc::new(CapabilityRegistry::new()),
+                service_providers: std::sync::Arc::new(std::sync::RwLock::new(
+                    std::collections::HashMap::new(),
+                )),
+                block_data_cache: std::sync::Arc::new(BlockDataCache::new()),
+                tx_block_items_received: tx_items,
+                tx_block_verified: tx_verified,
+                tx_block_persisted: tx_persisted,
+            },
+            rx_items,
+            rx_verified,
+            rx_persisted,
+        )
     }
 
     #[tokio::test]
@@ -433,7 +490,10 @@ mod tests {
         let msg = rx.try_recv().unwrap().unwrap();
         match msg.response.unwrap() {
             publish_stream_response::Response::EndStream(eos) => {
-                assert_eq!(eos.status, publish_stream_response::end_of_stream::Code::DuplicateBlock as i32);
+                assert_eq!(
+                    eos.status,
+                    publish_stream_response::end_of_stream::Code::DuplicateBlock as i32
+                );
                 assert_eq!(eos.block_number, 100);
             }
             _ => panic!("Expected EndStream DuplicateBlock"),
@@ -450,12 +510,8 @@ mod tests {
         let mut s2 = SessionManager::new(context.clone(), shared.clone(), tx2);
 
         // Register both sessions to receive broadcasts
-        shared
-            .active_sessions
-            .insert(s1.id, s1.response_tx.clone());
-        shared
-            .active_sessions
-            .insert(s2.id, s2.response_tx.clone());
+        shared.active_sessions.insert(s1.id, s1.response_tx.clone());
+        shared.active_sessions.insert(s2.id, s2.response_tx.clone());
 
         assert_eq!(s1.handle_block_header(101).await, true);
         // s2 attempts same block
@@ -475,9 +531,30 @@ mod tests {
         }
 
         // Primary session accumulates items and then proof leads to publish
-        let header_item = rock_node_protobufs::com::hedera::hapi::block::stream::BlockItem { item: Some(BlockItemType::BlockHeader(rock_node_protobufs::com::hedera::hapi::block::stream::output::BlockHeader { hapi_proto_version: None, software_version: None, number: 101, block_timestamp: None, hash_algorithm: 0 })) };
-        let proof_item = rock_node_protobufs::com::hedera::hapi::block::stream::BlockItem { item: Some(BlockItemType::BlockProof(rock_node_protobufs::com::hedera::hapi::block::stream::BlockProof { block: 101, ..Default::default() })) };
-        let req = PublishRequestType::BlockItems(rock_node_protobufs::org::hiero::block::api::BlockItemSet { block_items: vec![header_item, proof_item] });
+        let header_item = rock_node_protobufs::com::hedera::hapi::block::stream::BlockItem {
+            item: Some(BlockItemType::BlockHeader(
+                rock_node_protobufs::com::hedera::hapi::block::stream::output::BlockHeader {
+                    hapi_proto_version: None,
+                    software_version: None,
+                    number: 101,
+                    block_timestamp: None,
+                    hash_algorithm: 0,
+                },
+            )),
+        };
+        let proof_item = rock_node_protobufs::com::hedera::hapi::block::stream::BlockItem {
+            item: Some(BlockItemType::BlockProof(
+                rock_node_protobufs::com::hedera::hapi::block::stream::BlockProof {
+                    block: 101,
+                    ..Default::default()
+                },
+            )),
+        };
+        let req = PublishRequestType::BlockItems(
+            rock_node_protobufs::org::hiero::block::api::BlockItemSet {
+                block_items: vec![header_item, proof_item],
+            },
+        );
         // Kick off handle_request and allow it to run to process timeout
         let handle = tokio::spawn(async move { s1.handle_request(req).await });
         // Wait long enough for timeout path (configured to 1s in context)
@@ -506,22 +583,44 @@ mod tests {
         let mut s = SessionManager::new(context.clone(), shared.clone(), tx);
 
         // Register this session to receive ACK broadcast
-        shared
-            .active_sessions
-            .insert(s.id, s.response_tx.clone());
+        shared.active_sessions.insert(s.id, s.response_tx.clone());
 
         // start header
         assert_eq!(s.handle_block_header(200).await, true);
         // simulate proof -> will call publish_complete_block and then wait for ack
-        let header_item = rock_node_protobufs::com::hedera::hapi::block::stream::BlockItem { item: Some(BlockItemType::BlockHeader(rock_node_protobufs::com::hedera::hapi::block::stream::output::BlockHeader { hapi_proto_version: None, software_version: None, number: 200, block_timestamp: None, hash_algorithm: 0 })) };
-        let proof_item = rock_node_protobufs::com::hedera::hapi::block::stream::BlockItem { item: Some(BlockItemType::BlockProof(rock_node_protobufs::com::hedera::hapi::block::stream::BlockProof { block: 200, ..Default::default() })) };
-        let req = PublishRequestType::BlockItems(rock_node_protobufs::org::hiero::block::api::BlockItemSet { block_items: vec![header_item, proof_item] });
+        let header_item = rock_node_protobufs::com::hedera::hapi::block::stream::BlockItem {
+            item: Some(BlockItemType::BlockHeader(
+                rock_node_protobufs::com::hedera::hapi::block::stream::output::BlockHeader {
+                    hapi_proto_version: None,
+                    software_version: None,
+                    number: 200,
+                    block_timestamp: None,
+                    hash_algorithm: 0,
+                },
+            )),
+        };
+        let proof_item = rock_node_protobufs::com::hedera::hapi::block::stream::BlockItem {
+            item: Some(BlockItemType::BlockProof(
+                rock_node_protobufs::com::hedera::hapi::block::stream::BlockProof {
+                    block: 200,
+                    ..Default::default()
+                },
+            )),
+        };
+        let req = PublishRequestType::BlockItems(
+            rock_node_protobufs::org::hiero::block::api::BlockItemSet {
+                block_items: vec![header_item, proof_item],
+            },
+        );
 
         // Concurrently emit persisted event after a short delay
         let tx_persisted = s.context.tx_block_persisted.clone();
         tokio::spawn(async move {
             tokio::time::sleep(Duration::from_millis(50)).await;
-            let _ = tx_persisted.send(rock_node_core::events::BlockPersisted { block_number: 200, cache_key: uuid::Uuid::new_v4() });
+            let _ = tx_persisted.send(rock_node_core::events::BlockPersisted {
+                block_number: 200,
+                cache_key: uuid::Uuid::new_v4(),
+            });
         });
 
         let should_terminate = s.handle_request(req).await;
@@ -535,7 +634,9 @@ mod tests {
             .unwrap()
             .unwrap();
         match msg.response.unwrap() {
-            publish_stream_response::Response::Acknowledgement(ack) => assert_eq!(ack.block_number, 200),
+            publish_stream_response::Response::Acknowledgement(ack) => {
+                assert_eq!(ack.block_number, 200)
+            }
             _ => panic!("Expected Acknowledgement"),
         }
 

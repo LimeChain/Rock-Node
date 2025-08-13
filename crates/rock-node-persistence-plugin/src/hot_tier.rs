@@ -207,7 +207,8 @@ mod tests {
                     ),
                 }],
             };
-            hot.add_block_to_batch(&block, num, &mut write_batch).unwrap();
+            hot.add_block_to_batch(&block, num, &mut write_batch)
+                .unwrap();
         }
         hot.commit_batch(write_batch).unwrap();
 
