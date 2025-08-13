@@ -139,3 +139,87 @@ impl Archiver {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use prost::Message;
+    use rock_node_core::database::DatabaseManager;
+    use tempfile::TempDir;
+
+    fn make_block(num: u64) -> rock_node_protobufs::com::hedera::hapi::block::stream::Block {
+        rock_node_protobufs::com::hedera::hapi::block::stream::Block {
+            items: vec![rock_node_protobufs::com::hedera::hapi::block::stream::BlockItem {
+                item: Some(
+                    rock_node_protobufs::com::hedera::hapi::block::stream::block_item::Item::BlockHeader(
+                        rock_node_protobufs::com::hedera::hapi::block::stream::output::BlockHeader {
+                            hapi_proto_version: None,
+                            software_version: None,
+                            number: num,
+                            block_timestamp: None,
+                            hash_algorithm: 0,
+                        },
+                    ),
+                ),
+            }],
+        }
+    }
+
+    #[test]
+    fn archival_cycle_moves_complete_batch_and_updates_state() {
+        let tmp_dir = TempDir::new().unwrap();
+        let db = DatabaseManager::new(tmp_dir.path().to_str().unwrap()).unwrap().db_handle();
+        let state = Arc::new(StateManager::new(db.clone()));
+        let hot = Arc::new(HotTier::new(db.clone()));
+        let metrics = Arc::new(MetricsRegistry::new().unwrap());
+        let config = Arc::new(PersistenceServiceConfig {
+            enabled: true,
+            cold_storage_path: tmp_dir.path().to_str().unwrap().to_string(),
+            hot_storage_block_count: 2,
+            archive_batch_size: 3,
+        });
+        let cold_writer = Arc::new(ColdWriter::new(config.clone()));
+        let cold_reader = Arc::new(ColdReader::new(config.clone(), metrics.clone()));
+        let archiver = Archiver::new(
+            config,
+            hot.clone(),
+            cold_writer,
+            state.clone(),
+            cold_reader.clone(),
+            metrics,
+            Arc::new(Notify::new()),
+        );
+
+        // Seed state: earliest_hot=100, latest_persisted=104 (5 blocks)
+        let mut batch = WriteBatch::default();
+        state.set_earliest_hot(100, &mut batch).unwrap();
+        state.set_latest_persisted(104, &mut batch).unwrap();
+        // Add five blocks to hot tier
+        for n in 100..=104 {
+            let b = make_block(n);
+            hot.add_block_to_batch(&b, n, &mut batch).unwrap();
+        }
+        hot.commit_batch(batch).unwrap();
+
+        // Hot tier has 5 blocks, limit is 2 => archive should proceed.
+        archiver.run_archival_cycle().unwrap();
+
+        // After archiving 3-block batch starting at 100, earliest_hot should be 103
+        assert_eq!(state.get_earliest_hot().unwrap(), Some(103));
+        // And those first three should be gone from hot tier
+        assert!(hot.read_block(100).unwrap().is_none());
+        assert!(hot.read_block(101).unwrap().is_none());
+        assert!(hot.read_block(102).unwrap().is_none());
+        // Remaining still present
+        assert!(hot.read_block(103).unwrap().is_some());
+        assert!(hot.read_block(104).unwrap().is_some());
+
+        // Cold reader should be able to read an archived block
+        let bytes = cold_reader.read_block(101).unwrap().unwrap();
+        let decoded = rock_node_protobufs::com::hedera::hapi::block::stream::Block::decode(bytes.as_slice()).unwrap();
+        match decoded.items.first().unwrap().item.as_ref().unwrap() {
+            rock_node_protobufs::com::hedera::hapi::block::stream::block_item::Item::BlockHeader(h) => assert_eq!(h.number, 101),
+            _ => panic!("unexpected item"),
+        }
+    }
+}

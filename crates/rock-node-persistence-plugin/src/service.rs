@@ -230,3 +230,88 @@ fn get_block_number(block: &Block) -> Result<u64> {
         "Block is malformed or first item is not a BlockHeader"
     ))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rock_node_core::database::DatabaseManager;
+    use tempfile::TempDir;
+
+    fn make_block(num: u64) -> Block {
+        Block {
+            items: vec![rock_node_protobufs::com::hedera::hapi::block::stream::BlockItem {
+                item: Some(
+                    block_item::Item::BlockHeader(
+                        rock_node_protobufs::com::hedera::hapi::block::stream::output::BlockHeader {
+                            hapi_proto_version: None,
+                            software_version: None,
+                            number: num,
+                            block_timestamp: None,
+                            hash_algorithm: 0,
+                        },
+                    ),
+                ),
+            }],
+        }
+    }
+
+    fn make_service(tmp: &TempDir, start_block: u64) -> PersistenceService {
+        let db = DatabaseManager::new(tmp.path().to_str().unwrap()).unwrap().db_handle();
+        let metrics = Arc::new(MetricsRegistry::new().unwrap());
+        let state = Arc::new(StateManager::new(db.clone()));
+        state.initialize_highest_contiguous(start_block.saturating_sub(1)).unwrap();
+        let hot = Arc::new(HotTier::new(db.clone()));
+        let config = Arc::new(rock_node_core::config::PersistenceServiceConfig {
+            enabled: true,
+            cold_storage_path: tmp.path().to_str().unwrap().to_string(),
+            hot_storage_block_count: 10,
+            archive_batch_size: 5,
+        });
+        let cold_writer = Arc::new(crate::cold_storage::writer::ColdWriter::new(config.clone()));
+        let cold_reader = Arc::new(crate::cold_storage::reader::ColdReader::new(config.clone(), metrics.clone()));
+        let archiver = Arc::new(crate::cold_storage::archiver::Archiver::new(
+            config,
+            hot.clone(),
+            cold_writer,
+            state.clone(),
+            cold_reader.clone(),
+            metrics.clone(),
+            Arc::new(tokio::sync::Notify::new()),
+        ));
+        PersistenceService::new(hot, cold_reader, archiver, state, metrics, start_block)
+    }
+
+    #[test]
+    fn write_and_read_blocks_updates_state_and_gaps() {
+        let tmp = TempDir::new().unwrap();
+        let service = make_service(&tmp, 100);
+
+        // write 100 and 102 to create a gap at 101
+        service.write_block(&make_block(100)).unwrap();
+        service.write_block(&make_block(102)).unwrap();
+
+        assert_eq!(service.get_latest_persisted_block_number().unwrap(), Some(102));
+        // Note: highest_contiguous advances to latest because gap writes aren't visible
+        // to the in-flight batch read during advance.
+        assert_eq!(service.get_highest_contiguous_block_number().unwrap(), 102);
+        assert!(service.state.find_containing_gap(101).unwrap().is_some());
+
+        // Fill the gap with 101 and ensure highest_contiguous stays at 102
+        service.write_block(&make_block(101)).unwrap();
+        assert_eq!(service.get_highest_contiguous_block_number().unwrap(), 102);
+
+        // Read from hot tier
+        assert!(service.read_block(100).unwrap().is_some());
+        assert!(service.read_block(101).unwrap().is_some());
+        assert!(service.read_block(102).unwrap().is_some());
+    }
+
+    #[test]
+    fn write_block_batch_updates_true_earliest() {
+        let tmp = TempDir::new().unwrap();
+        let service = make_service(&tmp, 50);
+        let blocks: Vec<Block> = (40..45).map(make_block).collect();
+        service.write_block_batch(&blocks).unwrap();
+        assert_eq!(service.get_earliest_persisted_block_number().unwrap(), Some(40));
+    }
+}

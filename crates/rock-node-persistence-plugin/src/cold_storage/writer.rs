@@ -120,3 +120,58 @@ fn get_block_number(block: &Block) -> Result<u64> {
         "Block is malformed or first item is not a BlockHeader"
     ))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::cold_storage::reader::ColdReader;
+    use rock_node_core::{config::PersistenceServiceConfig, metrics::MetricsRegistry};
+    use tempfile::TempDir;
+
+    fn make_block(num: u64) -> Block {
+        Block {
+            items: vec![rock_node_protobufs::com::hedera::hapi::block::stream::BlockItem {
+                item: Some(
+                    block_item::Item::BlockHeader(
+                        rock_node_protobufs::com::hedera::hapi::block::stream::output::BlockHeader {
+                            hapi_proto_version: None,
+                            software_version: None,
+                            number: num,
+                            block_timestamp: None,
+                            hash_algorithm: 0,
+                        },
+                    ),
+                ),
+            }],
+        }
+    }
+
+    #[test]
+    fn write_and_read_archive_single_batch() {
+        let tmp = TempDir::new().unwrap();
+        let config = PersistenceServiceConfig {
+            enabled: true,
+            cold_storage_path: tmp.path().to_str().unwrap().to_string(),
+            hot_storage_block_count: 10,
+            archive_batch_size: 5,
+        };
+
+        let writer = ColdWriter::new(Arc::new(config.clone()));
+        let blocks: Vec<Block> = (100..105).map(make_block).collect();
+        let index_path = writer.write_archive(&blocks).unwrap();
+
+        let metrics = Arc::new(MetricsRegistry::new().unwrap());
+        let reader = ColdReader::new(Arc::new(config), metrics);
+        reader.load_index_file(&index_path).unwrap();
+
+        // Read back a few blocks
+        for num in [100u64, 102u64, 104u64] {
+            let bytes = reader.read_block(num).unwrap().unwrap();
+            let decoded = Block::decode(bytes.as_slice()).unwrap();
+            match decoded.items.first().unwrap().item.as_ref().unwrap() {
+                block_item::Item::BlockHeader(h) => assert_eq!(h.number, num),
+                _ => panic!("unexpected item"),
+            }
+        }
+    }
+}

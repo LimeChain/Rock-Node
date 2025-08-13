@@ -32,3 +32,6 @@ prost = "0.13.5"
 
 # Add async-trait for the Plugin trait
 async-trait = "0.1"
+
+[dev-dependencies]
+tempfile = "3"

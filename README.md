@@ -5,6 +5,7 @@
 
 <p><em>Resilient as a Rock ⚡</em></p>
 
+[![CodeCov](https://codecov.io/gh/LimeChain/Rock-Node/branch/main/graph/badge.svg?token=9PJP7AK77U)](https://codecov.io/gh/LimeChain/Rock-Node)
 [![Rust Version](https://img.shields.io/badge/rust-1.80.0+-blue.svg)](https://www.rust-lang.org)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
