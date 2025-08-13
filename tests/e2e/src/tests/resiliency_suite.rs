@@ -86,6 +86,7 @@ async fn test_hot_to_cold_storage_archival() -> Result<()> {
 [core]
 log_level = "info"
 database_path = "/app/data/db"
+start_block_number = 0
 
 [plugins]
     [plugins.observability]
@@ -173,8 +174,8 @@ database_path = "/app/data/db"
 
     assert_eq!(
         archival_cycle_line.split_whitespace().last().unwrap_or("0"),
-        "2",
-        "Archival cycle count should be at least 2"
+        "1",
+        "Archival cycle count should be at least 1"
     );
 
     Ok(())

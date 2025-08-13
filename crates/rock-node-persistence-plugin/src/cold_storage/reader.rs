@@ -54,9 +54,8 @@ impl MappedIndex {
         let record_bytes = &self.mmap[offset..offset + record_size];
         // SAFETY: We are reading a packed struct from a memory-mapped file slice
         // that is the exact size of the struct. Use read_unaligned to avoid UB.
-        let record: IndexRecord = unsafe {
-            std::ptr::read_unaligned(record_bytes.as_ptr() as *const IndexRecord)
-        };
+        let record: IndexRecord =
+            unsafe { std::ptr::read_unaligned(record_bytes.as_ptr() as *const IndexRecord) };
         Some(record)
     }
 }

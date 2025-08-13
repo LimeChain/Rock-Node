@@ -62,8 +62,7 @@ impl PersistenceService {
             current_highest = next_to_check;
             next_to_check += 1;
         }
-        self.state
-            .set_highest_contiguous(current_highest, batch)?;
+        self.state.set_highest_contiguous(current_highest, batch)?;
         Ok(())
     }
 }
@@ -139,9 +138,10 @@ impl BlockWriter for PersistenceService {
             .get_latest_persisted_block_number()?
             .unwrap_or(self.start_block_number.saturating_sub(1));
         let new_latest_persisted = std::cmp::max(latest_persisted, block_number);
-        
+
         if new_latest_persisted > latest_persisted {
-            self.state.set_latest_persisted(new_latest_persisted, &mut batch)?;
+            self.state
+                .set_latest_persisted(new_latest_persisted, &mut batch)?;
         }
 
         if self.state.get_true_earliest_persisted()?.is_none() {
@@ -156,7 +156,7 @@ impl BlockWriter for PersistenceService {
         } else {
             self.state.fill_gap_block(block_number, &mut batch)?;
         }
-        
+
         // Pass the correct upper bound to prevent the infinite loop.
         self.advance_highest_contiguous(new_latest_persisted, &mut batch)?;
         self.state
@@ -176,7 +176,7 @@ impl BlockWriter for PersistenceService {
                 self.archiver.notify_check();
             }
         }
-        
+
         timer.observe_duration();
         self.metrics
             .persistence_writes_total
@@ -204,10 +204,12 @@ impl BlockWriter for PersistenceService {
         } else {
             trace!("Cold reader index successfully updated for historical batch.");
         }
-        let batch_earliest =
-            get_block_number(blocks.first().ok_or_else(|| anyhow!("Archive batch is empty"))?)?;
-        self.state
-            .update_true_earliest_if_less(batch_earliest)?;
+        let batch_earliest = get_block_number(
+            blocks
+                .first()
+                .ok_or_else(|| anyhow!("Archive batch is empty"))?,
+        )?;
+        self.state.update_true_earliest_if_less(batch_earliest)?;
         trace!("Checked/updated true earliest block number with historical batch.");
         timer.observe_duration();
         self.metrics

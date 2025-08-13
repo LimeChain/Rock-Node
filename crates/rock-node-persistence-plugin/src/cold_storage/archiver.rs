@@ -71,10 +71,7 @@ impl Archiver {
 
             let batch_size = self.config.archive_batch_size;
 
-            if self
-                .hot_tier
-                .is_batch_complete(earliest_hot, batch_size)?
-            {
+            if self.hot_tier.is_batch_complete(earliest_hot, batch_size)? {
                 trace!(
                     "Found complete batch starting at {}. Archiving.",
                     earliest_hot
