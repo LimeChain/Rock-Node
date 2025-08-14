@@ -386,9 +386,7 @@ mod tests {
         cache::BlockDataCache,
         capability::CapabilityRegistry,
         config::{
-            BlockAccessServiceConfig, Config, CoreConfig, PersistenceServiceConfig, PluginConfigs,
-            PublishServiceConfig, QueryServiceConfig, ServerStatusServiceConfig,
-            StateManagementServiceConfig, SubscriberServiceConfig, VerificationServiceConfig,
+            BackfillConfig, BackfillMode, BlockAccessServiceConfig, Config, CoreConfig, PersistenceServiceConfig, PluginConfigs, PublishServiceConfig, QueryServiceConfig, ServerStatusServiceConfig, StateManagementServiceConfig, SubscriberServiceConfig, VerificationServiceConfig
         },
         metrics::MetricsRegistry,
     };
@@ -452,6 +450,13 @@ mod tests {
                     enabled: true,
                     grpc_address: "127.0.0.1".to_string(),
                     grpc_port: 0,
+                },
+                backfill: BackfillConfig {
+                    enabled: false,
+                    peers: vec![],
+                    mode: BackfillMode::GapFill,
+                    check_interval_seconds: 60,
+                    max_batch_size: 1000,
                 },
             },
         };

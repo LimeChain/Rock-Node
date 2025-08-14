@@ -11,6 +11,7 @@ members = [
     "crates/rock-node-subscriber-plugin",
     "crates/rock-node-state-management-plugin",
     "crates/rock-node-query-plugin",
+    "crates/rock-node-backfill-plugin",
     "tests/e2e"
 ]
 

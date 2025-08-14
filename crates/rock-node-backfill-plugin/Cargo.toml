@@ -1,0 +1,26 @@
+[package]
+name = "rock-node-backfill-plugin"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# Core application types and traits
+rock-node-core = { path = "../rock-node-core" }
+rock-node-protobufs = { path = "../rock-node-protobufs" }
+
+# Async runtime and gRPC
+tokio = { version = "1", features = ["full"] }
+tonic = "0.13.1"
+tokio-stream = "0.1"
+
+# For easy error handling
+anyhow = "1"
+
+# For structured logging
+tracing = "0.1"
+
+# For async traits
+async-trait = "0.1"
+
+# For RocksDB access
+rocksdb = "0.22"

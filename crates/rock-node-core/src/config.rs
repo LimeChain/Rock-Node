@@ -25,6 +25,8 @@ pub struct PluginConfigs {
     pub state_management_service: StateManagementServiceConfig,
     pub subscriber_service: SubscriberServiceConfig,
     pub query_service: QueryServiceConfig,
+    #[serde(default)]
+    pub backfill: BackfillConfig,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -93,4 +95,45 @@ pub struct QueryServiceConfig {
     pub enabled: bool,
     pub grpc_address: String,
     pub grpc_port: u16,
+}
+
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+#[serde(rename_all = "kebab-case")]
+pub enum BackfillMode {
+    GapFill,
+    Continuous,
+}
+
+impl Default for BackfillMode {
+    fn default() -> Self {
+        BackfillMode::GapFill
+    }
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct BackfillConfig {
+    pub enabled: bool,
+    #[serde(default)]
+    pub mode: BackfillMode,
+    pub peers: Vec<String>,
+    pub check_interval_seconds: u64,
+    #[serde(default = "default_max_batch_size")]
+    pub max_batch_size: u64,
+}
+
+fn default_max_batch_size() -> u64 {
+    1000
+}
+
+impl Default for BackfillConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            mode: BackfillMode::GapFill,
+            peers: vec![],
+            check_interval_seconds: 60,
+            max_batch_size: 1000,
+        }
+    }
 }
