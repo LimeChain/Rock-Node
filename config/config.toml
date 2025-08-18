@@ -61,3 +61,9 @@ start_block_number = 0
     grpc_address = "0.0.0.0"
     grpc_port = 6793
     
+    [plugins.backfill]
+    enabled = true
+    mode = "GapFill"
+    peers = [""]
+    check_interval_seconds = 5
+    max_batch_size = 10

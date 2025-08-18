@@ -2,6 +2,7 @@ use anyhow::Result;
 use clap::Parser;
 use config as config_rs;
 use dotenvy::dotenv;
+use rock_node_backfill_plugin::BackfillPlugin;
 use rock_node_block_access_plugin::BlockAccessPlugin;
 use rock_node_core::{
     app_context::AppContext, capability::CapabilityRegistry, config::Config as RockConfig,
@@ -16,7 +17,6 @@ use rock_node_server_status_plugin::StatusPlugin;
 use rock_node_state_management_plugin::StateManagementPlugin;
 use rock_node_subscriber_plugin::SubscriberPlugin;
 use rock_node_verifier_plugin::VerifierPlugin;
-use rock_node_backfill_plugin::BackfillPlugin;
 use std::{
     any::{Any, TypeId},
     collections::HashMap,
@@ -209,7 +209,7 @@ async fn main() -> Result<()> {
     plugins.push(Box::new(StateManagementPlugin::new()));
     plugins.push(Box::new(QueryPlugin::new()));
     plugins.push(Box::new(BackfillPlugin::new()));
-    
+
     // --- Step 7: Initialize and Start Plugins ---
     info!("{}", "-".repeat(16));
     info!("Initializing plugins...");

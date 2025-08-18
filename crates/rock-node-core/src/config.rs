@@ -211,11 +211,14 @@ impl Default for QueryServiceConfig {
     }
 }
 
-
 #[derive(Debug, Deserialize, Serialize, Clone)]
 #[serde(rename_all = "kebab-case")]
 pub enum BackfillMode {
+    // Accept both kebab-case (gap-fill) and common PascalCase (GapFill)
+    #[serde(alias = "GapFill", alias = "gapFill", alias = "GAPFILL")]
     GapFill,
+    // Accept both kebab-case (continuous) and PascalCase (Continuous)
+    #[serde(alias = "Continuous", alias = "CONTINUOUS")]
     Continuous,
 }
 

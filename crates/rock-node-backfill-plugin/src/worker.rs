@@ -1,10 +1,7 @@
 use anyhow::{anyhow, Context, Result};
 use rock_node_core::{
-    app_context::AppContext,
-    block_reader::BlockReader,
-    block_writer::BlockWriter,
-    database::CF_GAPS,
-    BlockReaderProvider, BlockWriterProvider,
+    app_context::AppContext, block_reader::BlockReader, block_writer::BlockWriter,
+    database::CF_GAPS, BlockReaderProvider, BlockWriterProvider,
 };
 use rock_node_protobufs::{
     com::hedera::hapi::block::stream::Block,
@@ -47,8 +44,12 @@ impl BackfillWorker {
             .get_writer();
 
         let db_manager = providers
-            .get(&TypeId::of::<rock_node_core::database_provider::DatabaseManagerProvider>())
-            .and_then(|p| p.downcast_ref::<rock_node_core::database_provider::DatabaseManagerProvider>())
+            .get(&TypeId::of::<
+                rock_node_core::database_provider::DatabaseManagerProvider,
+            >())
+            .and_then(|p| {
+                p.downcast_ref::<rock_node_core::database_provider::DatabaseManagerProvider>()
+            })
             .context("BackfillPlugin requires DatabaseManagerProvider")?
             .get_manager();
 
@@ -87,13 +88,19 @@ impl BackfillWorker {
                 Ok(Some(num)) => num + 1,
                 Ok(None) => self.context.config.core.start_block_number,
                 Err(e) => {
-                    error!("Could not read latest persisted block from DB: {}. Retrying...", e);
+                    error!(
+                        "Could not read latest persisted block from DB: {}. Retrying...",
+                        e
+                    );
                     tokio::time::sleep(Duration::from_secs(5)).await;
                     continue;
                 }
             };
 
-            info!("Starting continuous backfill stream from block #{}", start_from);
+            info!(
+                "Starting continuous backfill stream from block #{}",
+                start_from
+            );
 
             let stream_future = self.establish_and_run_stream(start_from, u64::MAX);
 
@@ -131,7 +138,10 @@ impl BackfillWorker {
 
             info!("Attempting to fill gap [{}, {}]", effective_start, end);
             if let Err(e) = self.establish_and_run_stream(effective_start, end).await {
-                warn!("Failed to fill gap [{}, {}]: {}. Will retry on next cycle.", effective_start, end, e);
+                warn!(
+                    "Failed to fill gap [{}, {}]: {}. Will retry on next cycle.",
+                    effective_start, end, e
+                );
             } else {
                 info!("Successfully filled gap [{}, {}].", effective_start, end);
             }
@@ -141,7 +151,10 @@ impl BackfillWorker {
 
     async fn establish_and_run_stream(&self, start: u64, end: u64) -> Result<()> {
         for peer_addr in &self.context.config.plugins.backfill.peers {
-            info!("Connecting to peer {} for blocks [{}, {}]", peer_addr, start, end);
+            info!(
+                "Connecting to peer {} for blocks [{}, {}]",
+                peer_addr, start, end
+            );
             match Channel::from_shared(peer_addr.clone())?.connect().await {
                 Ok(channel) => {
                     let mut client = BlockStreamSubscribeServiceClient::new(channel);
@@ -155,7 +168,9 @@ impl BackfillWorker {
                         match msg_res {
                             Ok(msg) => {
                                 if let Some(SubResponse::BlockItems(item_set)) = msg.response {
-                                    let block = Block { items: item_set.block_items };
+                                    let block = Block {
+                                        items: item_set.block_items,
+                                    };
                                     self.block_writer.write_block(&block)?;
                                 }
                             }
@@ -166,7 +181,10 @@ impl BackfillWorker {
                     return Ok(());
                 }
                 Err(e) => {
-                    warn!("Failed to connect to peer {}: {}. Trying next peer.", peer_addr, e);
+                    warn!(
+                        "Failed to connect to peer {}: {}. Trying next peer.",
+                        peer_addr, e
+                    );
                     continue;
                 }
             }

@@ -299,7 +299,10 @@ mod tests {
     use super::*;
     use rock_node_core::{
         config::{
-            BackfillConfig, BackfillMode, BlockAccessServiceConfig, Config, CoreConfig, ObservabilityConfig, PersistenceServiceConfig, PluginConfigs, PublishServiceConfig, QueryServiceConfig, ServerStatusServiceConfig, StateManagementServiceConfig, SubscriberServiceConfig, VerificationServiceConfig
+            BackfillConfig, BackfillMode, BlockAccessServiceConfig, Config, CoreConfig,
+            ObservabilityConfig, PersistenceServiceConfig, PluginConfigs, PublishServiceConfig,
+            QueryServiceConfig, ServerStatusServiceConfig, StateManagementServiceConfig,
+            SubscriberServiceConfig, VerificationServiceConfig,
         },
         events::BlockPersisted,
         AppContext, BlockReaderProvider, CapabilityRegistry, MetricsRegistry,
