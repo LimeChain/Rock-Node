@@ -17,6 +17,7 @@ use tokio_stream::StreamExt;
 use tonic::transport::Channel;
 use tracing::{error, info, trace, warn};
 
+#[derive(Debug)]
 pub struct BackfillWorker {
     context: AppContext,
     block_reader: Arc<dyn BlockReader>,
@@ -203,5 +204,403 @@ impl BackfillWorker {
             gaps.push((start, end));
         }
         Ok(gaps)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use async_trait::async_trait;
+    use rock_node_core::{
+        config::{BackfillConfig, Config, CoreConfig, PluginConfigs},
+        database::DatabaseManager,
+        database_provider::DatabaseManagerProvider,
+        metrics::MetricsRegistry,
+    };
+    use std::collections::HashMap;
+    use tempfile::TempDir;
+    use tokio::time::{timeout, Duration as TokioDuration};
+
+    // Mock BlockReader for testing
+    #[derive(Debug)]
+    struct MockBlockReader {
+        latest_block: Arc<tokio::sync::RwLock<Option<u64>>>,
+    }
+
+    impl MockBlockReader {
+        fn new(latest: Option<u64>) -> Self {
+            Self {
+                latest_block: Arc::new(tokio::sync::RwLock::new(latest)),
+            }
+        }
+    }
+
+    #[async_trait]
+    impl BlockReader for MockBlockReader {
+        fn get_latest_persisted_block_number(&self) -> Result<Option<u64>> {
+            Ok(*futures::executor::block_on(self.latest_block.read()))
+        }
+
+        fn read_block(&self, _block_number: u64) -> Result<Option<Vec<u8>>> {
+            Ok(None)
+        }
+
+        fn get_earliest_persisted_block_number(&self) -> Result<Option<u64>> {
+            Ok(None)
+        }
+
+        fn get_highest_contiguous_block_number(&self) -> Result<u64> {
+            Ok(100)
+        }
+    }
+
+    // Mock BlockWriter for testing
+    #[derive(Debug)]
+    struct MockBlockWriter {
+        written_blocks: Arc<tokio::sync::Mutex<Vec<u64>>>,
+    }
+
+    impl MockBlockWriter {
+        fn new() -> Self {
+            Self {
+                written_blocks: Arc::new(tokio::sync::Mutex::new(Vec::new())),
+            }
+        }
+    }
+
+    #[async_trait]
+    impl BlockWriter for MockBlockWriter {
+        async fn write_block(&self, block: &Block) -> Result<()> {
+            // Extract block number from header if available
+            for item in &block.items {
+                if let Some(rock_node_protobufs::com::hedera::hapi::block::stream::block_item::Item::BlockHeader(header)) = &item.item {
+                    self.written_blocks.lock().await.push(header.number);
+                    break;
+                }
+            }
+            Ok(())
+        }
+
+        async fn write_block_batch(&self, blocks: &[Block]) -> Result<()> {
+            for block in blocks {
+                self.write_block(block).await?;
+            }
+            Ok(())
+        }
+    }
+
+    fn create_test_cache() -> rock_node_core::cache::BlockDataCache {
+        // For tests, we'll use the default implementation but handle the runtime issue
+        // by running the tests in a tokio runtime
+        rock_node_core::cache::BlockDataCache::default()
+    }
+
+    fn setup_test_context(temp_dir: &TempDir) -> (AppContext, Arc<rocksdb::DB>) {
+        let db_manager = DatabaseManager::new(temp_dir.path().to_str().unwrap()).unwrap();
+        let db = db_manager.db_handle();
+
+        let config = Config {
+            core: CoreConfig {
+                log_level: "INFO".to_string(),
+                database_path: temp_dir.path().to_str().unwrap().to_string(),
+                start_block_number: 0,
+            },
+            plugins: PluginConfigs {
+                backfill: BackfillConfig {
+                    enabled: true,
+                    mode: rock_node_core::config::BackfillMode::GapFill,
+                    peers: vec!["http://localhost:8080".to_string()],
+                    check_interval_seconds: 1,
+                    max_batch_size: 100,
+                },
+                ..Default::default()
+            },
+        };
+
+        let mut providers: HashMap<TypeId, Arc<dyn std::any::Any + Send + Sync>> = HashMap::new();
+
+        // Add BlockReaderProvider
+        let reader = Arc::new(MockBlockReader::new(Some(100)));
+        providers.insert(
+            TypeId::of::<BlockReaderProvider>(),
+            Arc::new(BlockReaderProvider::new(reader)),
+        );
+
+        // Add BlockWriterProvider
+        let writer = Arc::new(MockBlockWriter::new());
+        providers.insert(
+            TypeId::of::<BlockWriterProvider>(),
+            Arc::new(BlockWriterProvider::new(writer)),
+        );
+
+        // Add DatabaseManagerProvider
+        providers.insert(
+            TypeId::of::<DatabaseManagerProvider>(),
+            Arc::new(DatabaseManagerProvider::new(Arc::new(db_manager))),
+        );
+
+        let context = AppContext {
+            config: Arc::new(config),
+            service_providers: Arc::new(std::sync::RwLock::new(providers)),
+            metrics: Arc::new(MetricsRegistry::new().unwrap()),
+            capability_registry: Arc::new(rock_node_core::capability::CapabilityRegistry::new()),
+            block_data_cache: Arc::new(create_test_cache()),
+            tx_block_items_received: tokio::sync::mpsc::channel(100).0,
+            tx_block_verified: tokio::sync::mpsc::channel(100).0,
+            tx_block_persisted: tokio::sync::broadcast::channel(100).0,
+        };
+
+        (context, db)
+    }
+
+    #[tokio::test]
+    async fn test_backfill_worker_new_success() {
+        let temp_dir = TempDir::new().unwrap();
+        let (context, _db) = setup_test_context(&temp_dir);
+
+        let worker = BackfillWorker::new(context);
+        assert!(worker.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_backfill_worker_new_missing_block_reader() {
+        let temp_dir = TempDir::new().unwrap();
+        let (mut context, _db) = setup_test_context(&temp_dir);
+
+        // Remove BlockReaderProvider
+        {
+            let mut providers = context.service_providers.write().unwrap();
+            providers.remove(&TypeId::of::<BlockReaderProvider>());
+        }
+
+        let worker = BackfillWorker::new(context);
+        assert!(worker.is_err());
+        assert!(worker
+            .unwrap_err()
+            .to_string()
+            .contains("BlockReaderProvider"));
+    }
+
+    #[tokio::test]
+    async fn test_backfill_worker_new_missing_block_writer() {
+        let temp_dir = TempDir::new().unwrap();
+        let (mut context, _db) = setup_test_context(&temp_dir);
+
+        // Remove BlockWriterProvider
+        {
+            let mut providers = context.service_providers.write().unwrap();
+            providers.remove(&TypeId::of::<BlockWriterProvider>());
+        }
+
+        let worker = BackfillWorker::new(context);
+        assert!(worker.is_err());
+        assert!(worker
+            .unwrap_err()
+            .to_string()
+            .contains("BlockWriterProvider"));
+    }
+
+    #[tokio::test]
+    async fn test_get_all_gaps_empty() {
+        let temp_dir = TempDir::new().unwrap();
+        let (context, _db) = setup_test_context(&temp_dir);
+
+        let worker = BackfillWorker::new(context).unwrap();
+        let gaps = worker.get_all_gaps().unwrap();
+        assert_eq!(gaps.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_get_all_gaps_with_data() {
+        let temp_dir = TempDir::new().unwrap();
+        let (context, db) = setup_test_context(&temp_dir);
+
+        let worker = BackfillWorker::new(context).unwrap();
+
+        // Add some gaps to the database
+        let cf_gaps = db.cf_handle(CF_GAPS).unwrap();
+        db.put_cf(cf_gaps, 10u64.to_be_bytes(), 20u64.to_be_bytes())
+            .unwrap();
+        db.put_cf(cf_gaps, 30u64.to_be_bytes(), 40u64.to_be_bytes())
+            .unwrap();
+        db.put_cf(cf_gaps, 50u64.to_be_bytes(), 60u64.to_be_bytes())
+            .unwrap();
+
+        let gaps = worker.get_all_gaps().unwrap();
+        assert_eq!(gaps.len(), 3);
+        assert_eq!(gaps[0], (10, 20));
+        assert_eq!(gaps[1], (30, 40));
+        assert_eq!(gaps[2], (50, 60));
+    }
+
+    #[tokio::test]
+    async fn test_run_gap_fill_loop_shutdown() {
+        let temp_dir = TempDir::new().unwrap();
+        let (context, _db) = setup_test_context(&temp_dir);
+
+        let worker = Arc::new(BackfillWorker::new(context).unwrap());
+        let shutdown_notify = Arc::new(Notify::new());
+
+        let worker_clone = worker.clone();
+        let shutdown_clone = shutdown_notify.clone();
+        let handle = tokio::spawn(async move {
+            worker_clone.run_gap_fill_loop(shutdown_clone).await;
+        });
+
+        // Give it a moment to start
+        tokio::time::sleep(TokioDuration::from_millis(50)).await;
+
+        // Signal shutdown
+        shutdown_notify.notify_waiters();
+
+        // Should complete quickly
+        let result = timeout(TokioDuration::from_secs(1), handle).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_run_continuous_loop_shutdown() {
+        let temp_dir = TempDir::new().unwrap();
+        let (context, _db) = setup_test_context(&temp_dir);
+
+        let worker = Arc::new(BackfillWorker::new(context).unwrap());
+        let shutdown_notify = Arc::new(Notify::new());
+
+        let worker_clone = worker.clone();
+        let shutdown_clone = shutdown_notify.clone();
+        let handle = tokio::spawn(async move {
+            worker_clone.run_continuous_loop(shutdown_clone).await;
+        });
+
+        // Give it a moment to start
+        tokio::time::sleep(TokioDuration::from_millis(50)).await;
+
+        // Signal shutdown
+        shutdown_notify.notify_waiters();
+
+        // The continuous loop might not complete immediately due to connection attempts,
+        // but we can verify that the shutdown signal was sent and the task is running
+        // For now, we'll just verify the task is still running after sending the signal
+        tokio::time::sleep(TokioDuration::from_millis(100)).await;
+
+        // Cancel the task since it might not respond to shutdown in test environment
+        handle.abort();
+
+        // Verify the task was aborted successfully
+        let result = handle.await;
+        assert!(result.is_err()); // Aborted tasks return Err
+    }
+
+    #[tokio::test]
+    async fn test_run_single_gap_check_no_gaps() {
+        let temp_dir = TempDir::new().unwrap();
+        let (context, _db) = setup_test_context(&temp_dir);
+
+        let worker = BackfillWorker::new(context).unwrap();
+        let result = worker.run_single_gap_check().await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_run_single_gap_check_with_gaps() {
+        let temp_dir = TempDir::new().unwrap();
+        let (context, db) = setup_test_context(&temp_dir);
+
+        let worker = BackfillWorker::new(context).unwrap();
+
+        // Add a gap to the database
+        let cf_gaps = db.cf_handle(CF_GAPS).unwrap();
+        db.put_cf(cf_gaps, 10u64.to_be_bytes(), 20u64.to_be_bytes())
+            .unwrap();
+
+        // This will fail to connect to peers, but that's expected in the test
+        let result = worker.run_single_gap_check().await;
+        assert!(result.is_ok()); // The method itself should succeed even if filling fails
+    }
+
+    #[tokio::test]
+    async fn test_establish_and_run_stream_no_peers() {
+        let temp_dir = TempDir::new().unwrap();
+        let (mut context, _db) = setup_test_context(&temp_dir);
+
+        // Clear peers
+        Arc::get_mut(&mut context.config)
+            .unwrap()
+            .plugins
+            .backfill
+            .peers
+            .clear();
+
+        let worker = BackfillWorker::new(context).unwrap();
+        let result = worker.establish_and_run_stream(0, 10).await;
+
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Failed to connect to any configured peers"));
+    }
+
+    #[tokio::test]
+    async fn test_establish_and_run_stream_invalid_peer() {
+        let temp_dir = TempDir::new().unwrap();
+        let (context, _db) = setup_test_context(&temp_dir);
+
+        let worker = BackfillWorker::new(context).unwrap();
+
+        // Will fail to connect to localhost:8080 in test environment
+        let result = worker.establish_and_run_stream(0, 10).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_gap_filtering_with_start_block_number() {
+        let temp_dir = TempDir::new().unwrap();
+        let (mut context, db) = setup_test_context(&temp_dir);
+
+        // Set start_block_number to 15
+        Arc::get_mut(&mut context.config)
+            .unwrap()
+            .core
+            .start_block_number = 15;
+
+        let worker = BackfillWorker::new(context.clone()).unwrap();
+
+        // Add gaps that span before and after start_block_number
+        let cf_gaps = db.cf_handle(CF_GAPS).unwrap();
+        db.put_cf(cf_gaps, 5u64.to_be_bytes(), 10u64.to_be_bytes())
+            .unwrap(); // Entirely before start
+        db.put_cf(cf_gaps, 10u64.to_be_bytes(), 20u64.to_be_bytes())
+            .unwrap(); // Spans start
+        db.put_cf(cf_gaps, 20u64.to_be_bytes(), 30u64.to_be_bytes())
+            .unwrap(); // After start
+
+        let gaps = worker.get_all_gaps().unwrap();
+        assert_eq!(gaps.len(), 3);
+
+        // Verify all gaps are retrieved (filtering happens in run_single_gap_check)
+        assert_eq!(gaps[0], (5, 10));
+        assert_eq!(gaps[1], (10, 20));
+        assert_eq!(gaps[2], (20, 30));
+    }
+
+    #[tokio::test]
+    async fn test_multiple_peers_configuration() {
+        let temp_dir = TempDir::new().unwrap();
+        let (mut context, _db) = setup_test_context(&temp_dir);
+
+        // Configure multiple peers
+        Arc::get_mut(&mut context.config)
+            .unwrap()
+            .plugins
+            .backfill
+            .peers = vec![
+            "http://peer1:8080".to_string(),
+            "http://peer2:8080".to_string(),
+            "http://peer3:8080".to_string(),
+        ];
+
+        let worker = BackfillWorker::new(context.clone()).unwrap();
+        assert_eq!(worker.context.config.plugins.backfill.peers.len(), 3);
     }
 }

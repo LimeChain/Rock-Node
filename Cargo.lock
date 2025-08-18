@@ -2201,9 +2201,11 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
+ "futures",
  "rock-node-core",
  "rock-node-protobufs",
  "rocksdb",
+ "tempfile",
  "tokio",
  "tokio-stream",
  "tonic",
@@ -2240,6 +2242,7 @@ dependencies = [
  "serde",
  "thiserror 1.0.69",
  "tokio",
+ "toml 0.8.23",
  "tracing",
  "uuid",
 ]

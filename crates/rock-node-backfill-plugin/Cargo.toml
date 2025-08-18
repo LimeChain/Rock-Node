@@ -24,3 +24,7 @@ async-trait = "0.1"
 
 # For RocksDB access
 rocksdb = "0.22"
+
+[dev-dependencies]
+tempfile = "3.20"
+futures = "0.3"

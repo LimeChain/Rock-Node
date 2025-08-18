@@ -23,3 +23,6 @@ tracing = "0.1"
 
 # Add async-trait for async methods in traits
 async-trait = "0.1"
+
+[dev-dependencies]
+toml = "0.8"
