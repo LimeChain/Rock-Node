@@ -290,7 +290,7 @@ async fn process_event(event: InboundEvent, context: &AppContext, service: &Pers
     if let Some(data) = context.block_data_cache.get(&cache_key) {
         match Block::decode(data.contents.as_slice()) {
             Ok(block_proto) => {
-                if let Err(e) = service.write_block(&block_proto) {
+                if let Err(e) = service.write_block(&block_proto).await {
                     error!("Failed to persist block #{}: {}", block_number, e);
                 } else {
                     trace!("Successfully persisted block #{}.", block_number);

@@ -171,7 +171,7 @@ impl BackfillWorker {
                                     let block = Block {
                                         items: item_set.block_items,
                                     };
-                                    self.block_writer.write_block(&block)?;
+                                    self.block_writer.write_block(&block).await?;
                                 }
                             }
                             Err(status) => return Err(anyhow!("gRPC stream error: {}", status)),

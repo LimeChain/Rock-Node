@@ -17,7 +17,7 @@ async fn test_gap_fill_mode_successfully_fills_gap() -> Result<()> {
     publish_blocks(&source_ctx, 0, 20).await?;
 
     let subscriber_port = source_ctx.subscriber_client_port().await?;
-    let peer_address = format!("http://localhost:{}", subscriber_port);
+    let peer_address = format!("http://host.docker.internal:{}", subscriber_port);
 
     // --- 2. Setup a "destination" node with a gap ---
     // This node will be configured to backfill from the source node.
@@ -122,7 +122,7 @@ async fn test_continuous_mode_successfully_catches_up_and_streams() -> Result<()
     publish_blocks(&source_ctx, 0, 10).await?;
 
     let subscriber_port = source_ctx.subscriber_client_port().await?;
-    let peer_address = format!("http://localhost:{}", subscriber_port);
+    let peer_address = format!("http://host.docker.internal:{}", subscriber_port);
 
     // --- 2. Setup a new, empty "destination" node in Continuous mode ---
     let dest_config = format!(

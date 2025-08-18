@@ -93,7 +93,7 @@ impl TestContext {
             .with_exposed_port(50053.tcp())
             .with_exposed_port(50054.tcp())
             .with_exposed_port(50055.tcp()) // Query service port
-            .with_wait_for(WaitFor::message_on_stderr(
+            .with_wait_for(WaitFor::message_on_stdout(
                 "Rock Node running successfully!",
             ))
             .with_env_var("RUST_LOG", "info,rock_node_persistence_plugin=trace")
