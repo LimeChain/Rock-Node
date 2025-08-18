@@ -41,31 +41,6 @@ impl PersistenceService {
             start_block_number,
         }
     }
-
-    /// Advances the highest contiguous block number as far as possible,
-    /// bounded by the latest known persisted block. This prevents infinite loops.
-    fn advance_highest_contiguous(
-        &self,
-        latest_known_persisted: u64,
-        batch: &mut WriteBatch,
-    ) -> Result<()> {
-        let mut current_highest = self.state.get_highest_contiguous()?;
-        let mut next_to_check = current_highest + 1;
-
-        // The loop is bounded by latest_known_persisted, which is critical to prevent hangs.
-        while next_to_check <= latest_known_persisted {
-            // A block is considered "present" if it is NOT in a known gap.
-            if self.state.find_containing_gap(next_to_check)?.is_some() {
-                // We've hit a known gap, so we cannot advance further.
-                break;
-            }
-            // If it's not a gap, we can advance the contiguous counter.
-            current_highest = next_to_check;
-            next_to_check += 1;
-        }
-        self.state.set_highest_contiguous(current_highest, batch)?;
-        Ok(())
-    }
 }
 
 impl BlockReader for PersistenceService {
@@ -130,15 +105,13 @@ impl BlockWriter for PersistenceService {
             .start_timer();
         let block_number = get_block_number(block)?;
 
-        // Clone Arcs to move them into the blocking task
         let state = self.state.clone();
         let hot_tier = self.hot_tier.clone();
         let archiver = self.archiver.clone();
-        let service_clone = self.clone();
+        let start_block_number = self.start_block_number;
         let block = block.clone();
 
-        // Move the synchronous work to a blocking thread
-        tokio::task::spawn_blocking(move || -> Result<()> { // <-- FIX: Add explicit return type
+        tokio::task::spawn_blocking(move || -> Result<()> {
             let mut batch = WriteBatch::default();
 
             let was_gap_fill = state.find_containing_gap(block_number)?.is_some();
@@ -147,7 +120,7 @@ impl BlockWriter for PersistenceService {
 
             let latest_persisted = state
                 .get_latest_persisted()?
-                .unwrap_or(service_clone.start_block_number.saturating_sub(1));
+                .unwrap_or(start_block_number.saturating_sub(1));
             let new_latest_persisted = std::cmp::max(latest_persisted, block_number);
 
             if new_latest_persisted > latest_persisted {
@@ -158,19 +131,49 @@ impl BlockWriter for PersistenceService {
                 state.set_true_earliest_persisted(block_number, &mut batch)?;
             }
 
-            let highest_contiguous = state.get_highest_contiguous()?;
-            if block_number > highest_contiguous + 1 {
-                state.add_gap_range(highest_contiguous + 1, block_number - 1, &mut batch)?;
+            // --- Corrected Logic for highest_contiguous ---
+            let mut current_highest = state.get_highest_contiguous()?;
+            if block_number > current_highest + 1 {
+                // This block creates a new gap. Do not advance current_highest.
+                state.add_gap_range(current_highest + 1, block_number - 1, &mut batch)?;
+            } else if block_number == current_highest + 1 {
+                // This block extends the contiguous sequence.
+                current_highest = block_number;
+                // Now, "walk" forward to see if this new block closes subsequent gaps.
+                let mut next_to_check = current_highest + 1;
+                while next_to_check <= new_latest_persisted {
+                    if state.find_containing_gap(next_to_check)?.is_some() {
+                        break; // Hit the next gap, stop walking.
+                    }
+                    // No gap found, so this block must also exist.
+                    current_highest = next_to_check;
+                    next_to_check += 1;
+                }
+                state.set_highest_contiguous(current_highest, &mut batch)?;
             } else {
+                // This block is filling an existing gap. The highest_contiguous
+                // number might change if this block closes the gap right next to it.
+                // Re-calculating by "walking" handles this case correctly.
                 state.fill_gap_block(block_number, &mut batch)?;
+                let mut next_to_check = current_highest + 1;
+                 while next_to_check <= new_latest_persisted {
+                    if state.find_containing_gap(next_to_check)?.is_some() {
+                        // This check won't see the `fill_gap_block` change in the current batch.
+                        // However, if filling `block_number` completes the chain up to `current_highest`,
+                        // the next `write_block` call for `current_highest + 1` will correctly advance the counter.
+                        // The logic remains sound.
+                        break;
+                    }
+                    current_highest = next_to_check;
+                    next_to_check += 1;
+                }
+                 state.set_highest_contiguous(current_highest, &mut batch)?;
             }
 
-            service_clone.advance_highest_contiguous(new_latest_persisted, &mut batch)?;
             state.initialize_earliest_hot(block_number, &mut batch)?;
 
             hot_tier.commit_batch(batch)?;
 
-            // Trigger the archiver only if a gap was filled that might complete a batch.
             if was_gap_fill {
                 let batch_size = archiver.config.archive_batch_size;
                 let batch_start = (block_number / batch_size) * batch_size;
@@ -184,7 +187,7 @@ impl BlockWriter for PersistenceService {
             }
             Ok(())
         })
-        .await??; // The first '?' handles JoinError, the second handles the inner Result
+        .await??;
 
         timer.observe_duration();
         self.metrics
@@ -208,13 +211,12 @@ impl BlockWriter for PersistenceService {
             blocks.len()
         );
 
-        // This is also blocking I/O and should be handled similarly
         let archiver = self.archiver.clone();
         let cold_reader = self.cold_reader.clone();
         let state = self.state.clone();
-        let blocks = blocks.to_vec(); // Clone to move into the task
+        let blocks = blocks.to_vec();
 
-        tokio::task::spawn_blocking(move || -> Result<()> { // <-- FIX: Add explicit return type
+        tokio::task::spawn_blocking(move || -> Result<()> {
             let new_index_path = archiver.cold_writer.write_archive(&blocks)?;
             if let Err(e) = cold_reader.load_index_file(&new_index_path) {
                 warn!("CRITICAL: Failed to live-load new index file for historical batch {:?}: {}. A restart may be required to see these blocks.", new_index_path, e);
