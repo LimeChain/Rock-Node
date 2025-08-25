@@ -10,14 +10,19 @@ use serial_test::serial;
 /// Test Case: GapFill Mode
 /// Objective: Verify that a node with a gap in its block history can fill it from a peer.
 #[tokio::test]
-#[serial]
+#[serial("backfill")]
 async fn test_gap_fill_mode_successfully_fills_gap() -> Result<()> {
     // --- 1. Setup a "source" node with a complete history ---
     let source_ctx = TestContext::new().await?;
     publish_blocks(&source_ctx, 0, 20).await?;
 
     let subscriber_port = source_ctx.subscriber_client_port().await?;
-    let peer_address = format!("http://host.docker.internal:{}", subscriber_port);
+    // Use host.docker.internal for macOS and host-gateway for Linux
+    let peer_address = if cfg!(target_os = "macos") {
+        format!("http://host.docker.internal:{}", subscriber_port)
+    } else {
+        format!("http://host-gateway:{}", subscriber_port)
+    };
 
     // --- 2. Setup a "destination" node with a gap ---
     // This node will be configured to backfill from the source node.
@@ -70,11 +75,11 @@ start_block_number = 0
         "Block 12 should not be found before backfill"
     );
 
-    // --- 3. Wait for the backfill process to run ---
+    // --- 4. Wait for the backfill process to run ---
     println!("Waiting for GapFill cycle to complete...");
     tokio::time::sleep(Duration::from_secs(10)).await;
 
-    // --- 4. Verify the gap has been filled ---
+    // --- 5. Verify the gap has been filled ---
     let response_after = access_client
         .get_block(BlockRequest {
             block_specifier: Some(BlockSpecifier::BlockNumber(12)),
@@ -115,14 +120,19 @@ start_block_number = 0
 /// Test Case: Continuous Mode
 /// Objective: Verify that a node can catch up to a peer and then continue streaming live blocks.
 #[tokio::test]
-#[serial]
+#[serial("backfill")]
 async fn test_continuous_mode_successfully_catches_up_and_streams() -> Result<()> {
     // --- 1. Setup a "source" node and publish some initial blocks ---
     let source_ctx = TestContext::new().await?;
     publish_blocks(&source_ctx, 0, 10).await?;
 
     let subscriber_port = source_ctx.subscriber_client_port().await?;
-    let peer_address = format!("http://host.docker.internal:{}", subscriber_port);
+    // Use host.docker.internal for macOS and host-gateway for Linux
+    let peer_address = if cfg!(target_os = "macos") {
+        format!("http://host.docker.internal:{}", subscriber_port)
+    } else {
+        format!("http://host-gateway:{}", subscriber_port)
+    };
 
     // --- 2. Setup a new, empty "destination" node in Continuous mode ---
     let dest_config = format!(
