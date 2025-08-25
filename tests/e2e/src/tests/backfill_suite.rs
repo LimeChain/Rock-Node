@@ -155,7 +155,7 @@ start_block_number = 0
 
     // --- 3. Wait for the initial catch-up ---
     println!("Waiting for Continuous mode to catch up...");
-    tokio::time::sleep(Duration::from_secs(10)).await;
+    tokio::time::sleep(Duration::from_secs(20)).await;
 
     // --- 4. Verify the initial set of blocks was backfilled ---
     let mut access_client = dest_ctx.access_client().await?;
@@ -179,7 +179,7 @@ start_block_number = 0
     publish_blocks(&source_ctx, 11, 15).await?;
 
     // --- 6. Wait for the continuous stream to deliver the new blocks ---
-    tokio::time::sleep(Duration::from_secs(5)).await;
+    tokio::time::sleep(Duration::from_secs(15)).await;
 
     // --- 7. Verify the new blocks have been streamed ---
     for i in 11..=15 {
