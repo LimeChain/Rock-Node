@@ -17,6 +17,7 @@ use rock_node_protobufs::proto::{
 };
 use std::path::PathBuf;
 use std::process::Command;
+use testcontainers::core::Host;
 use testcontainers::runners::AsyncRunner;
 use testcontainers::{
     core::{IntoContainerPort, Mount, WaitFor},
@@ -92,10 +93,11 @@ impl TestContext {
             .with_exposed_port(50052.tcp())
             .with_exposed_port(50053.tcp())
             .with_exposed_port(50054.tcp())
-            .with_exposed_port(50055.tcp()) // Query service port
+            .with_exposed_port(50055.tcp())
             .with_wait_for(WaitFor::message_on_stdout(
                 "Rock Node running successfully!",
             ))
+            .with_host("host-gateway", Host::HostGateway)
             .with_env_var("RUST_LOG", "info,rock_node_persistence_plugin=trace")
             .with_cmd(vec![
                 "--config-path".to_string(),
@@ -128,6 +130,13 @@ impl TestContext {
         let endpoint = format!("http://localhost:{}", port);
         let channel = Channel::from_shared(endpoint)?.connect().await?;
         Ok(BlockStreamPublishServiceClient::new(channel))
+    }
+
+    pub async fn subscriber_client_port(&self) -> Result<u16> {
+        self.container
+            .get_host_port_ipv4(50052)
+            .await
+            .map_err(Into::into)
     }
 
     pub async fn subscriber_client(&self) -> Result<BlockStreamSubscribeServiceClient<Channel>> {
@@ -226,7 +235,9 @@ pub async fn publish_blocks(ctx: &TestContext, start: u64, end: u64) -> Result<(
     let mut client = ctx.publisher_client().await?;
     let (tx, rx) = mpsc::channel(10); // Use a buffered channel
 
-    tokio::spawn(async move {
+    // We need a separate task for sending because the main task will be busy
+    // waiting for server responses. This is the key to avoiding the deadlock.
+    let sender_task = tokio::spawn(async move {
         for i in start..=end {
             let block_bytes = BlockBuilder::new(i).build();
             let block_proto: rock_node_protobufs::com::hedera::hapi::block::stream::Block =
@@ -237,18 +248,26 @@ pub async fn publish_blocks(ctx: &TestContext, start: u64, end: u64) -> Result<(
                 })),
             };
             if tx.send(req).await.is_err() {
-                break; // Receiver dropped
+                // This would happen if the receiver (the main part of this function)
+                // is dropped, which means the test has already failed or finished.
+                break;
             }
         }
+        // When tx is dropped here, the stream will close on the server side.
     });
 
+    // Now, create the stream and immediately start draining the responses.
     let mut responses = client
         .publish_block_stream(ReceiverStream::new(rx))
         .await?
         .into_inner();
 
-    // Drain responses to ensure all blocks are acknowledged
+    // Drain responses to ensure all blocks are acknowledged by the server.
+    // The stream will end naturally when the sender_task completes and drops `tx`.
     while responses.next().await.is_some() {}
+
+    // Ensure the sender task finished without panicking.
+    sender_task.await?;
 
     Ok(())
 }

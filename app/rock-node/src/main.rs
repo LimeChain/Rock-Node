@@ -2,6 +2,7 @@ use anyhow::Result;
 use clap::Parser;
 use config as config_rs;
 use dotenvy::dotenv;
+use rock_node_backfill_plugin::BackfillPlugin;
 use rock_node_block_access_plugin::BlockAccessPlugin;
 use rock_node_core::{
     app_context::AppContext, capability::CapabilityRegistry, config::Config as RockConfig,
@@ -207,6 +208,7 @@ async fn main() -> Result<()> {
     plugins.push(Box::new(ObservabilityPlugin::new()));
     plugins.push(Box::new(StateManagementPlugin::new()));
     plugins.push(Box::new(QueryPlugin::new()));
+    plugins.push(Box::new(BackfillPlugin::new()));
 
     // --- Step 7: Initialize and Start Plugins ---
     info!("{}", "-".repeat(16));

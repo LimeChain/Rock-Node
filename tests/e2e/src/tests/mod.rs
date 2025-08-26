@@ -1,3 +1,4 @@
+pub mod backfill_suite;
 pub mod block_access_suite;
 pub mod gap_ingestion_suite;
 pub mod health_check;

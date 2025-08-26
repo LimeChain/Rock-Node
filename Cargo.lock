@@ -2176,6 +2176,7 @@ dependencies = [
  "clap",
  "config",
  "dotenvy",
+ "rock-node-backfill-plugin",
  "rock-node-block-access-plugin",
  "rock-node-core",
  "rock-node-observability-plugin",
@@ -2190,6 +2191,24 @@ dependencies = [
  "serde_json",
  "tokio",
  "toml 0.8.23",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "rock-node-backfill-plugin"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "futures",
+ "rock-node-core",
+ "rock-node-protobufs",
+ "rocksdb",
+ "tempfile",
+ "tokio",
+ "tokio-stream",
+ "tonic",
  "tracing",
  "tracing-subscriber",
 ]
@@ -2224,6 +2243,7 @@ dependencies = [
  "serde",
  "thiserror 1.0.69",
  "tokio",
+ "toml 0.8.23",
  "tracing",
  "uuid",
 ]
