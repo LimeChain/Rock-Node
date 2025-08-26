@@ -1,3 +1,4 @@
+pub use worker::stream_blocks_from_peers;
 mod worker;
 
 use crate::worker::BackfillWorker;
