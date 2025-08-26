@@ -22,6 +22,9 @@ tracing = "0.1"
 # For async traits
 async-trait = "0.1"
 
+# The subscriber that collects and prints logs
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+
 # For RocksDB access
 rocksdb = "0.22"
 
