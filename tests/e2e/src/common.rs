@@ -17,6 +17,7 @@ use rock_node_protobufs::proto::{
 };
 use std::path::PathBuf;
 use std::process::Command;
+use testcontainers::core::Host;
 use testcontainers::runners::AsyncRunner;
 use testcontainers::{
     core::{IntoContainerPort, Mount, WaitFor},
@@ -92,10 +93,11 @@ impl TestContext {
             .with_exposed_port(50052.tcp())
             .with_exposed_port(50053.tcp())
             .with_exposed_port(50054.tcp())
-            .with_exposed_port(50055.tcp()) // Query service port
+            .with_exposed_port(50055.tcp())
             .with_wait_for(WaitFor::message_on_stdout(
                 "Rock Node running successfully!",
             ))
+            .with_host("host-gateway", Host::HostGateway)
             .with_env_var("RUST_LOG", "info,rock_node_persistence_plugin=trace")
             .with_cmd(vec![
                 "--config-path".to_string(),
