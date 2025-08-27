@@ -35,3 +35,4 @@ async-trait = "0.1"
 
 [dev-dependencies]
 tempfile = "3"
+prometheus = "0.14"

@@ -65,9 +65,11 @@ pub struct MetricsRegistry {
 impl MetricsRegistry {
     /// Creates a new `MetricsRegistry` and registers all the defined metrics.
     pub fn new() -> Result<Self, prometheus::Error> {
-        let registry = Registry::new();
+        Self::with_registry(Registry::new())
+    }
 
-        // --- Core Metrics Initialization ---
+    /// Creates a new `MetricsRegistry` with a custom registry (useful for testing).
+    pub fn with_registry(registry: Registry) -> Result<Self, prometheus::Error> {
         let blocks_acknowledged = IntCounter::with_opts(Opts::new(
             "rocknode_blocks_acknowledged",
             "Total number of blocks acknowledged by the publish plugin after successful persistence.",

@@ -228,7 +228,9 @@ mod tests {
     #[test]
     fn scan_and_read_from_cold_storage() {
         let tmp = TempDir::new().unwrap();
-        let metrics = Arc::new(MetricsRegistry::new().unwrap());
+        // Use isolated registry for testing to avoid cardinality conflicts
+        let registry = prometheus::Registry::new();
+        let metrics = Arc::new(MetricsRegistry::with_registry(registry).unwrap());
         let config = Arc::new(PersistenceServiceConfig {
             enabled: true,
             cold_storage_path: tmp.path().to_str().unwrap().to_string(),

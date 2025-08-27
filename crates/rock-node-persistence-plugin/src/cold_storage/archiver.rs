@@ -99,7 +99,7 @@ impl Archiver {
         let timer = self
             .metrics
             .persistence_archival_cycle_duration_seconds
-            .with_label_values(&[""])
+            .with_label_values::<&str>(&[])
             .start_timer();
 
         let blocks_to_archive = self.hot_tier.read_block_batch(start_block, count)?;
@@ -165,8 +165,14 @@ mod tests {
         }
     }
 
+    /// Helper function to create an isolated metrics registry for testing
+    fn create_test_metrics() -> Arc<MetricsRegistry> {
+        // Create a fresh registry to avoid cardinality conflicts
+        let registry = prometheus::Registry::new();
+        Arc::new(MetricsRegistry::with_registry(registry).unwrap())
+    }
+
     #[test]
-    #[ignore = "Skipped due to Prometheus cardinality conflict - needs registry isolation"]
     fn archival_cycle_moves_complete_batch_and_updates_state() {
         let tmp_dir = TempDir::new().unwrap();
         let db = DatabaseManager::new(tmp_dir.path().to_str().unwrap())
@@ -175,17 +181,7 @@ mod tests {
         let state = Arc::new(StateManager::new(db.clone()));
         let hot = Arc::new(HotTier::new(db.clone()));
 
-        // Create a basic metrics registry for the test
-        // Note: This may fail in some environments due to Prometheus cardinality issues
-        let metrics_result = MetricsRegistry::new();
-        let metrics = match metrics_result {
-            Ok(metrics) => Arc::new(metrics),
-            Err(_) => {
-                // If metrics creation fails, skip this test
-                println!("Skipping test due to Prometheus cardinality conflict");
-                return;
-            }
-        };
+        let metrics = create_test_metrics();
 
         let config = Arc::new(PersistenceServiceConfig {
             enabled: true,
