@@ -148,7 +148,7 @@ mod tests {
 
     #[test]
     fn read_and_write_single_block() {
-        let (_tmp, hot, db) = setup_hot();
+        let (_tmp, hot, _db) = setup_hot();
         // build a minimal block with header
         let block = rock_node_protobufs::com::hedera::hapi::block::stream::Block {
             items: vec![rock_node_protobufs::com::hedera::hapi::block::stream::BlockItem {

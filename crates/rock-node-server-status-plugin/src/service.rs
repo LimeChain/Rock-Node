@@ -95,7 +95,8 @@ mod tests {
     struct MockBlockReader {
         earliest_block: i64,
         latest_block: i64,
-        force_error: bool,
+        force_earliest_error: bool,
+        force_latest_error: bool,
     }
 
     impl MockBlockReader {
@@ -103,7 +104,17 @@ mod tests {
             Self {
                 earliest_block: 100,
                 latest_block: 5000,
-                force_error: true,
+                force_earliest_error: true,
+                force_latest_error: true,
+            }
+        }
+
+        fn with_latest_error() -> Self {
+            Self {
+                earliest_block: 100,
+                latest_block: 5000,
+                force_earliest_error: false,
+                force_latest_error: true,
             }
         }
     }
@@ -114,7 +125,7 @@ mod tests {
         }
 
         fn get_earliest_persisted_block_number(&self) -> Result<Option<u64>> {
-            if self.force_error {
+            if self.force_earliest_error {
                 Err(anyhow::anyhow!("Database connection error"))
             } else if self.earliest_block < 0 {
                 Ok(None)
@@ -124,7 +135,7 @@ mod tests {
         }
 
         fn get_latest_persisted_block_number(&self) -> Result<Option<u64>> {
-            if self.force_error {
+            if self.force_latest_error {
                 Err(anyhow::anyhow!("Database connection error"))
             } else if self.latest_block < 0 {
                 Ok(None)
@@ -153,7 +164,8 @@ mod tests {
         let reader = MockBlockReader {
             earliest_block: 100,
             latest_block: 5000,
-            force_error: false,
+            force_earliest_error: false,
+            force_latest_error: false,
         };
         let service = create_test_service(reader);
 
@@ -171,7 +183,8 @@ mod tests {
         let reader = MockBlockReader {
             earliest_block: -1,
             latest_block: -1,
-            force_error: false,
+            force_earliest_error: false,
+            force_latest_error: false,
         };
         let service = create_test_service(reader);
 
@@ -187,7 +200,8 @@ mod tests {
         let reader = MockBlockReader {
             earliest_block: 1,
             latest_block: 1,
-            force_error: false,
+            force_earliest_error: false,
+            force_latest_error: false,
         };
         let service = create_test_service(reader);
 
@@ -216,8 +230,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_server_status_latest_block_error() {
-        let mut reader = MockBlockReader::with_error();
-        reader.force_error = false; // Allow earliest to succeed but latest to fail
+        let reader = MockBlockReader::with_latest_error(); // Only latest will fail
         let service = create_test_service(reader);
 
         let request = Request::new(ServerStatusRequest {});
@@ -236,7 +249,8 @@ mod tests {
         let reader = MockBlockReader {
             earliest_block: -1, // None
             latest_block: 1000, // Some value
-            force_error: false,
+            force_earliest_error: false,
+            force_latest_error: false,
         };
         let service = create_test_service(reader);
 
@@ -252,7 +266,8 @@ mod tests {
         let reader = MockBlockReader {
             earliest_block: 100, // Some value
             latest_block: -1,    // None
-            force_error: false,
+            force_earliest_error: false,
+            force_latest_error: false,
         };
         let service = create_test_service(reader);
 
@@ -268,7 +283,8 @@ mod tests {
         let reader = MockBlockReader {
             earliest_block: i64::MAX - 1000,
             latest_block: i64::MAX - 100,
-            force_error: false,
+            force_earliest_error: false,
+            force_latest_error: false,
         };
         let service = create_test_service(reader);
 
@@ -284,7 +300,8 @@ mod tests {
         let reader = MockBlockReader {
             earliest_block: 100,
             latest_block: 200,
-            force_error: false,
+            force_earliest_error: false,
+            force_latest_error: false,
         };
         let service = create_test_service(reader);
 

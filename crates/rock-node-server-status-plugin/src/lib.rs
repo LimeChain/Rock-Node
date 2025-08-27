@@ -106,8 +106,8 @@ mod tests {
         assert_eq!(plugin.name(), "status-plugin");
     }
 
-    #[test]
-    fn test_plugin_initialization() {
+    #[tokio::test]
+    async fn test_plugin_initialization() {
         let mut plugin = StatusPlugin::new();
         let context = create_test_context(true);
 
@@ -117,8 +117,8 @@ mod tests {
         assert!(!plugin.is_running());
     }
 
-    #[test]
-    fn test_plugin_initialization_twice() {
+    #[tokio::test]
+    async fn test_plugin_initialization_twice() {
         let mut plugin = StatusPlugin::new();
         let context = create_test_context(true);
 

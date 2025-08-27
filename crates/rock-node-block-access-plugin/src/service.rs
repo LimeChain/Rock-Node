@@ -263,11 +263,16 @@ mod tests {
 
     impl MockBlockReader {
         fn new(earliest: i64, latest: i64) -> Self {
-            Self {
+            let mut reader = Self {
                 earliest_block: earliest,
                 latest_block: latest,
                 ..Default::default()
+            };
+            // Store the latest block so it's available for retrieval
+            if latest > 0 {
+                reader.insert_block(latest as u64, create_mock_block_bytes());
             }
+            reader
         }
 
         fn insert_block(&mut self, number: u64, data: Vec<u8>) {
@@ -469,9 +474,10 @@ mod tests {
         });
 
         let result = service.get_block(request).await;
-        assert!(result.is_err());
-        let status = result.unwrap_err();
-        assert_eq!(status.code(), tonic::Code::Internal);
+        assert!(result.is_ok()); // Service returns success with error status
+        let response = result.unwrap().into_inner();
+        assert_eq!(response.status, block_response::Code::Unknown as i32);
+        assert!(response.block.is_none());
     }
 
     #[tokio::test]
@@ -485,9 +491,10 @@ mod tests {
         });
 
         let result = service.get_block(request).await;
-        assert!(result.is_err());
-        let status = result.unwrap_err();
-        assert_eq!(status.code(), tonic::Code::Internal);
+        assert!(result.is_ok()); // Service returns success with error status
+        let response = result.unwrap().into_inner();
+        assert_eq!(response.status, block_response::Code::Unknown as i32);
+        assert!(response.block.is_none());
     }
 
     #[tokio::test]
