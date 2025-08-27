@@ -256,7 +256,7 @@ fn get_block_number(block: &Block) -> Result<u64> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rock_node_core::database::DatabaseManager;
+    use rock_node_core::{database::DatabaseManager, test_utils::create_isolated_metrics};
     use tempfile::TempDir;
 
     fn make_block(num: u64) -> Block {
@@ -281,7 +281,7 @@ mod tests {
         let db = DatabaseManager::new(tmp.path().to_str().unwrap())
             .unwrap()
             .db_handle();
-        let metrics = Arc::new(MetricsRegistry::new().unwrap());
+        let metrics = Arc::new(create_isolated_metrics());
         let state = Arc::new(StateManager::new(db.clone()));
         state
             .initialize_highest_contiguous(start_block.saturating_sub(1))

@@ -30,7 +30,7 @@ mod tests {
             BackfillConfig, BlockAccessServiceConfig, Config, CoreConfig, PluginConfigs,
             ServerStatusServiceConfig,
         },
-        metrics::MetricsRegistry,
+        test_utils::create_isolated_metrics,
     };
     use std::{
         any::TypeId,
@@ -65,7 +65,7 @@ mod tests {
         AppContext {
             config: Arc::new(config),
             service_providers: Arc::new(RwLock::new(providers)),
-            metrics: Arc::new(MetricsRegistry::new().unwrap()),
+            metrics: Arc::new(create_isolated_metrics()),
             capability_registry: Arc::new(Default::default()),
             block_data_cache: Arc::new(Default::default()),
             tx_block_items_received: tokio::sync::mpsc::channel(100).0,
@@ -250,7 +250,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_metrics_handler() {
-        let metrics = Arc::new(MetricsRegistry::new().unwrap());
+        let metrics = Arc::new(create_isolated_metrics());
 
         // Create a simple test by calling the handler function
         let _response = get_metrics(State(metrics)).await;
@@ -262,7 +262,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_metrics_gathering() {
-        let metrics = MetricsRegistry::new().unwrap();
+        let metrics = create_isolated_metrics();
         let gathered = metrics.gather();
 
         // Basic checks on the gathered metrics
@@ -307,7 +307,7 @@ mod tests {
         let context = AppContext {
             config: Arc::new(config),
             service_providers: Arc::new(RwLock::new(providers)),
-            metrics: Arc::new(MetricsRegistry::new().unwrap()),
+            metrics: Arc::new(create_isolated_metrics()),
             capability_registry: Arc::new(Default::default()),
             block_data_cache: Arc::new(Default::default()),
             tx_block_items_received: tokio::sync::mpsc::channel(100).0,

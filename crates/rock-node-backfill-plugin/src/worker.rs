@@ -417,7 +417,7 @@ mod tests {
         config::{BackfillConfig, Config, CoreConfig, PluginConfigs},
         database::DatabaseManager,
         database_provider::DatabaseManagerProvider,
-        metrics::MetricsRegistry,
+        test_utils::create_isolated_metrics,
     };
     use rock_node_protobufs::{
         com::hedera::hapi::block::stream::{block_item, BlockItem},
@@ -622,7 +622,7 @@ mod tests {
         let context = AppContext {
             config: Arc::new(config),
             service_providers: Arc::new(std::sync::RwLock::new(providers)),
-            metrics: Arc::new(MetricsRegistry::new().unwrap()),
+            metrics: Arc::new(create_isolated_metrics()),
             capability_registry: Arc::new(Default::default()),
             block_data_cache: Arc::new(Default::default()),
             tx_block_items_received: tokio::sync::mpsc::channel(100).0,

@@ -167,9 +167,8 @@ mod tests {
 
     /// Helper function to create an isolated metrics registry for testing
     fn create_test_metrics() -> Arc<MetricsRegistry> {
-        // Create a fresh registry to avoid cardinality conflicts
-        let registry = prometheus::Registry::new();
-        Arc::new(MetricsRegistry::with_registry(registry).unwrap())
+        use rock_node_core::test_utils::create_isolated_metrics;
+        Arc::new(create_isolated_metrics())
     }
 
     #[test]

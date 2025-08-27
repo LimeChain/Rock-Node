@@ -246,7 +246,7 @@ impl BlockAccessServiceImpl {
 mod tests {
     use super::*;
     use anyhow::Result;
-    use rock_node_core::block_reader::BlockReader;
+    use rock_node_core::{block_reader::BlockReader, test_utils::create_isolated_metrics};
     use rock_node_protobufs::{
         com::hedera::hapi::block::stream::BlockItem,
         org::hiero::block::api::block_request::BlockSpecifier,
@@ -315,7 +315,7 @@ mod tests {
     fn create_test_service(reader: MockBlockReader) -> BlockAccessServiceImpl {
         BlockAccessServiceImpl {
             block_reader: Arc::new(reader),
-            metrics: Arc::new(MetricsRegistry::new().unwrap()),
+            metrics: Arc::new(create_isolated_metrics()),
         }
     }
 

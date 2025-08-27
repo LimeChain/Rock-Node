@@ -87,7 +87,7 @@ impl BlockNodeService for StatusServiceImpl {
 mod tests {
     use super::*;
     use anyhow::Result;
-    use rock_node_core::{block_reader::BlockReader, MetricsRegistry};
+    use rock_node_core::{block_reader::BlockReader, test_utils::create_isolated_metrics};
     use rock_node_protobufs::org::hiero::block::api::ServerStatusRequest;
     use std::sync::Arc;
 
@@ -155,7 +155,7 @@ mod tests {
     fn create_test_service(reader: MockBlockReader) -> StatusServiceImpl {
         StatusServiceImpl {
             block_reader: Arc::new(reader),
-            metrics: Arc::new(MetricsRegistry::new().unwrap()),
+            metrics: Arc::new(create_isolated_metrics()),
         }
     }
 

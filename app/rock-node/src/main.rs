@@ -27,6 +27,135 @@ use std::{
 use tokio::sync::{broadcast, mpsc};
 use tracing::{error, info};
 
+/// Reports the startup status of all plugins with detailed information.
+///
+/// This function checks each plugin's running status and provides
+/// comprehensive feedback about which plugins started successfully
+/// and which ones failed.
+///
+/// # Arguments
+///
+/// * `plugins` - Slice of plugin references to check
+pub fn report_plugin_startup_status(plugins: &[Box<dyn Plugin>]) {
+    let mut failed_plugins = Vec::new();
+    let mut running_plugins = Vec::new();
+
+    for plugin in plugins {
+        if plugin.is_running() {
+            running_plugins.push(plugin.name());
+        } else {
+            failed_plugins.push(plugin.name());
+        }
+    }
+
+    if failed_plugins.is_empty() {
+        info!("✅ All {} plugins started successfully!", plugins.len());
+        info!("Rock Node running successfully!");
+    } else {
+        info!("⚠️  Some plugins failed to start:");
+        for failed_plugin in &failed_plugins {
+            info!("  ❌ {} - FAILED", failed_plugin);
+        }
+        info!("✅ {} plugins running:", running_plugins.len());
+        for running_plugin in &running_plugins {
+            info!("  ✅ {} - OK", running_plugin);
+        }
+        info!("Rock Node running successfully! However, some plugins may not be available!");
+    }
+}
+
+/// Validates that a configuration file exists and is readable.
+///
+/// This is a utility function that can be tested independently of
+/// the main application startup flow.
+///
+/// # Arguments
+///
+/// * `config_path` - Path to the configuration file to validate
+///
+/// # Returns
+///
+/// * `Result<(), anyhow::Error>` - Ok if file exists and is readable, Error otherwise
+pub fn validate_config_file_exists(config_path: &PathBuf) -> Result<(), anyhow::Error> {
+    if !config_path.exists() {
+        anyhow::bail!("Config file not found at '{}'", config_path.display());
+    }
+    Ok(())
+}
+
+/// Creates a formatted plugin list for logging purposes.
+///
+/// This function takes a list of plugin names and formats them
+/// for consistent logging output.
+///
+/// # Arguments
+///
+/// * `plugin_names` - Vector of plugin names to format
+/// * `status_symbol` - Symbol to use for each plugin (e.g., "✅", "❌")
+///
+/// # Returns
+///
+/// * `String` - Formatted plugin list
+pub fn format_plugin_list(plugin_names: &[String], status_symbol: &str) -> String {
+    if plugin_names.is_empty() {
+        return "None".to_string();
+    }
+
+    plugin_names
+        .iter()
+        .map(|name| {
+            format!(
+                "  {} {} - {}",
+                status_symbol,
+                name,
+                if status_symbol == "✅" {
+                    "OK"
+                } else {
+                    "FAILED"
+                }
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// Analyzes plugin startup results and generates a summary report.
+///
+/// This function takes the results of plugin startup checks and
+/// generates a comprehensive report suitable for logging.
+///
+/// # Arguments
+///
+/// * `total_plugins` - Total number of plugins that were started
+/// * `running_plugins` - List of plugin names that are running
+/// * `failed_plugins` - List of plugin names that failed to start
+///
+/// # Returns
+///
+/// * `(String, bool)` - Tuple containing the report message and success flag
+pub fn analyze_plugin_startup_results(
+    total_plugins: usize,
+    running_plugins: &[String],
+    failed_plugins: &[String],
+) -> (String, bool) {
+    let all_successful = failed_plugins.is_empty();
+
+    let message = if all_successful {
+        format!("✅ All {} plugins started successfully!", total_plugins)
+    } else {
+        let failed_list = format_plugin_list(failed_plugins, "❌");
+        let running_list = format_plugin_list(running_plugins, "✅");
+        format!(
+            "⚠️  Some plugins failed to start:\n{}\n✅ {} plugins running:\n{}",
+            failed_list,
+            running_plugins.len(),
+            running_list
+        )
+    };
+
+    (message, all_successful)
+}
+
 fn print_section(name: &str, section: &toml::Value, depth: usize) {
     let dash_char = if name == "plugins" && depth == 0 {
         '='
@@ -110,9 +239,7 @@ async fn main() -> Result<()> {
     // --- Step 2: Load Config and Initialize Logging (ONCE) ---
     // NOTE: We no longer need to read the config TOML manually; the `config` crate will handle it.
     //       We'll still validate that the file exists early to provide a clear error message.
-    if !args.config_path.exists() {
-        anyhow::bail!("Config file not found at '{}'", args.config_path.display());
-    }
+    validate_config_file_exists(&args.config_path)?;
 
     // Load environment variables from .env (if present) and the process environment.
     dotenv().ok();
@@ -222,12 +349,14 @@ async fn main() -> Result<()> {
         plugin.start()?;
     }
     info!("{}", "-".repeat(16));
-    info!("Rock Node running successfully!");
+
+    // --- Step 8: Verify Plugin Startup ---
+    report_plugin_startup_status(&plugins);
 
     // --- Wait for Shutdown Signal ---
     shutdown_signal().await;
 
-    // --- Step 8: Graceful Shutdown ---
+    // --- Step 9: Graceful Shutdown ---
     info!("Shutdown signal received. Stopping plugins...");
     // Iterate in reverse order of startup to handle dependencies correctly.
     for plugin in plugins.iter_mut().rev() {
@@ -244,4 +373,102 @@ async fn main() -> Result<()> {
     info!("All plugins stopped. Exiting.");
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    #[test]
+    fn test_validate_config_file_exists_with_valid_file() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let config_path = temp_dir.path().join("config.toml");
+        std::fs::write(&config_path, "test = 'value'").unwrap();
+
+        let result = validate_config_file_exists(&config_path);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_validate_config_file_exists_with_missing_file() {
+        let config_path = PathBuf::from("/nonexistent/path/config.toml");
+
+        let result = validate_config_file_exists(&config_path);
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Config file not found"));
+    }
+
+    #[test]
+    fn test_format_plugin_list_empty() {
+        let empty_list: Vec<String> = vec![];
+        let result = format_plugin_list(&empty_list, "✅");
+        assert_eq!(result, "None");
+    }
+
+    #[test]
+    fn test_format_plugin_list_single_plugin() {
+        let plugins = vec!["TestPlugin".to_string()];
+        let result = format_plugin_list(&plugins, "✅");
+        assert_eq!(result, "  ✅ TestPlugin - OK");
+    }
+
+    #[test]
+    fn test_format_plugin_list_multiple_plugins() {
+        let plugins = vec!["Plugin1".to_string(), "Plugin2".to_string()];
+        let result = format_plugin_list(&plugins, "❌");
+        let expected = "  ❌ Plugin1 - FAILED\n  ❌ Plugin2 - FAILED";
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn test_analyze_plugin_startup_results_all_successful() {
+        let running_plugins = vec!["Plugin1".to_string(), "Plugin2".to_string()];
+        let failed_plugins: Vec<String> = vec![];
+
+        let (message, success) =
+            analyze_plugin_startup_results(2, &running_plugins, &failed_plugins);
+
+        assert!(success);
+        assert!(message.contains("All 2 plugins started successfully"));
+        assert!(message.contains("✅"));
+    }
+
+    #[test]
+    fn test_analyze_plugin_startup_results_partial_failure() {
+        let running_plugins = vec!["Plugin1".to_string()];
+        let failed_plugins = vec!["Plugin2".to_string(), "Plugin3".to_string()];
+
+        let (message, success) =
+            analyze_plugin_startup_results(3, &running_plugins, &failed_plugins);
+
+        assert!(!success);
+        assert!(message.contains("Some plugins failed to start"));
+        assert!(message.contains("❌ Plugin2 - FAILED"));
+        assert!(message.contains("❌ Plugin3 - FAILED"));
+        assert!(message.contains("✅ Plugin1 - OK"));
+    }
+
+    #[test]
+    fn test_analyze_plugin_startup_results_all_failed() {
+        let running_plugins: Vec<String> = vec![];
+        let failed_plugins = vec!["Plugin1".to_string(), "Plugin2".to_string()];
+
+        let (message, success) =
+            analyze_plugin_startup_results(2, &running_plugins, &failed_plugins);
+
+        assert!(!success);
+        assert!(message.contains("Some plugins failed to start"));
+        assert!(message.contains("❌ Plugin1 - FAILED"));
+        assert!(message.contains("❌ Plugin2 - FAILED"));
+        assert!(message.contains("0 plugins running"));
+    }
+
+    // Note: Testing report_plugin_startup_status directly is challenging because
+    // it uses tracing::info! macros and depends on external logging setup.
+    // In a real scenario, you might want to refactor this function to accept
+    // a logger callback or return the status information for external logging.
 }

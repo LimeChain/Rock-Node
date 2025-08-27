@@ -401,14 +401,12 @@ mod tests {
         mpsc::Receiver<rock_node_core::events::BlockVerified>,
         broadcast::Receiver<rock_node_core::events::BlockPersisted>,
     ) {
-        make_context_with_registry(MetricsRegistry::new().unwrap())
+        make_context_with_registry(create_test_metrics())
     }
 
     /// Helper function to create an isolated metrics registry for testing
     fn create_test_metrics() -> MetricsRegistry {
-        // Create a fresh registry to avoid cardinality conflicts
-        let registry = prometheus::Registry::new();
-        MetricsRegistry::with_registry(registry).unwrap()
+        rock_node_core::test_utils::create_isolated_metrics()
     }
 
     fn make_context_with_registry(

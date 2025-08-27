@@ -40,6 +40,11 @@ config = "0.13"
 dotenvy = "0.15"
 
 # For ergonomic error handling in the main function
-anyhow = "1" 
+anyhow = "1"
 
 clap = { version = "4", features = ["derive"] }
+futures-util = "0.3"
+async-trait = "0.1"
+
+[dev-dependencies]
+tempfile = "3"

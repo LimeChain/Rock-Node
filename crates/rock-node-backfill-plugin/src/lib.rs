@@ -105,7 +105,7 @@ mod tests {
         config::{BackfillConfig, Config, CoreConfig, PluginConfigs},
         database::DatabaseManager,
         database_provider::DatabaseManagerProvider,
-        metrics::MetricsRegistry,
+        test_utils::create_isolated_metrics,
         BlockReaderProvider, BlockWriterProvider,
     };
     use std::any::TypeId;
@@ -207,7 +207,7 @@ mod tests {
         let context = AppContext {
             config: Arc::new(config),
             service_providers: Arc::new(std::sync::RwLock::new(providers)),
-            metrics: Arc::new(MetricsRegistry::new().unwrap()),
+            metrics: Arc::new(create_isolated_metrics()),
             capability_registry: Arc::new(rock_node_core::capability::CapabilityRegistry::new()),
             block_data_cache: Arc::new(create_test_cache()),
             tx_block_items_received: tokio::sync::mpsc::channel(100).0,

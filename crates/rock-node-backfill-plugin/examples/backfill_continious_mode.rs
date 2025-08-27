@@ -8,8 +8,8 @@ use rock_node_core::{
     config::{BackfillConfig, BackfillMode, Config, CoreConfig, PluginConfigs},
     database::DatabaseManager,
     database_provider::DatabaseManagerProvider,
-    metrics::MetricsRegistry,
     plugin::Plugin,
+    test_utils::create_isolated_metrics,
 };
 use rock_node_protobufs::com::hedera::hapi::block::stream::Block;
 use std::{
@@ -127,7 +127,7 @@ async fn main() -> Result<()> {
     let (tx_verified, _) = mpsc::channel(1);
     let app_context = AppContext {
         config: Arc::new(config),
-        metrics: Arc::new(MetricsRegistry::new()?),
+        metrics: Arc::new(create_isolated_metrics()),
         capability_registry: Arc::new(Default::default()),
         service_providers,
         block_data_cache: Arc::new(Default::default()),
