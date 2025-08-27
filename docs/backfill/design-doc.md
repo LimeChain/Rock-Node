@@ -15,6 +15,9 @@
      - [4.2.1 Process Flow](#421-process-flow)
      - [4.2.2 Sequence Diagram](#422-sequence-diagram)
 5. [Error Handling and Resiliency](#5-error-handling-and-resiliency)
+6. [Observability](#6-observability)
+   - [6.1 Metrics](#61-metrics)
+   - [6.2 Logging](#62-logging)
 
 ---
 
@@ -111,12 +114,17 @@ Designed for nodes that are mostly up-to-date but need to repair holes in their 
 
 #### 4.1.1 Process Flow
 
-- **Trigger**: The plugin's main loop is triggered by a periodic timer based on `check_interval_seconds`.
-- **Gap Detection**: Query the local RocksDB instance, specifically the `CF_GAPS` column family, to retrieve a list of all known missing block ranges.
-- **Batching**: For each identified gap, internally break the range into smaller chunks, respecting the `max_batch_size`. For example, a gap of 2,500 blocks with a `max_batch_size` of 1000 is processed as three separate requests: `[1000-1999]`, `[2000-2999]`, and `[3000-3499]`.
-- **Peer Request**: Connect to a peer from the `peers` list and send a `SubscribeStreamRequest` for the first batch. This is a finite stream request with both a `start_block_number` and an `end_block_number`.
-- **Ingestion**: As `BlockItemSet` messages arrive, reconstruct them into `Block` objects and immediately pass them to the `BlockWriter` service.
-- **Completion & Iteration**: Once a batch is successfully streamed, move to the next batch for the current gap, or to the next gap if the current one is complete. The entire process repeats on the next timer tick.
+**Trigger**: The plugin's main loop is triggered by a periodic timer based on `check_interval_seconds`.
+
+**Gap Detection**: Query the local RocksDB instance, specifically the `CF_GAPS` column family, to retrieve a list of all known missing block ranges.
+
+**Batching**: For each identified gap, internally break the range into smaller chunks, respecting the `max_batch_size`. For example, a gap of 2,500 blocks with a `max_batch_size` of 1000 is processed as three separate requests: [1000-1999], [2000-2999], and [3000-3499].
+
+**Peer Request**: Connect to a peer from the `peers` list and send a `SubscribeStreamRequest` for the first batch. This is a finite stream request with both a `start_block_number` and an `end_block_number`.
+
+**Ingestion**: As `BlockItemSet` messages arrive, reconstruct them into `Block` objects and immediately pass them to the `BlockWriter` service.
+
+**Completion & Iteration**: Once a batch is successfully streamed, move to the next batch for the current gap, or to the next gap if the current one is complete. The entire process repeats on the next timer tick.
 
 #### 4.1.2 Sequence Diagram
 
@@ -146,14 +154,20 @@ The primary data ingestion engine for a Tier 2 node. It is designed to be a pers
 
 #### 4.2.1 Process Flow
 
-- **Trigger**: A single, persistent task loop is initiated when the plugin starts.
-- **State Determination**: The loop's first action is to determine its starting point. It queries its own BlockReader to find the `latest_persisted_block_number`. The block to start fetching from is `latest_persisted + 1`.
-- **Peer Connection**: Enter a resilient connection loop, attempting to connect to each peer in the `peers` list until successful.
-- **Open-Ended Stream Request**: Once connected, send a single `SubscribeStreamRequest` with:
-  - `start_block_number`: The calculated starting block.
-  - `end_block_number`: `u64::MAX`. This tells the peer to send all blocks from the start number and then keep the stream open, sending new blocks as they become available.
-- **Ingestion**: As blocks arrive (both historical catch-up and live), pass them to the `BlockWriter` service.
-- **Resiliency**: If the stream breaks or the connection is lost, the function handling the stream returns an error. The main loop catches this error, waits briefly (e.g., 5 seconds) to prevent frantic retries, and then restarts the process from State Determination. Because it always re-queries the database for the latest persisted block, it seamlessly resumes exactly where it left off.
+**Trigger**: A single, persistent task loop is initiated when the plugin starts.
+
+**State Determination**: The loop's first action is to determine its starting point. It queries its own `BlockReader` to find the `latest_persisted_block_number`. The block to start fetching from is `latest_persisted + 1`.
+
+**Peer Connection**: Enter a resilient connection loop, attempting to connect to each peer in the `peers` list until successful.
+
+**Open-Ended Stream Request**: Once connected, send a single `SubscribeStreamRequest` with:
+
+- `start_block_number`: The calculated starting block.
+- `end_block_number`: `u64::MAX`. This tells the peer to send all blocks from the start number and then keep the stream open, sending new blocks as they become available.
+
+**Ingestion**: As blocks arrive (both historical catch-up and live), pass them to the `BlockWriter` service.
+
+**Resiliency**: If the stream breaks or the connection is lost, the function handling the stream returns an error. The main loop catches this error, waits briefly (e.g., 5 seconds) to prevent frantic retries, and then restarts the process from State Determination. Because it always re-queries the database for the latest persisted block, it seamlessly resumes exactly where it left off.
 
 #### 4.2.2 Sequence Diagram
 
@@ -190,9 +204,33 @@ sequenceDiagram
 
 The plugin is designed to be self-healing and operate without manual intervention.
 
-- **Peer Unavailability**: If a peer is down or unreachable, the plugin logs the error and immediately tries the next peer in the configured list.
-- **Mid-Stream Disconnection**:
-  - In GapFill mode, the failure is contained to a small batch. The partially filled gap will be smaller on the next cycle, and the process resumes automatically.
-  - In Continuous mode, a disconnection triggers the main loop to restart. It re-queries the database for the last block it successfully persisted and starts a new stream from that point forward, ensuring no data is lost or duplicated.
-- **Idempotency**: The database is the single source of truth for progress. The plugin does not maintain in-memory counters of its progress, making it resilient to crashes and restarts. The `BlockWriter` is the ultimate gatekeeper, preventing duplicate writes.
+**Peer Unavailability**: If a peer is down or unreachable, the plugin logs the error and immediately tries the next peer in the configured list.
 
+**Mid-Stream Disconnection**:
+
+- **GapFill mode**: The failure is contained to a small batch. The partially filled gap will be smaller on the next cycle, and the process resumes automatically.
+- **Continuous mode**: A disconnection triggers the main loop to restart. It re-queries the database for the last block it successfully persisted and starts a new stream from that point forward, ensuring no data is lost or duplicated.
+
+**Idempotency**: The database is the single source of truth for progress. The plugin does not maintain in-memory counters of its progress, making it resilient to crashes and restarts. The `BlockWriter` is the ultimate gatekeeper, preventing duplicate writes.
+
+---
+
+## 6. Observability
+
+### 6.1 Metrics
+
+- **`rocknode_backfill_gaps_found_total`**: A Counter for the total number of block gaps detected by the GapFill mode.
+- **`rocknode_backfill_blocks_fetched_total`**: A Counter for the total number of blocks successfully fetched from peers.
+  - Labels: `mode` ("GapFill", "Continuous")
+- **`rocknode_backfill_peer_connection_attempts_total`**: A Counter for connection attempts to peers.
+  - Labels: `peer_address`, `outcome` ("success", "failure")
+- **`rocknode_backfill_stream_duration_seconds`**: A Histogram measuring the duration of a backfill stream from a single peer.
+  - Labels: `peer_address`, `mode`
+- **`rocknode_backfill_active_streams`**: A Gauge indicating the number of currently active backfill streams.
+- **`rocknode_backfill_latest_continuous_block`**: A Gauge showing the latest block number fetched in Continuous mode.
+
+### 6.2 Logging
+
+- **INFO**: Plugin startup, mode selection, and successful completion of major tasks (e.g., filling a gap).
+- **WARN**: Non-fatal issues, such as failing to connect to a peer and trying the next one.
+- **ERROR**: Critical failures that prevent a backfill cycle from running, such as database errors.

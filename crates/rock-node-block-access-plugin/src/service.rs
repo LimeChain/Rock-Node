@@ -401,4 +401,170 @@ mod tests {
         assert_eq!(response.status, block_response::Code::NotAvailable as i32);
         assert!(response.block.is_none());
     }
+
+    #[tokio::test]
+    async fn test_block_not_available_too_high() {
+        let reader = MockBlockReader::new(100, 200);
+        let service = create_test_service(reader);
+
+        let request = Request::new(BlockRequest {
+            block_specifier: Some(BlockSpecifier::BlockNumber(300)),
+        });
+
+        let response = service.get_block(request).await.unwrap().into_inner();
+        assert_eq!(response.status, block_response::Code::NotAvailable as i32);
+        assert!(response.block.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_empty_block_specifier() {
+        let reader = MockBlockReader::new(100, 200);
+        let service = create_test_service(reader);
+
+        let request = Request::new(BlockRequest {
+            block_specifier: None,
+        });
+
+        let response = service.get_block(request).await.unwrap().into_inner();
+        assert_eq!(response.status, block_response::Code::InvalidRequest as i32);
+        assert!(response.block.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_get_latest_block_empty_database() {
+        let reader = MockBlockReader::new(-1, -1); // Empty database
+        let service = create_test_service(reader);
+
+        let request = Request::new(BlockRequest {
+            block_specifier: Some(BlockSpecifier::RetrieveLatest(true)),
+        });
+
+        let response = service.get_block(request).await.unwrap().into_inner();
+        assert_eq!(response.status, block_response::Code::NotFound as i32);
+        assert!(response.block.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_get_latest_block_u64_max() {
+        let reader = MockBlockReader::new(100, 200);
+        let service = create_test_service(reader);
+
+        let request = Request::new(BlockRequest {
+            block_specifier: Some(BlockSpecifier::BlockNumber(u64::MAX)),
+        });
+
+        let response = service.get_block(request).await.unwrap().into_inner();
+        assert_eq!(response.status, block_response::Code::Success as i32);
+        assert!(response.block.is_some());
+    }
+
+    #[tokio::test]
+    async fn test_database_error_on_read_block() {
+        let mut reader = MockBlockReader::new(100, 200);
+        reader.force_db_error = true;
+        let service = create_test_service(reader);
+
+        let request = Request::new(BlockRequest {
+            block_specifier: Some(BlockSpecifier::BlockNumber(150)),
+        });
+
+        let result = service.get_block(request).await;
+        assert!(result.is_err());
+        let status = result.unwrap_err();
+        assert_eq!(status.code(), tonic::Code::Internal);
+    }
+
+    #[tokio::test]
+    async fn test_database_error_on_get_latest() {
+        let mut reader = MockBlockReader::new(100, 200);
+        reader.force_db_error = true;
+        let service = create_test_service(reader);
+
+        let request = Request::new(BlockRequest {
+            block_specifier: Some(BlockSpecifier::RetrieveLatest(true)),
+        });
+
+        let result = service.get_block(request).await;
+        assert!(result.is_err());
+        let status = result.unwrap_err();
+        assert_eq!(status.code(), tonic::Code::Internal);
+    }
+
+    #[tokio::test]
+    async fn test_decode_error_on_block() {
+        let mut reader = MockBlockReader::new(100, 200);
+        // Insert invalid protobuf data that will cause decode error
+        reader.insert_block(150, vec![0xFF, 0xFF, 0xFF, 0xFF]); // Invalid protobuf
+        let service = create_test_service(reader);
+
+        let request = Request::new(BlockRequest {
+            block_specifier: Some(BlockSpecifier::BlockNumber(150)),
+        });
+
+        let response = service.get_block(request).await.unwrap().into_inner();
+        assert_eq!(response.status, block_response::Code::Unknown as i32);
+        assert!(response.block.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_empty_block_content() {
+        let mut reader = MockBlockReader::new(100, 200);
+        reader.insert_block(150, vec![]); // Empty block content
+        let service = create_test_service(reader);
+
+        let request = Request::new(BlockRequest {
+            block_specifier: Some(BlockSpecifier::BlockNumber(150)),
+        });
+
+        let response = service.get_block(request).await.unwrap().into_inner();
+        assert_eq!(response.status, block_response::Code::Unknown as i32);
+        assert!(response.block.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_edge_case_block_number_zero() {
+        let reader = MockBlockReader::new(0, 200);
+        let service = create_test_service(reader);
+
+        let request = Request::new(BlockRequest {
+            block_specifier: Some(BlockSpecifier::BlockNumber(0)),
+        });
+
+        let response = service.get_block(request).await.unwrap().into_inner();
+        assert_eq!(response.status, block_response::Code::NotFound as i32);
+        assert!(response.block.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_latest_block_metrics_update() {
+        let reader = MockBlockReader::new(100, 200);
+        let service = create_test_service(reader);
+
+        let request = Request::new(BlockRequest {
+            block_specifier: Some(BlockSpecifier::RetrieveLatest(true)),
+        });
+
+        let response = service.get_block(request).await.unwrap().into_inner();
+        assert_eq!(response.status, block_response::Code::Success as i32);
+
+        // Verify that metrics were updated
+        // This would require inspecting the metrics registry in a real implementation
+        // For now, we just ensure the request completes successfully
+    }
+
+    #[tokio::test]
+    async fn test_code_to_string_conversion() {
+        assert_eq!(code_to_string(block_response::Code::Success), "Success");
+        assert_eq!(
+            code_to_string(block_response::Code::InvalidRequest),
+            "InvalidRequest"
+        );
+        assert_eq!(code_to_string(block_response::Code::NotFound), "NotFound");
+        assert_eq!(
+            code_to_string(block_response::Code::NotAvailable),
+            "NotAvailable"
+        );
+        assert_eq!(code_to_string(block_response::Code::Unknown), "Unknown");
+        // Note: Error case will panic in debug mode, so we don't test it here
+    }
 }

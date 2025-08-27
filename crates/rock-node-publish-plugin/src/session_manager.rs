@@ -79,7 +79,7 @@ impl SessionManager {
                                 self.context
                                     .metrics
                                     .publish_header_to_proof_duration_seconds
-                                    .with_label_values(&[])
+                                    .with_label_values(&[""])
                                     .observe(duration);
                                 // Update running average for this session
                                 self.header_proof_total_duration += duration;

@@ -97,6 +97,16 @@ The application loads configuration in **two layers (highest precedence last)**:
 | `plugins.query_service.grpc_address`     | `ROCK_NODE__PLUGINS__QUERY_SERVICE__GRPC_ADDRESS`                | `0.0.0.0` | Bind address |
 | `plugins.query_service.grpc_port`        | `ROCK_NODE__PLUGINS__QUERY_SERVICE__GRPC_PORT`                   | `6793`  | Port |
 
+### Backfill Plugin
+
+| TOML key                                 | Environment variable                                             | Default | Description |
+|------------------------------------------|------------------------------------------------------------------|---------|-------------|
+| `plugins.backfill.enabled`               | `ROCK_NODE__PLUGINS__BACKFILL__ENABLED`                          | `false` | Enable backfill plugin |
+| `plugins.backfill.mode`                  | `ROCK_NODE__PLUGINS__BACKFILL__MODE`                             | `GapFill` | Backfill mode (`GapFill` or `Continuous`) |
+| `plugins.backfill.peers`                 | `ROCK_NODE__PLUGINS__BACKFILL__PEERS`                            | `[]`    | List of peer addresses to backfill from |
+| `plugins.backfill.check_interval_seconds`| `ROCK_NODE__PLUGINS__BACKFILL__CHECK_INTERVAL_SECONDS`           | `60`    | Interval in seconds to check for gaps |
+| `plugins.backfill.max_batch_size`        | `ROCK_NODE__PLUGINS__BACKFILL__MAX_BATCH_SIZE`                   | `1000`  | Maximum number of blocks to fetch in a single request |
+
 ---
 
 ## Why double underscores?

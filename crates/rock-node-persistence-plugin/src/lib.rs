@@ -282,7 +282,7 @@ async fn process_event(event: InboundEvent, context: &AppContext, service: &Pers
     let latency_timer = context
         .metrics
         .persistence_event_duration_seconds
-        .with_label_values(&[])
+        .with_label_values(&[""])
         .start_timer();
 
     let block_number = event.block_number();

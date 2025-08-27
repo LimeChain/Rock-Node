@@ -99,7 +99,7 @@ impl Archiver {
         let timer = self
             .metrics
             .persistence_archival_cycle_duration_seconds
-            .with_label_values(&[])
+            .with_label_values(&[""])
             .start_timer();
 
         let blocks_to_archive = self.hot_tier.read_block_batch(start_block, count)?;

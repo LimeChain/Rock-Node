@@ -1,10 +1,9 @@
 use anyhow::{anyhow, Context, Result};
 use futures_util::Stream;
-use rand::rng;
 use rand::seq::SliceRandom;
 use rock_node_core::{
     app_context::AppContext, block_reader::BlockReader, block_writer::BlockWriter,
-    database::CF_GAPS, BlockReaderProvider, BlockWriterProvider,
+    config::BackfillMode, database::CF_GAPS, BlockReaderProvider, BlockWriterProvider,
 };
 use rock_node_protobufs::{
     com::hedera::hapi::block::stream::Block,
@@ -41,7 +40,7 @@ pub async fn stream_blocks_from_peers(
     end_block: u64,
 ) -> Result<impl Stream<Item = Result<Block, tonic::Status>>> {
     let mut shuffled_peers = peers.to_vec();
-    shuffled_peers.shuffle(&mut rng());
+    shuffled_peers.shuffle(&mut rand::rng());
 
     for peer_addr in &shuffled_peers {
         info!(
@@ -185,7 +184,8 @@ impl BackfillWorker {
                 start_from
             );
 
-            let stream_future = self.establish_and_run_stream(start_from, u64::MAX);
+            let stream_future =
+                self.establish_and_run_stream(start_from, u64::MAX, BackfillMode::Continuous);
 
             tokio::select! {
                 res = stream_future => {
@@ -212,7 +212,12 @@ impl BackfillWorker {
             return Ok(());
         }
 
+        self.context
+            .metrics
+            .backfill_gaps_found_total
+            .inc_by(gaps.len() as u64);
         info!("Found {} gaps to potentially fill.", gaps.len());
+
         for (start, end) in gaps {
             let effective_start = std::cmp::max(start, self.context.config.core.start_block_number);
             if effective_start > end {
@@ -220,7 +225,10 @@ impl BackfillWorker {
             }
 
             info!("Attempting to fill gap [{}, {}]", effective_start, end);
-            if let Err(e) = self.establish_and_run_stream(effective_start, end).await {
+            if let Err(e) = self
+                .establish_and_run_stream(effective_start, end, BackfillMode::GapFill)
+                .await
+            {
                 warn!(
                     "Failed to fill gap [{}, {}]: {}. Will retry on next cycle.",
                     effective_start, end, e
@@ -232,17 +240,55 @@ impl BackfillWorker {
         Ok(())
     }
 
-    /// (Refactored) Establishes a stream and writes incoming blocks to the database.
-    async fn establish_and_run_stream(&self, start: u64, end: u64) -> Result<()> {
+    async fn establish_and_run_stream(
+        &self,
+        start: u64,
+        end: u64,
+        mode: BackfillMode,
+    ) -> Result<()> {
         let peers = &self.context.config.plugins.backfill.peers;
-        let mut stream = stream_blocks_from_peers(peers, start, end).await?;
+        let mode_str = if matches!(mode, BackfillMode::GapFill) {
+            "GapFill"
+        } else {
+            "Continuous"
+        };
+
+        let (peer_addr, mut stream) =
+            stream_blocks_from_peers_internal(&self.context, peers, start, end).await?;
+        let timer = self
+            .context
+            .metrics
+            .backfill_stream_duration_seconds
+            .with_label_values(&[&peer_addr, &mode_str.to_string()])
+            .start_timer();
+        self.context.metrics.backfill_active_streams.inc();
+        let _drop_guard = DecrementingGuard::new(&self.context.metrics.backfill_active_streams);
 
         while let Some(block_result) = stream.next().await {
             match block_result {
-                Ok(block) => self.block_writer.write_block(&block).await?,
+                Ok(block) => {
+                    if let Some(block_number) = get_block_number_from_block(&block) {
+                        self.context
+                            .metrics
+                            .backfill_blocks_fetched_total
+                            .with_label_values(&[mode_str])
+                            .inc();
+                        if matches!(mode, BackfillMode::Continuous) {
+                            self.context
+                                .metrics
+                                .backfill_latest_continuous_block
+                                .set(block_number as i64);
+                        }
+                    }
+
+                    // This internally uses the BlockWriter, ensuring data goes
+                    // through the same persistence pipeline as live blocks.
+                    self.block_writer.write_block(&block).await?;
+                }
                 Err(status) => return Err(anyhow!("gRPC stream error: {}", status)),
             }
         }
+        timer.observe_duration();
         Ok(())
     }
 
@@ -257,6 +303,109 @@ impl BackfillWorker {
             gaps.push((start, end));
         }
         Ok(gaps)
+    }
+}
+
+// Internal version of stream_blocks_from_peers that takes AppContext for metrics
+async fn stream_blocks_from_peers_internal(
+    context: &AppContext,
+    peers: &[String],
+    start_block: u64,
+    end_block: u64,
+) -> Result<(String, impl Stream<Item = Result<Block, tonic::Status>>)> {
+    let mut shuffled_peers = peers.to_vec();
+    shuffled_peers.shuffle(&mut rand::rng());
+
+    for peer_addr in &shuffled_peers {
+        context
+            .metrics
+            .backfill_peer_connection_attempts_total
+            .with_label_values(&[peer_addr, &"attempt".to_string()])
+            .inc();
+
+        match Channel::from_shared(peer_addr.clone())?.connect().await {
+            Ok(channel) => {
+                context
+                    .metrics
+                    .backfill_peer_connection_attempts_total
+                    .with_label_values(&[peer_addr, &"success".to_string()])
+                    .inc();
+
+                let mut client = BlockStreamSubscribeServiceClient::new(channel);
+                let request = SubscribeStreamRequest {
+                    start_block_number: start_block,
+                    end_block_number: end_block,
+                };
+                let stream = client.subscribe_block_stream(request).await?.into_inner();
+                let (tx, rx) = tokio::sync::mpsc::channel(128);
+
+                tokio::spawn(async move {
+                    let mut stream = stream;
+                    while let Some(msg_res) = stream.next().await {
+                        match msg_res {
+                            Ok(msg) => {
+                                if let Some(SubResponse::BlockItems(item_set)) = msg.response {
+                                    let block = Block {
+                                        items: item_set.block_items,
+                                    };
+                                    if tx.send(Ok(block)).await.is_err() {
+                                        break;
+                                    }
+                                }
+                            }
+                            Err(status) => {
+                                let _ = tx.send(Err(status)).await;
+                                break;
+                            }
+                        }
+                    }
+                });
+                return Ok((peer_addr.clone(), ReceiverStream::new(rx)));
+            }
+            Err(e) => {
+                context
+                    .metrics
+                    .backfill_peer_connection_attempts_total
+                    .with_label_values(&[peer_addr, &"failure".to_string()])
+                    .inc();
+                warn!(
+                    "Failed to connect to peer {}: {}. Trying next peer.",
+                    peer_addr, e
+                );
+                continue;
+            }
+        }
+    }
+    Err(anyhow!("Failed to connect to any of the configured peers."))
+}
+
+// Helper to get block number from a Block proto
+fn get_block_number_from_block(block: &Block) -> Option<u64> {
+    block.items.first().and_then(|item| {
+        if let Some(
+            rock_node_protobufs::com::hedera::hapi::block::stream::block_item::Item::BlockHeader(
+                header,
+            ),
+        ) = &item.item
+        {
+            Some(header.number)
+        } else {
+            None
+        }
+    })
+}
+
+struct DecrementingGuard<'a> {
+    gauge: &'a prometheus::IntGauge,
+}
+impl<'a> DecrementingGuard<'a> {
+    fn new(gauge: &'a prometheus::IntGauge) -> Self {
+        Self { gauge }
+    }
+}
+impl<'a> Drop for DecrementingGuard<'a> {
+    fn drop(&mut self) {
+        self.gauge.dec();
     }
 }
 
@@ -347,8 +496,6 @@ mod tests {
         Ok(format!("http://{}", addr))
     }
 
-    // --- NEW TESTS FOR stream_blocks_from_peers ---
-
     #[tokio::test]
     async fn test_stream_blocks_from_peers_success() {
         let peer_addr = spawn_mock_peer().await.unwrap();
@@ -420,7 +567,12 @@ mod tests {
     #[async_trait]
     impl BlockWriter for MockBlockWriter {
         async fn write_block(&self, block: &Block) -> Result<()> {
-            if let Some(rock_node_protobufs::com::hedera::hapi::block::stream::block_item::Item::BlockHeader(header)) = &block.items[0].item {
+            if let Some(
+                rock_node_protobufs::com::hedera::hapi::block::stream::block_item::Item::BlockHeader(
+                    header,
+                ),
+            ) = &block.items[0].item
+            {
                 self.written_blocks.lock().await.push(header.number);
             }
             Ok(())
@@ -490,7 +642,10 @@ mod tests {
         let worker = BackfillWorker::new(context).unwrap();
 
         // Run the worker's internal method
-        worker.establish_and_run_stream(1, 5).await.unwrap();
+        worker
+            .establish_and_run_stream(1, 5, BackfillMode::GapFill)
+            .await
+            .unwrap();
 
         let written = writer.written_blocks.lock().await;
         assert_eq!(*written, vec![1, 2, 3, 4, 5]);

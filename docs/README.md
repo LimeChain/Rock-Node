@@ -19,7 +19,7 @@ Rock Node follows a modular plugin architecture where each component is designed
 
 ## Core Plugins
 
-### 🔗 [Block Access Plugin](block-access/design-doc.md)
+### [Block Access Plugin](block-access/design-doc.md)
 **Purpose**: Public-facing gRPC API for blockchain data retrieval
 
 The Block Access Plugin provides a simple, robust, and performant access layer to blocks stored by the Persistence Plugin. It exposes a gRPC API that allows external clients and other Rock Node operators to query and retrieve blockchain data.
@@ -30,7 +30,7 @@ The Block Access Plugin provides a simple, robust, and performant access layer t
 - Comprehensive error handling and status reporting
 - Prometheus metrics for monitoring and alerting
 
-### 📊 [Server Status Plugin](server-status/design-doc.md)
+### [Server Status Plugin](server-status/design-doc.md)
 **Purpose**: Health and status monitoring endpoint
 
 The Server Status Plugin provides a lightweight gRPC service for health checks and status monitoring. It offers a fast and efficient way for clients, operators, and automated monitoring systems to determine the range of block data currently available on the node.
@@ -41,7 +41,7 @@ The Server Status Plugin provides a lightweight gRPC service for health checks a
 - Low-latency responses for load balancer integration
 - Operational metrics for monitoring
 
-### 📤 [Publisher Plugin](publisher/design-doc.md)
+### [Publisher Plugin](publisher/design-doc.md)
 **Purpose**: Block data ingestion and streaming
 
 The Publisher Plugin provides a gRPC endpoint for data producers to stream block data into the Rock Node. It handles multiple simultaneous publisher connections while ensuring blocks are processed sequentially, exactly once, and in order.
@@ -53,7 +53,7 @@ The Publisher Plugin provides a gRPC endpoint for data producers to stream block
 - Session management with robust error handling
 - Leader election for concurrent publishers
 
-### 📥 [Subscriber Plugin](subscriber/design-doc.md)
+### [Subscriber Plugin](subscriber/design-doc.md)
 **Purpose**: Block data streaming and subscription service
 
 The Subscriber Plugin exposes a public-facing gRPC endpoint that allows clients to subscribe to streams of block data. It serves both finite historical ranges of blocks and open-ended "live" streams that receive new blocks as soon as they are persisted.
@@ -65,7 +65,7 @@ The Subscriber Plugin exposes a public-facing gRPC endpoint that allows clients 
 - Session management for multiple concurrent subscribers
 - Comprehensive error handling and status reporting
 
-### 💾 [Persistence Plugin](persistence/design-doc.md)
+### [Persistence Plugin](persistence/design-doc.md)
 **Purpose**: Core data storage and management
 
 The Persistence Plugin is the authoritative source for block data storage and retrieval. It provides the `BlockReader` trait that other plugins depend on for accessing blockchain data.
@@ -77,7 +77,7 @@ The Persistence Plugin is the authoritative source for block data storage and re
 - Data integrity and consistency guarantees
 - Storage lifecycle management
 
-### 🌳 [State Management Plugin](state-managment/design-doc.md)
+### [State Management Plugin](state-managment/design-doc.md)
 **Purpose**: Verifiable state maintenance and management
 
 The State Management Plugin maintains the live, verifiable state of the blockchain ledger. It processes state mutations from verified blocks and maintains a cryptographically verifiable "Forest of Merkle Trees" architecture.
@@ -92,8 +92,11 @@ The State Management Plugin maintains the live, verifiable state of the blockcha
 
 ## Supporting Documentation
 
-### 🔧 [Protobufs Compilation](protobufs/protobufs-compilation.md)
+### 肌 [Protobufs Compilation](protobufs/protobufs-compilation.md)
 Technical guide for Protocol Buffer compilation and code generation used across all gRPC services in the Rock Node ecosystem.
+
+### 斤 [Metrics Reference](metrics.md)
+A detailed reference of all Prometheus metrics exposed by the Rock Node, essential for monitoring and alerting.
 
 ## Quick Start
 
@@ -127,12 +130,13 @@ ROCK_NODE_CONFIG=/path/to/config.toml ./target/release/rock-node
 
 ### Plugin Development
 Each plugin follows a consistent structure:
-- `lib.rs`: Plugin entry point implementing the `Plugin` trait
-- `service.rs`: gRPC service implementation (if applicable)
-- `state.rs`: Shared state management (if applicable)
-- `error.rs`: Error handling and status mapping
 
-**Note**: The State Management Plugin provides a `StateReader` trait that other plugins can use to query the verifiable state without direct dependencies.
+- **`lib.rs`**: Plugin entry point implementing the Plugin trait
+- **`service.rs`**: gRPC service implementation (if applicable)
+- **`state.rs`**: Shared state management (if applicable)
+- **`error.rs`**: Error handling and status mapping
+
+> **Note**: The State Management Plugin provides a `StateReader` trait that other plugins can use to query the verifiable state without direct dependencies.
 
 ### Testing
 ```bash
@@ -147,10 +151,9 @@ cargo test --test integration
 ```
 
 ## Monitoring and Observability
-
 Rock Node provides comprehensive observability through:
 
-- **Prometheus Metrics**: Detailed metrics for each plugin
+- **Prometheus Metrics**: Detailed metrics for each plugin are described in their respective design documents
 - **Structured Logging**: Using the `tracing` library
 - **Health Checks**: Built-in health check endpoints
 - **Performance Monitoring**: Request duration and throughput metrics

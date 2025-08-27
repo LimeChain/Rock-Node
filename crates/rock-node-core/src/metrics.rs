@@ -52,6 +52,14 @@ pub struct MetricsRegistry {
     pub subscriber_blocks_sent_total: CounterVec,
     pub subscriber_sessions_total: CounterVec,
     pub subscriber_average_inter_block_time_seconds: GaugeVec,
+
+    // --- Backfill Plugin Metrics ---
+    pub backfill_gaps_found_total: IntCounter,
+    pub backfill_blocks_fetched_total: CounterVec,
+    pub backfill_peer_connection_attempts_total: CounterVec,
+    pub backfill_stream_duration_seconds: HistogramVec,
+    pub backfill_active_streams: IntGauge,
+    pub backfill_latest_continuous_block: IntGauge,
 }
 
 impl MetricsRegistry {
@@ -310,6 +318,53 @@ impl MetricsRegistry {
             subscriber_average_inter_block_time_seconds.clone(),
         ))?;
 
+        // --- Backfill Plugin Metrics Initialization ---
+        let backfill_gaps_found_total = IntCounter::with_opts(Opts::new(
+            "rocknode_backfill_gaps_found_total",
+            "Total number of block gaps detected by the GapFill mode.",
+        ))?;
+        registry.register(Box::new(backfill_gaps_found_total.clone()))?;
+
+        let backfill_blocks_fetched_total = CounterVec::new(
+            Opts::new(
+                "rocknode_backfill_blocks_fetched_total",
+                "Total number of blocks successfully fetched from peers.",
+            ),
+            &["mode"],
+        )?;
+        registry.register(Box::new(backfill_blocks_fetched_total.clone()))?;
+
+        let backfill_peer_connection_attempts_total = CounterVec::new(
+            Opts::new(
+                "rocknode_backfill_peer_connection_attempts_total",
+                "Total number of connection attempts to peers.",
+            ),
+            &["peer_address", "outcome"],
+        )?;
+        registry.register(Box::new(backfill_peer_connection_attempts_total.clone()))?;
+
+        let backfill_stream_duration_seconds = HistogramVec::new(
+            Opts::new(
+                "rocknode_backfill_stream_duration_seconds",
+                "Duration of a backfill stream from a single peer.",
+            )
+            .into(),
+            &["peer_address", "mode"],
+        )?;
+        registry.register(Box::new(backfill_stream_duration_seconds.clone()))?;
+
+        let backfill_active_streams = IntGauge::with_opts(Opts::new(
+            "rocknode_backfill_active_streams",
+            "Number of currently active backfill streams.",
+        ))?;
+        registry.register(Box::new(backfill_active_streams.clone()))?;
+
+        let backfill_latest_continuous_block = IntGauge::with_opts(Opts::new(
+            "rocknode_backfill_latest_continuous_block",
+            "The latest block number fetched in Continuous mode.",
+        ))?;
+        registry.register(Box::new(backfill_latest_continuous_block.clone()))?;
+
         Ok(Self {
             registry,
             blocks_acknowledged,
@@ -341,6 +396,12 @@ impl MetricsRegistry {
             subscriber_blocks_sent_total,
             subscriber_sessions_total,
             subscriber_average_inter_block_time_seconds,
+            backfill_gaps_found_total,
+            backfill_blocks_fetched_total,
+            backfill_peer_connection_attempts_total,
+            backfill_stream_duration_seconds,
+            backfill_active_streams,
+            backfill_latest_continuous_block,
         })
     }
 
