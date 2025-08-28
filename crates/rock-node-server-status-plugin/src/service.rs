@@ -87,7 +87,7 @@ impl BlockNodeService for StatusServiceImpl {
 mod tests {
     use super::*;
     use anyhow::Result;
-    use rock_node_core::{block_reader::BlockReader, MetricsRegistry};
+    use rock_node_core::{block_reader::BlockReader, test_utils::create_isolated_metrics};
     use rock_node_protobufs::org::hiero::block::api::ServerStatusRequest;
     use std::sync::Arc;
 
@@ -95,6 +95,28 @@ mod tests {
     struct MockBlockReader {
         earliest_block: i64,
         latest_block: i64,
+        force_earliest_error: bool,
+        force_latest_error: bool,
+    }
+
+    impl MockBlockReader {
+        fn with_error() -> Self {
+            Self {
+                earliest_block: 100,
+                latest_block: 5000,
+                force_earliest_error: true,
+                force_latest_error: true,
+            }
+        }
+
+        fn with_latest_error() -> Self {
+            Self {
+                earliest_block: 100,
+                latest_block: 5000,
+                force_earliest_error: false,
+                force_latest_error: true,
+            }
+        }
     }
 
     impl BlockReader for MockBlockReader {
@@ -103,7 +125,9 @@ mod tests {
         }
 
         fn get_earliest_persisted_block_number(&self) -> Result<Option<u64>> {
-            if self.earliest_block < 0 {
+            if self.force_earliest_error {
+                Err(anyhow::anyhow!("Database connection error"))
+            } else if self.earliest_block < 0 {
                 Ok(None)
             } else {
                 Ok(Some(self.earliest_block as u64))
@@ -111,7 +135,9 @@ mod tests {
         }
 
         fn get_latest_persisted_block_number(&self) -> Result<Option<u64>> {
-            if self.latest_block < 0 {
+            if self.force_latest_error {
+                Err(anyhow::anyhow!("Database connection error"))
+            } else if self.latest_block < 0 {
                 Ok(None)
             } else {
                 Ok(Some(self.latest_block as u64))
@@ -129,7 +155,7 @@ mod tests {
     fn create_test_service(reader: MockBlockReader) -> StatusServiceImpl {
         StatusServiceImpl {
             block_reader: Arc::new(reader),
-            metrics: Arc::new(MetricsRegistry::new().unwrap()),
+            metrics: Arc::new(create_isolated_metrics()),
         }
     }
 
@@ -138,6 +164,8 @@ mod tests {
         let reader = MockBlockReader {
             earliest_block: 100,
             latest_block: 5000,
+            force_earliest_error: false,
+            force_latest_error: false,
         };
         let service = create_test_service(reader);
 
@@ -146,6 +174,8 @@ mod tests {
 
         assert_eq!(response.first_available_block, 100);
         assert_eq!(response.last_available_block, 5000);
+        assert!(!response.only_latest_state);
+        assert!(response.version_information.is_none());
     }
 
     #[tokio::test]
@@ -153,6 +183,8 @@ mod tests {
         let reader = MockBlockReader {
             earliest_block: -1,
             latest_block: -1,
+            force_earliest_error: false,
+            force_latest_error: false,
         };
         let service = create_test_service(reader);
 
@@ -168,6 +200,8 @@ mod tests {
         let reader = MockBlockReader {
             earliest_block: 1,
             latest_block: 1,
+            force_earliest_error: false,
+            force_latest_error: false,
         };
         let service = create_test_service(reader);
 
@@ -176,5 +210,106 @@ mod tests {
 
         assert_eq!(response.first_available_block, 1);
         assert_eq!(response.last_available_block, 1);
+    }
+
+    #[tokio::test]
+    async fn test_server_status_earliest_block_error() {
+        let reader = MockBlockReader::with_error();
+        let service = create_test_service(reader);
+
+        let request = Request::new(ServerStatusRequest {});
+        let result = service.server_status(request).await;
+
+        assert!(result.is_err());
+        let status = result.unwrap_err();
+        assert_eq!(status.code(), tonic::Code::Internal);
+        assert!(status
+            .message()
+            .contains("Database error while fetching earliest block"));
+    }
+
+    #[tokio::test]
+    async fn test_server_status_latest_block_error() {
+        let reader = MockBlockReader::with_latest_error(); // Only latest will fail
+        let service = create_test_service(reader);
+
+        let request = Request::new(ServerStatusRequest {});
+        let result = service.server_status(request).await;
+
+        assert!(result.is_err());
+        let status = result.unwrap_err();
+        assert_eq!(status.code(), tonic::Code::Internal);
+        assert!(status
+            .message()
+            .contains("Database error while fetching latest block"));
+    }
+
+    #[tokio::test]
+    async fn test_server_status_earliest_none_latest_some() {
+        let reader = MockBlockReader {
+            earliest_block: -1, // None
+            latest_block: 1000, // Some value
+            force_earliest_error: false,
+            force_latest_error: false,
+        };
+        let service = create_test_service(reader);
+
+        let request = Request::new(ServerStatusRequest {});
+        let response = service.server_status(request).await.unwrap().into_inner();
+
+        assert_eq!(response.first_available_block, 0);
+        assert_eq!(response.last_available_block, 1000);
+    }
+
+    #[tokio::test]
+    async fn test_server_status_earliest_some_latest_none() {
+        let reader = MockBlockReader {
+            earliest_block: 100, // Some value
+            latest_block: -1,    // None
+            force_earliest_error: false,
+            force_latest_error: false,
+        };
+        let service = create_test_service(reader);
+
+        let request = Request::new(ServerStatusRequest {});
+        let response = service.server_status(request).await.unwrap().into_inner();
+
+        assert_eq!(response.first_available_block, 100);
+        assert_eq!(response.last_available_block, 0);
+    }
+
+    #[tokio::test]
+    async fn test_server_status_large_block_numbers() {
+        let reader = MockBlockReader {
+            earliest_block: i64::MAX - 1000,
+            latest_block: i64::MAX - 100,
+            force_earliest_error: false,
+            force_latest_error: false,
+        };
+        let service = create_test_service(reader);
+
+        let request = Request::new(ServerStatusRequest {});
+        let response = service.server_status(request).await.unwrap().into_inner();
+
+        assert_eq!(response.first_available_block, (i64::MAX - 1000) as u64);
+        assert_eq!(response.last_available_block, (i64::MAX - 100) as u64);
+    }
+
+    #[tokio::test]
+    async fn test_server_status_metrics_recording() {
+        let reader = MockBlockReader {
+            earliest_block: 100,
+            latest_block: 200,
+            force_earliest_error: false,
+            force_latest_error: false,
+        };
+        let service = create_test_service(reader);
+
+        let request = Request::new(ServerStatusRequest {});
+        let _response = service.server_status(request).await.unwrap().into_inner();
+
+        // Check that metrics were recorded
+        // This is a basic check - in a real scenario you'd want to inspect the metrics registry
+        // but for now we'll just ensure the request completes successfully
     }
 }

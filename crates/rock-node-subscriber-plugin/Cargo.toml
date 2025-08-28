@@ -30,7 +30,7 @@ prost = "0.13.5"
 uuid = { version = "1", features = ["v4"] }
 
 # Metrics
-prometheus = { version = "0.13", features = ["process"] }
+prometheus = { version = "0.14", features = ["process"] }
 
 # Add async-trait for async methods in traits
 async-trait = "0.1"

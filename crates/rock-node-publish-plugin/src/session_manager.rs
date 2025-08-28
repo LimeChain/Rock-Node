@@ -79,7 +79,7 @@ impl SessionManager {
                                 self.context
                                     .metrics
                                     .publish_header_to_proof_duration_seconds
-                                    .with_label_values(&[])
+                                    .with_label_values::<&str>(&[])
                                     .observe(duration);
                                 // Update running average for this session
                                 self.header_proof_total_duration += duration;
@@ -401,6 +401,22 @@ mod tests {
         mpsc::Receiver<rock_node_core::events::BlockVerified>,
         broadcast::Receiver<rock_node_core::events::BlockPersisted>,
     ) {
+        make_context_with_registry(create_test_metrics())
+    }
+
+    /// Helper function to create an isolated metrics registry for testing
+    fn create_test_metrics() -> MetricsRegistry {
+        rock_node_core::test_utils::create_isolated_metrics()
+    }
+
+    fn make_context_with_registry(
+        metrics: MetricsRegistry,
+    ) -> (
+        AppContext,
+        mpsc::Receiver<rock_node_core::events::BlockItemsReceived>,
+        mpsc::Receiver<rock_node_core::events::BlockVerified>,
+        broadcast::Receiver<rock_node_core::events::BlockPersisted>,
+    ) {
         let config = Config {
             core: CoreConfig {
                 log_level: "info".to_string(),
@@ -469,7 +485,7 @@ mod tests {
         (
             AppContext {
                 config: std::sync::Arc::new(config),
-                metrics: std::sync::Arc::new(MetricsRegistry::new().unwrap()),
+                metrics: std::sync::Arc::new(metrics),
                 capability_registry: std::sync::Arc::new(CapabilityRegistry::new()),
                 service_providers: std::sync::Arc::new(std::sync::RwLock::new(
                     std::collections::HashMap::new(),
@@ -510,7 +526,8 @@ mod tests {
 
     #[tokio::test]
     async fn first_header_wins_primary_second_goes_behind() {
-        let (context, _rx_items, _rx_verified, _rx_persisted) = make_context();
+        let metrics = create_test_metrics();
+        let (context, _rx_items, _rx_verified, _rx_persisted) = make_context_with_registry(metrics);
         let shared = Arc::new(SharedState::new());
         let (tx1, mut rx1) = mpsc::channel(4);
         let (tx2, mut rx2) = mpsc::channel(4);
@@ -585,7 +602,8 @@ mod tests {
 
     #[tokio::test]
     async fn ack_path_updates_shared_state_and_sends_ack() {
-        let (context, _rx_items, _rx_verified, _rx_persisted) = make_context();
+        let metrics = create_test_metrics();
+        let (context, _rx_items, _rx_verified, _rx_persisted) = make_context_with_registry(metrics);
         let shared = Arc::new(SharedState::new());
         let (tx, mut rx) = mpsc::channel(8);
         let mut s = SessionManager::new(context.clone(), shared.clone(), tx);

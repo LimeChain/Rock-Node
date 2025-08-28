@@ -99,7 +99,7 @@ impl Archiver {
         let timer = self
             .metrics
             .persistence_archival_cycle_duration_seconds
-            .with_label_values(&[])
+            .with_label_values::<&str>(&[])
             .start_timer();
 
         let blocks_to_archive = self.hot_tier.read_block_batch(start_block, count)?;
@@ -165,6 +165,12 @@ mod tests {
         }
     }
 
+    /// Helper function to create an isolated metrics registry for testing
+    fn create_test_metrics() -> Arc<MetricsRegistry> {
+        use rock_node_core::test_utils::create_isolated_metrics;
+        Arc::new(create_isolated_metrics())
+    }
+
     #[test]
     fn archival_cycle_moves_complete_batch_and_updates_state() {
         let tmp_dir = TempDir::new().unwrap();
@@ -173,7 +179,9 @@ mod tests {
             .db_handle();
         let state = Arc::new(StateManager::new(db.clone()));
         let hot = Arc::new(HotTier::new(db.clone()));
-        let metrics = Arc::new(MetricsRegistry::new().unwrap());
+
+        let metrics = create_test_metrics();
+
         let config = Arc::new(PersistenceServiceConfig {
             enabled: true,
             cold_storage_path: tmp_dir.path().to_str().unwrap().to_string(),

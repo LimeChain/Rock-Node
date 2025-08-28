@@ -228,7 +228,8 @@ mod tests {
     #[test]
     fn scan_and_read_from_cold_storage() {
         let tmp = TempDir::new().unwrap();
-        let metrics = Arc::new(MetricsRegistry::new().unwrap());
+        // Use isolated registry for testing to avoid cardinality conflicts
+        let metrics = Arc::new(rock_node_core::test_utils::create_isolated_metrics());
         let config = Arc::new(PersistenceServiceConfig {
             enabled: true,
             cold_storage_path: tmp.path().to_str().unwrap().to_string(),

@@ -18,7 +18,7 @@ start_block_number = 0
     [plugins.publish_service]
     enabled = true
     grpc_address = "0.0.0.0"
-    grpc_port = 7090
+    grpc_port = 8090
     max_concurrent_streams = 250
     persistence_ack_timeout_seconds = 60
     stale_winner_timeout_seconds = 10
@@ -36,7 +36,7 @@ start_block_number = 0
 
     [plugins.subscriber_service]
     enabled = true
-    grpc_port = 7895
+    grpc_port = 6895
     grpc_address = "0.0.0.0"
     max_concurrent_streams = 100
     live_stream_queue_size = 250
@@ -49,21 +49,21 @@ start_block_number = 0
     [plugins.block_access_service]
     enabled = true
     grpc_address = "0.0.0.0"
-    grpc_port = 7791
+    grpc_port = 6791
 
     [plugins.server_status_service]
     enabled = true
     grpc_address = "0.0.0.0"
-    grpc_port = 7792
+    grpc_port = 6792
 
     [plugins.query_service]
     enabled = true
     grpc_address = "0.0.0.0"
-    grpc_port = 7793
+    grpc_port = 6793
     
     [plugins.backfill]
     enabled = true
-    mode = "Continuous"
-    peers = ["http://localhost:6895"]
+    mode = "GapFill"
+    peers = [""]
     check_interval_seconds = 5
     max_batch_size = 10

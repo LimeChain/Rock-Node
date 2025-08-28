@@ -123,6 +123,27 @@ cargo test --test integration_test_name
 - Use meaningful test names that describe the behavior being tested
 - Mock external dependencies appropriately
 
+### Testing with Metrics
+
+When writing tests that use Prometheus metrics:
+
+- **Always use isolated registries** to prevent cardinality conflicts
+- Use `rock_node_core::test_utils::create_isolated_metrics()` for test contexts
+- Avoid using `MetricsRegistry::new()` directly in tests
+- Follow the established patterns in existing plugins
+
+```rust
+use rock_node_core::test_utils::create_isolated_metrics;
+
+#[test]
+fn my_metrics_test() {
+    let metrics = create_isolated_metrics();
+    // Test implementation using isolated metrics...
+}
+```
+
+See [Registry Isolation Guide](docs/registry-isolation.md) for detailed information.
+
 ### Test Coverage
 
 We aim for high test coverage. You can check coverage with:

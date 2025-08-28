@@ -25,8 +25,13 @@ async-trait = "0.1"
 # The subscriber that collects and prints logs
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 
+# For metrics
+prometheus = "0.14"
+
 # For RocksDB access
 rocksdb = "0.22"
+rand = "0.9"
+futures-util = "0.3"
 
 [dev-dependencies]
 tempfile = "3.20"

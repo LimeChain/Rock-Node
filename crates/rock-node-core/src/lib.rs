@@ -12,6 +12,7 @@ pub mod events;
 pub mod metrics;
 pub mod plugin;
 pub mod state_reader;
+pub mod test_utils;
 
 pub use app_context::AppContext;
 pub use block_reader::{BlockReader, BlockReaderProvider};

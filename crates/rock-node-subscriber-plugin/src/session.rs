@@ -305,7 +305,8 @@ mod tests {
             SubscriberServiceConfig, VerificationServiceConfig,
         },
         events::BlockPersisted,
-        AppContext, BlockReaderProvider, CapabilityRegistry, MetricsRegistry,
+        test_utils::create_isolated_metrics,
+        AppContext, BlockReaderProvider, CapabilityRegistry,
     };
     use rock_node_protobufs::com::hedera::hapi::block::stream::BlockItem;
     use std::{any::Any, collections::HashMap, sync::RwLock};
@@ -428,7 +429,7 @@ mod tests {
         (
             Arc::new(AppContext {
                 config: Arc::new(config),
-                metrics: Arc::new(MetricsRegistry::new().unwrap()),
+                metrics: Arc::new(create_isolated_metrics()),
                 capability_registry: Arc::new(CapabilityRegistry::new()),
                 service_providers,
                 block_data_cache: Arc::new(Default::default()),

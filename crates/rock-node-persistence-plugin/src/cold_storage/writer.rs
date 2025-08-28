@@ -125,7 +125,7 @@ fn get_block_number(block: &Block) -> Result<u64> {
 mod tests {
     use super::*;
     use crate::cold_storage::reader::ColdReader;
-    use rock_node_core::{config::PersistenceServiceConfig, metrics::MetricsRegistry};
+    use rock_node_core::{config::PersistenceServiceConfig, test_utils::create_isolated_metrics};
     use tempfile::TempDir;
 
     fn make_block(num: u64) -> Block {
@@ -160,7 +160,7 @@ mod tests {
         let blocks: Vec<Block> = (100..105).map(make_block).collect();
         let index_path = writer.write_archive(&blocks).unwrap();
 
-        let metrics = Arc::new(MetricsRegistry::new().unwrap());
+        let metrics = Arc::new(create_isolated_metrics());
         let reader = ColdReader::new(Arc::new(config), metrics);
         reader.load_index_file(&index_path).unwrap();
 

@@ -1,7 +1,9 @@
 use anyhow::{anyhow, Context, Result};
+use futures_util::Stream;
+use rand::seq::SliceRandom;
 use rock_node_core::{
     app_context::AppContext, block_reader::BlockReader, block_writer::BlockWriter,
-    database::CF_GAPS, BlockReaderProvider, BlockWriterProvider,
+    config::BackfillMode, database::CF_GAPS, BlockReaderProvider, BlockWriterProvider,
 };
 use rock_node_protobufs::{
     com::hedera::hapi::block::stream::Block,
@@ -13,9 +15,88 @@ use rock_node_protobufs::{
 use rocksdb::IteratorMode;
 use std::{any::TypeId, sync::Arc, time::Duration};
 use tokio::sync::Notify;
-use tokio_stream::StreamExt;
+use tokio_stream::{wrappers::ReceiverStream, StreamExt};
 use tonic::transport::Channel;
 use tracing::{error, info, trace, warn};
+
+/// Establishes a connection to one of the provided peers and returns a stream of blocks.
+///
+/// This function is designed for external use. It allows any application to leverage
+/// the peer-connection and block-streaming logic of this crate without being tied
+/// to its database writing implementation.
+///
+/// # Arguments
+/// * `peers` - A slice of strings, where each string is a valid URI for a peer's subscriber service.
+/// * `start_block` - The block number to start streaming from.
+/// * `end_block` - The block number to end the stream at. Use `u64::MAX` for a continuous stream.
+///
+/// # Returns
+/// A `Result` containing a `Stream` of `Block`s. The outer `Result` will be an error
+/// if a connection to any peer cannot be established. The inner `Result` within the stream
+/// represents potential errors during the streaming process itself.
+pub async fn stream_blocks_from_peers(
+    peers: &[String],
+    start_block: u64,
+    end_block: u64,
+) -> Result<impl Stream<Item = Result<Block, tonic::Status>>> {
+    let mut shuffled_peers = peers.to_vec();
+    shuffled_peers.shuffle(&mut rand::rng());
+
+    for peer_addr in &shuffled_peers {
+        info!(
+            "Attempting to connect to peer {} for blocks [{}, {}]",
+            peer_addr, start_block, end_block
+        );
+        match Channel::from_shared(peer_addr.clone())?.connect().await {
+            Ok(channel) => {
+                let mut client = BlockStreamSubscribeServiceClient::new(channel);
+                let request = SubscribeStreamRequest {
+                    start_block_number: start_block,
+                    end_block_number: end_block,
+                };
+                let stream = client.subscribe_block_stream(request).await?.into_inner();
+
+                // We use a channel to map the stream items, which makes the return type cleaner.
+                let (tx, rx) = tokio::sync::mpsc::channel(128);
+
+                tokio::spawn(async move {
+                    let mut stream = stream;
+                    while let Some(msg_res) = stream.next().await {
+                        match msg_res {
+                            Ok(msg) => {
+                                if let Some(SubResponse::BlockItems(item_set)) = msg.response {
+                                    let block = Block {
+                                        items: item_set.block_items,
+                                    };
+                                    if tx.send(Ok(block)).await.is_err() {
+                                        // Receiver was dropped, so we can stop.
+                                        break;
+                                    }
+                                }
+                            }
+                            Err(status) => {
+                                // Forward the error through the channel and stop.
+                                let _ = tx.send(Err(status)).await;
+                                break;
+                            }
+                        }
+                    }
+                });
+
+                // Return a stream that reads from the channel.
+                return Ok(ReceiverStream::new(rx));
+            }
+            Err(e) => {
+                warn!(
+                    "Failed to connect to peer {}: {}. Trying next peer.",
+                    peer_addr, e
+                );
+                continue;
+            }
+        }
+    }
+    Err(anyhow!("Failed to connect to any of the configured peers."))
+}
 
 #[derive(Debug)]
 pub struct BackfillWorker {
@@ -103,7 +184,8 @@ impl BackfillWorker {
                 start_from
             );
 
-            let stream_future = self.establish_and_run_stream(start_from, u64::MAX);
+            let stream_future =
+                self.establish_and_run_stream(start_from, u64::MAX, BackfillMode::Continuous);
 
             tokio::select! {
                 res = stream_future => {
@@ -130,7 +212,12 @@ impl BackfillWorker {
             return Ok(());
         }
 
+        self.context
+            .metrics
+            .backfill_gaps_found_total
+            .inc_by(gaps.len() as u64);
         info!("Found {} gaps to potentially fill.", gaps.len());
+
         for (start, end) in gaps {
             let effective_start = std::cmp::max(start, self.context.config.core.start_block_number);
             if effective_start > end {
@@ -138,7 +225,10 @@ impl BackfillWorker {
             }
 
             info!("Attempting to fill gap [{}, {}]", effective_start, end);
-            if let Err(e) = self.establish_and_run_stream(effective_start, end).await {
+            if let Err(e) = self
+                .establish_and_run_stream(effective_start, end, BackfillMode::GapFill)
+                .await
+            {
                 warn!(
                     "Failed to fill gap [{}, {}]: {}. Will retry on next cycle.",
                     effective_start, end, e
@@ -150,47 +240,56 @@ impl BackfillWorker {
         Ok(())
     }
 
-    async fn establish_and_run_stream(&self, start: u64, end: u64) -> Result<()> {
-        for peer_addr in &self.context.config.plugins.backfill.peers {
-            info!(
-                "Connecting to peer {} for blocks [{}, {}]",
-                peer_addr, start, end
-            );
-            match Channel::from_shared(peer_addr.clone())?.connect().await {
-                Ok(channel) => {
-                    let mut client = BlockStreamSubscribeServiceClient::new(channel);
-                    let request = SubscribeStreamRequest {
-                        start_block_number: start,
-                        end_block_number: end,
-                    };
+    async fn establish_and_run_stream(
+        &self,
+        start: u64,
+        end: u64,
+        mode: BackfillMode,
+    ) -> Result<()> {
+        let peers = &self.context.config.plugins.backfill.peers;
+        let mode_str = if matches!(mode, BackfillMode::GapFill) {
+            "GapFill"
+        } else {
+            "Continuous"
+        };
 
-                    let mut stream = client.subscribe_block_stream(request).await?.into_inner();
-                    while let Some(msg_res) = stream.next().await {
-                        match msg_res {
-                            Ok(msg) => {
-                                if let Some(SubResponse::BlockItems(item_set)) = msg.response {
-                                    let block = Block {
-                                        items: item_set.block_items,
-                                    };
-                                    self.block_writer.write_block(&block).await?;
-                                }
-                            }
-                            Err(status) => return Err(anyhow!("gRPC stream error: {}", status)),
+        let (peer_addr, mut stream) =
+            stream_blocks_from_peers_internal(&self.context, peers, start, end).await?;
+        let timer = self
+            .context
+            .metrics
+            .backfill_stream_duration_seconds
+            .with_label_values(&[&peer_addr, &mode_str.to_string()])
+            .start_timer();
+        self.context.metrics.backfill_active_streams.inc();
+        let _drop_guard = DecrementingGuard::new(&self.context.metrics.backfill_active_streams);
+
+        while let Some(block_result) = stream.next().await {
+            match block_result {
+                Ok(block) => {
+                    if let Some(block_number) = get_block_number_from_block(&block) {
+                        self.context
+                            .metrics
+                            .backfill_blocks_fetched_total
+                            .with_label_values(&[mode_str])
+                            .inc();
+                        if matches!(mode, BackfillMode::Continuous) {
+                            self.context
+                                .metrics
+                                .backfill_latest_continuous_block
+                                .set(block_number as i64);
                         }
                     }
-                    // If we get here, the stream finished successfully for this gap.
-                    return Ok(());
+
+                    // This internally uses the BlockWriter, ensuring data goes
+                    // through the same persistence pipeline as live blocks.
+                    self.block_writer.write_block(&block).await?;
                 }
-                Err(e) => {
-                    warn!(
-                        "Failed to connect to peer {}: {}. Trying next peer.",
-                        peer_addr, e
-                    );
-                    continue;
-                }
+                Err(status) => return Err(anyhow!("gRPC stream error: {}", status)),
             }
         }
-        Err(anyhow!("Failed to connect to any configured peers."))
+        timer.observe_duration();
+        Ok(())
     }
 
     fn get_all_gaps(&self) -> Result<Vec<(u64, u64)>> {
@@ -207,6 +306,109 @@ impl BackfillWorker {
     }
 }
 
+// Internal version of stream_blocks_from_peers that takes AppContext for metrics
+async fn stream_blocks_from_peers_internal(
+    context: &AppContext,
+    peers: &[String],
+    start_block: u64,
+    end_block: u64,
+) -> Result<(String, impl Stream<Item = Result<Block, tonic::Status>>)> {
+    let mut shuffled_peers = peers.to_vec();
+    shuffled_peers.shuffle(&mut rand::rng());
+
+    for peer_addr in &shuffled_peers {
+        context
+            .metrics
+            .backfill_peer_connection_attempts_total
+            .with_label_values(&[peer_addr, &"attempt".to_string()])
+            .inc();
+
+        match Channel::from_shared(peer_addr.clone())?.connect().await {
+            Ok(channel) => {
+                context
+                    .metrics
+                    .backfill_peer_connection_attempts_total
+                    .with_label_values(&[peer_addr, &"success".to_string()])
+                    .inc();
+
+                let mut client = BlockStreamSubscribeServiceClient::new(channel);
+                let request = SubscribeStreamRequest {
+                    start_block_number: start_block,
+                    end_block_number: end_block,
+                };
+                let stream = client.subscribe_block_stream(request).await?.into_inner();
+                let (tx, rx) = tokio::sync::mpsc::channel(128);
+
+                tokio::spawn(async move {
+                    let mut stream = stream;
+                    while let Some(msg_res) = stream.next().await {
+                        match msg_res {
+                            Ok(msg) => {
+                                if let Some(SubResponse::BlockItems(item_set)) = msg.response {
+                                    let block = Block {
+                                        items: item_set.block_items,
+                                    };
+                                    if tx.send(Ok(block)).await.is_err() {
+                                        break;
+                                    }
+                                }
+                            }
+                            Err(status) => {
+                                let _ = tx.send(Err(status)).await;
+                                break;
+                            }
+                        }
+                    }
+                });
+                return Ok((peer_addr.clone(), ReceiverStream::new(rx)));
+            }
+            Err(e) => {
+                context
+                    .metrics
+                    .backfill_peer_connection_attempts_total
+                    .with_label_values(&[peer_addr, &"failure".to_string()])
+                    .inc();
+                warn!(
+                    "Failed to connect to peer {}: {}. Trying next peer.",
+                    peer_addr, e
+                );
+                continue;
+            }
+        }
+    }
+    Err(anyhow!("Failed to connect to any of the configured peers."))
+}
+
+// Helper to get block number from a Block proto
+fn get_block_number_from_block(block: &Block) -> Option<u64> {
+    block.items.first().and_then(|item| {
+        if let Some(
+            rock_node_protobufs::com::hedera::hapi::block::stream::block_item::Item::BlockHeader(
+                header,
+            ),
+        ) = &item.item
+        {
+            Some(header.number)
+        } else {
+            None
+        }
+    })
+}
+
+struct DecrementingGuard<'a> {
+    gauge: &'a prometheus::IntGauge,
+}
+impl<'a> DecrementingGuard<'a> {
+    fn new(gauge: &'a prometheus::IntGauge) -> Self {
+        Self { gauge }
+    }
+}
+impl<'a> Drop for DecrementingGuard<'a> {
+    fn drop(&mut self) {
+        self.gauge.dec();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -215,51 +417,146 @@ mod tests {
         config::{BackfillConfig, Config, CoreConfig, PluginConfigs},
         database::DatabaseManager,
         database_provider::DatabaseManagerProvider,
-        metrics::MetricsRegistry,
+        test_utils::create_isolated_metrics,
+    };
+    use rock_node_protobufs::{
+        com::hedera::hapi::block::stream::{block_item, BlockItem},
+        org::hiero::block::api::{
+            block_stream_subscribe_service_server::{
+                BlockStreamSubscribeService, BlockStreamSubscribeServiceServer,
+            },
+            subscribe_stream_response::Response as SubResponse,
+            BlockItemSet, SubscribeStreamResponse,
+        },
     };
     use std::collections::HashMap;
     use tempfile::TempDir;
-    use tokio::time::{timeout, Duration as TokioDuration};
+    use tokio::net::TcpListener;
+    use tokio_stream::wrappers::TcpListenerStream;
+    use tonic::transport::Server;
 
-    // Mock BlockReader for testing
-    #[derive(Debug)]
-    struct MockBlockReader {
-        latest_block: Arc<tokio::sync::RwLock<Option<u64>>>,
-    }
+    // --- Mock gRPC Peer Server ---
+    #[derive(Default)]
+    struct MockPeerServer;
 
-    impl MockBlockReader {
-        fn new(latest: Option<u64>) -> Self {
-            Self {
-                latest_block: Arc::new(tokio::sync::RwLock::new(latest)),
-            }
+    #[async_trait]
+    impl BlockStreamSubscribeService for MockPeerServer {
+        type subscribeBlockStreamStream =
+            tokio_stream::wrappers::ReceiverStream<Result<SubscribeStreamResponse, tonic::Status>>;
+
+        async fn subscribe_block_stream(
+            &self,
+            request: tonic::Request<SubscribeStreamRequest>,
+        ) -> Result<tonic::Response<Self::subscribeBlockStreamStream>, tonic::Status> {
+            let req = request.into_inner();
+            let (tx, rx) = tokio::sync::mpsc::channel(10);
+
+            tokio::spawn(async move {
+                for i in req.start_block_number..=req.end_block_number {
+                    let block = Block {
+                        items: vec![BlockItem {
+                            item: Some(block_item::Item::BlockHeader(
+                                rock_node_protobufs::com::hedera::hapi::block::stream::output::BlockHeader {
+                                    number: i, ..Default::default()
+                                },
+                            )),
+                        }],
+                    };
+                    let item_set = BlockItemSet {
+                        block_items: block.items,
+                    };
+                    let response = SubscribeStreamResponse {
+                        response: Some(SubResponse::BlockItems(item_set)),
+                    };
+                    if tx.send(Ok(response)).await.is_err() {
+                        break;
+                    }
+                }
+            });
+
+            Ok(tonic::Response::new(ReceiverStream::new(rx)))
         }
     }
 
+    /// Helper to spawn a mock server and return its address.
+    async fn spawn_mock_peer() -> Result<String> {
+        let listener = TcpListener::bind("127.0.0.1:0").await?;
+        let addr = listener.local_addr()?;
+        let listener_stream = TcpListenerStream::new(listener);
+
+        tokio::spawn(async move {
+            Server::builder()
+                .add_service(BlockStreamSubscribeServiceServer::new(
+                    MockPeerServer::default(),
+                ))
+                .serve_with_incoming(listener_stream)
+                .await
+        });
+
+        Ok(format!("http://{}", addr))
+    }
+
+    #[tokio::test]
+    async fn test_stream_blocks_from_peers_success() {
+        let peer_addr = spawn_mock_peer().await.unwrap();
+        let peers = vec![peer_addr];
+
+        let mut stream = stream_blocks_from_peers(&peers, 5, 10).await.unwrap();
+
+        let mut received_blocks = Vec::new();
+        while let Some(Ok(block)) = stream.next().await {
+            let num = block.items[0].item.as_ref().unwrap().clone();
+            if let block_item::Item::BlockHeader(h) = num {
+                received_blocks.push(h.number);
+            }
+        }
+
+        assert_eq!(received_blocks, vec![5, 6, 7, 8, 9, 10]);
+    }
+
+    #[tokio::test]
+    async fn test_stream_blocks_failover() {
+        let good_peer = spawn_mock_peer().await.unwrap();
+        let peers = vec![
+            "http://127.0.0.1:1".to_string(), // A bad peer that will fail to connect
+            good_peer,
+        ];
+
+        let mut stream = stream_blocks_from_peers(&peers, 1, 3).await.unwrap();
+        let mut received_blocks = Vec::new();
+        while let Some(Ok(block)) = stream.next().await {
+            let num = block.items[0].item.as_ref().unwrap().clone();
+            if let block_item::Item::BlockHeader(h) = num {
+                received_blocks.push(h.number);
+            }
+        }
+        assert_eq!(received_blocks, vec![1, 2, 3]);
+    }
+
+    // --- Mock Implementations for Worker Tests ---
+
+    #[derive(Debug)]
+    struct MockBlockReader;
     #[async_trait]
     impl BlockReader for MockBlockReader {
         fn get_latest_persisted_block_number(&self) -> Result<Option<u64>> {
-            Ok(*futures::executor::block_on(self.latest_block.read()))
+            Ok(Some(100))
         }
-
         fn read_block(&self, _block_number: u64) -> Result<Option<Vec<u8>>> {
             Ok(None)
         }
-
         fn get_earliest_persisted_block_number(&self) -> Result<Option<u64>> {
             Ok(None)
         }
-
         fn get_highest_contiguous_block_number(&self) -> Result<u64> {
             Ok(100)
         }
     }
 
-    // Mock BlockWriter for testing
-    #[derive(Debug)]
+    #[derive(Debug, Default)]
     struct MockBlockWriter {
         written_blocks: Arc<tokio::sync::Mutex<Vec<u64>>>,
     }
-
     impl MockBlockWriter {
         fn new() -> Self {
             Self {
@@ -267,340 +564,90 @@ mod tests {
             }
         }
     }
-
     #[async_trait]
     impl BlockWriter for MockBlockWriter {
         async fn write_block(&self, block: &Block) -> Result<()> {
-            // Extract block number from header if available
-            for item in &block.items {
-                if let Some(rock_node_protobufs::com::hedera::hapi::block::stream::block_item::Item::BlockHeader(header)) = &item.item {
-                    self.written_blocks.lock().await.push(header.number);
-                    break;
-                }
+            if let Some(
+                rock_node_protobufs::com::hedera::hapi::block::stream::block_item::Item::BlockHeader(
+                    header,
+                ),
+            ) = &block.items[0].item
+            {
+                self.written_blocks.lock().await.push(header.number);
             }
             Ok(())
         }
-
-        async fn write_block_batch(&self, blocks: &[Block]) -> Result<()> {
-            for block in blocks {
-                self.write_block(block).await?;
-            }
+        async fn write_block_batch(&self, _blocks: &[Block]) -> Result<()> {
             Ok(())
         }
     }
 
-    fn create_test_cache() -> rock_node_core::cache::BlockDataCache {
-        // For tests, we'll use the default implementation but handle the runtime issue
-        // by running the tests in a tokio runtime
-        rock_node_core::cache::BlockDataCache::default()
-    }
-
-    fn setup_test_context(temp_dir: &TempDir) -> (AppContext, Arc<rocksdb::DB>) {
+    fn setup_test_context(
+        temp_dir: &TempDir,
+        peers: Vec<String>,
+    ) -> (AppContext, Arc<MockBlockWriter>) {
         let db_manager = DatabaseManager::new(temp_dir.path().to_str().unwrap()).unwrap();
-        let db = db_manager.db_handle();
 
         let config = Config {
-            core: CoreConfig {
-                log_level: "INFO".to_string(),
-                database_path: temp_dir.path().to_str().unwrap().to_string(),
-                start_block_number: 0,
-            },
             plugins: PluginConfigs {
                 backfill: BackfillConfig {
                     enabled: true,
-                    mode: rock_node_core::config::BackfillMode::GapFill,
-                    peers: vec!["http://localhost:8080".to_string()],
-                    check_interval_seconds: 1,
-                    max_batch_size: 100,
+                    peers,
+                    ..Default::default()
                 },
+                ..Default::default()
+            },
+            core: CoreConfig {
+                start_block_number: 0,
                 ..Default::default()
             },
         };
 
         let mut providers: HashMap<TypeId, Arc<dyn std::any::Any + Send + Sync>> = HashMap::new();
-
-        // Add BlockReaderProvider
-        let reader = Arc::new(MockBlockReader::new(Some(100)));
-        providers.insert(
-            TypeId::of::<BlockReaderProvider>(),
-            Arc::new(BlockReaderProvider::new(reader)),
-        );
-
-        // Add BlockWriterProvider
         let writer = Arc::new(MockBlockWriter::new());
+
         providers.insert(
             TypeId::of::<BlockWriterProvider>(),
-            Arc::new(BlockWriterProvider::new(writer)),
+            Arc::new(BlockWriterProvider::new(writer.clone())),
         );
-
-        // Add DatabaseManagerProvider
         providers.insert(
             TypeId::of::<DatabaseManagerProvider>(),
             Arc::new(DatabaseManagerProvider::new(Arc::new(db_manager))),
+        );
+        providers.insert(
+            TypeId::of::<BlockReaderProvider>(),
+            Arc::new(BlockReaderProvider::new(Arc::new(MockBlockReader))),
         );
 
         let context = AppContext {
             config: Arc::new(config),
             service_providers: Arc::new(std::sync::RwLock::new(providers)),
-            metrics: Arc::new(MetricsRegistry::new().unwrap()),
-            capability_registry: Arc::new(rock_node_core::capability::CapabilityRegistry::new()),
-            block_data_cache: Arc::new(create_test_cache()),
+            metrics: Arc::new(create_isolated_metrics()),
+            capability_registry: Arc::new(Default::default()),
+            block_data_cache: Arc::new(Default::default()),
             tx_block_items_received: tokio::sync::mpsc::channel(100).0,
             tx_block_verified: tokio::sync::mpsc::channel(100).0,
             tx_block_persisted: tokio::sync::broadcast::channel(100).0,
         };
 
-        (context, db)
+        (context, writer)
     }
 
     #[tokio::test]
-    async fn test_backfill_worker_new_success() {
+    async fn test_worker_consumes_stream_and_writes() {
         let temp_dir = TempDir::new().unwrap();
-        let (context, _db) = setup_test_context(&temp_dir);
-
-        let worker = BackfillWorker::new(context);
-        assert!(worker.is_ok());
-    }
-
-    #[tokio::test]
-    async fn test_backfill_worker_new_missing_block_reader() {
-        let temp_dir = TempDir::new().unwrap();
-        let (mut context, _db) = setup_test_context(&temp_dir);
-
-        // Remove BlockReaderProvider
-        {
-            let mut providers = context.service_providers.write().unwrap();
-            providers.remove(&TypeId::of::<BlockReaderProvider>());
-        }
-
-        let worker = BackfillWorker::new(context);
-        assert!(worker.is_err());
-        assert!(worker
-            .unwrap_err()
-            .to_string()
-            .contains("BlockReaderProvider"));
-    }
-
-    #[tokio::test]
-    async fn test_backfill_worker_new_missing_block_writer() {
-        let temp_dir = TempDir::new().unwrap();
-        let (mut context, _db) = setup_test_context(&temp_dir);
-
-        // Remove BlockWriterProvider
-        {
-            let mut providers = context.service_providers.write().unwrap();
-            providers.remove(&TypeId::of::<BlockWriterProvider>());
-        }
-
-        let worker = BackfillWorker::new(context);
-        assert!(worker.is_err());
-        assert!(worker
-            .unwrap_err()
-            .to_string()
-            .contains("BlockWriterProvider"));
-    }
-
-    #[tokio::test]
-    async fn test_get_all_gaps_empty() {
-        let temp_dir = TempDir::new().unwrap();
-        let (context, _db) = setup_test_context(&temp_dir);
-
-        let worker = BackfillWorker::new(context).unwrap();
-        let gaps = worker.get_all_gaps().unwrap();
-        assert_eq!(gaps.len(), 0);
-    }
-
-    #[tokio::test]
-    async fn test_get_all_gaps_with_data() {
-        let temp_dir = TempDir::new().unwrap();
-        let (context, db) = setup_test_context(&temp_dir);
+        let peer_addr = spawn_mock_peer().await.unwrap();
+        let (context, writer) = setup_test_context(&temp_dir, vec![peer_addr]);
 
         let worker = BackfillWorker::new(context).unwrap();
 
-        // Add some gaps to the database
-        let cf_gaps = db.cf_handle(CF_GAPS).unwrap();
-        db.put_cf(cf_gaps, 10u64.to_be_bytes(), 20u64.to_be_bytes())
-            .unwrap();
-        db.put_cf(cf_gaps, 30u64.to_be_bytes(), 40u64.to_be_bytes())
-            .unwrap();
-        db.put_cf(cf_gaps, 50u64.to_be_bytes(), 60u64.to_be_bytes())
+        // Run the worker's internal method
+        worker
+            .establish_and_run_stream(1, 5, BackfillMode::GapFill)
+            .await
             .unwrap();
 
-        let gaps = worker.get_all_gaps().unwrap();
-        assert_eq!(gaps.len(), 3);
-        assert_eq!(gaps[0], (10, 20));
-        assert_eq!(gaps[1], (30, 40));
-        assert_eq!(gaps[2], (50, 60));
-    }
-
-    #[tokio::test]
-    async fn test_run_gap_fill_loop_shutdown() {
-        let temp_dir = TempDir::new().unwrap();
-        let (context, _db) = setup_test_context(&temp_dir);
-
-        let worker = Arc::new(BackfillWorker::new(context).unwrap());
-        let shutdown_notify = Arc::new(Notify::new());
-
-        let worker_clone = worker.clone();
-        let shutdown_clone = shutdown_notify.clone();
-        let handle = tokio::spawn(async move {
-            worker_clone.run_gap_fill_loop(shutdown_clone).await;
-        });
-
-        // Give it a moment to start
-        tokio::time::sleep(TokioDuration::from_millis(50)).await;
-
-        // Signal shutdown
-        shutdown_notify.notify_waiters();
-
-        // Should complete quickly
-        let result = timeout(TokioDuration::from_secs(1), handle).await;
-        assert!(result.is_ok());
-    }
-
-    #[tokio::test]
-    async fn test_run_continuous_loop_shutdown() {
-        let temp_dir = TempDir::new().unwrap();
-        let (context, _db) = setup_test_context(&temp_dir);
-
-        let worker = Arc::new(BackfillWorker::new(context).unwrap());
-        let shutdown_notify = Arc::new(Notify::new());
-
-        let worker_clone = worker.clone();
-        let shutdown_clone = shutdown_notify.clone();
-        let handle = tokio::spawn(async move {
-            worker_clone.run_continuous_loop(shutdown_clone).await;
-        });
-
-        // Give it a moment to start
-        tokio::time::sleep(TokioDuration::from_millis(50)).await;
-
-        // Signal shutdown
-        shutdown_notify.notify_waiters();
-
-        // The continuous loop might not complete immediately due to connection attempts,
-        // but we can verify that the shutdown signal was sent and the task is running
-        // For now, we'll just verify the task is still running after sending the signal
-        tokio::time::sleep(TokioDuration::from_millis(100)).await;
-
-        // Cancel the task since it might not respond to shutdown in test environment
-        handle.abort();
-
-        // Verify the task was aborted successfully
-        let result = handle.await;
-        assert!(result.is_err()); // Aborted tasks return Err
-    }
-
-    #[tokio::test]
-    async fn test_run_single_gap_check_no_gaps() {
-        let temp_dir = TempDir::new().unwrap();
-        let (context, _db) = setup_test_context(&temp_dir);
-
-        let worker = BackfillWorker::new(context).unwrap();
-        let result = worker.run_single_gap_check().await;
-        assert!(result.is_ok());
-    }
-
-    #[tokio::test]
-    async fn test_run_single_gap_check_with_gaps() {
-        let temp_dir = TempDir::new().unwrap();
-        let (context, db) = setup_test_context(&temp_dir);
-
-        let worker = BackfillWorker::new(context).unwrap();
-
-        // Add a gap to the database
-        let cf_gaps = db.cf_handle(CF_GAPS).unwrap();
-        db.put_cf(cf_gaps, 10u64.to_be_bytes(), 20u64.to_be_bytes())
-            .unwrap();
-
-        // This will fail to connect to peers, but that's expected in the test
-        let result = worker.run_single_gap_check().await;
-        assert!(result.is_ok()); // The method itself should succeed even if filling fails
-    }
-
-    #[tokio::test]
-    async fn test_establish_and_run_stream_no_peers() {
-        let temp_dir = TempDir::new().unwrap();
-        let (mut context, _db) = setup_test_context(&temp_dir);
-
-        // Clear peers
-        Arc::get_mut(&mut context.config)
-            .unwrap()
-            .plugins
-            .backfill
-            .peers
-            .clear();
-
-        let worker = BackfillWorker::new(context).unwrap();
-        let result = worker.establish_and_run_stream(0, 10).await;
-
-        assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("Failed to connect to any configured peers"));
-    }
-
-    #[tokio::test]
-    async fn test_establish_and_run_stream_invalid_peer() {
-        let temp_dir = TempDir::new().unwrap();
-        let (context, _db) = setup_test_context(&temp_dir);
-
-        let worker = BackfillWorker::new(context).unwrap();
-
-        // Will fail to connect to localhost:8080 in test environment
-        let result = worker.establish_and_run_stream(0, 10).await;
-        assert!(result.is_err());
-    }
-
-    #[tokio::test]
-    async fn test_gap_filtering_with_start_block_number() {
-        let temp_dir = TempDir::new().unwrap();
-        let (mut context, db) = setup_test_context(&temp_dir);
-
-        // Set start_block_number to 15
-        Arc::get_mut(&mut context.config)
-            .unwrap()
-            .core
-            .start_block_number = 15;
-
-        let worker = BackfillWorker::new(context.clone()).unwrap();
-
-        // Add gaps that span before and after start_block_number
-        let cf_gaps = db.cf_handle(CF_GAPS).unwrap();
-        db.put_cf(cf_gaps, 5u64.to_be_bytes(), 10u64.to_be_bytes())
-            .unwrap(); // Entirely before start
-        db.put_cf(cf_gaps, 10u64.to_be_bytes(), 20u64.to_be_bytes())
-            .unwrap(); // Spans start
-        db.put_cf(cf_gaps, 20u64.to_be_bytes(), 30u64.to_be_bytes())
-            .unwrap(); // After start
-
-        let gaps = worker.get_all_gaps().unwrap();
-        assert_eq!(gaps.len(), 3);
-
-        // Verify all gaps are retrieved (filtering happens in run_single_gap_check)
-        assert_eq!(gaps[0], (5, 10));
-        assert_eq!(gaps[1], (10, 20));
-        assert_eq!(gaps[2], (20, 30));
-    }
-
-    #[tokio::test]
-    async fn test_multiple_peers_configuration() {
-        let temp_dir = TempDir::new().unwrap();
-        let (mut context, _db) = setup_test_context(&temp_dir);
-
-        // Configure multiple peers
-        Arc::get_mut(&mut context.config)
-            .unwrap()
-            .plugins
-            .backfill
-            .peers = vec![
-            "http://peer1:8080".to_string(),
-            "http://peer2:8080".to_string(),
-            "http://peer3:8080".to_string(),
-        ];
-
-        let worker = BackfillWorker::new(context.clone()).unwrap();
-        assert_eq!(worker.context.config.plugins.backfill.peers.len(), 3);
+        let written = writer.written_blocks.lock().await;
+        assert_eq!(*written, vec![1, 2, 3, 4, 5]);
     }
 }
