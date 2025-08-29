@@ -7,3 +7,4 @@ pub mod query_suites;
 pub mod resiliency_suite;
 pub mod server_status_suite;
 pub mod subscription_suite;
+pub mod backfill_resilience_suite;

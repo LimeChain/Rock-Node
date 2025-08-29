@@ -1,11 +1,11 @@
-use std::time::Duration;
-
 use crate::common::{publish_blocks, TestContext};
 use anyhow::Result;
 use rock_node_protobufs::org::hiero::block::api::{
-    block_request::BlockSpecifier, block_response, BlockRequest,
+    block_request::BlockSpecifier, block_response, BlockRequest, ServerStatusRequest,
 };
 use serial_test::serial;
+use std::time::Duration;
+use testcontainers::core::Host;
 
 /// Test Case: GapFill Mode
 /// Objective: Verify that a node with a gap in its block history can fill it from a peer.
@@ -19,7 +19,7 @@ async fn test_gap_fill_mode_successfully_fills_gap() -> Result<()> {
     let subscriber_port = source_ctx.subscriber_client_port().await?;
     // Use host.docker.internal for macOS and host-gateway for Linux
     let peer_address = if cfg!(target_os = "macos") {
-        format!("http://host.docker.internal:{}", subscriber_port)
+        format!("[http://host.docker.internal](http://host.docker.internal):{}", subscriber_port)
     } else {
         format!("http://host-gateway:{}", subscriber_port)
     };
@@ -129,7 +129,7 @@ async fn test_continuous_mode_successfully_catches_up_and_streams() -> Result<()
     let subscriber_port = source_ctx.subscriber_client_port().await?;
     // Use host.docker.internal for macOS and host-gateway for Linux
     let peer_address = if cfg!(target_os = "macos") {
-        format!("http://host.docker.internal:{}", subscriber_port)
+        format!("[http://host.docker.internal](http://host.docker.internal):{}", subscriber_port)
     } else {
         format!("http://host-gateway:{}", subscriber_port)
     };
