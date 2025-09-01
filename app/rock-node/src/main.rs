@@ -25,7 +25,8 @@ use std::{
     time::Duration,
 };
 use tokio::sync::{broadcast, mpsc, watch};
-use tracing::{error, info};
+use tonic::transport::server::Router;
+use tracing::{error, info, warn};
 
 /// Reports the startup status of all plugins with detailed information.
 pub fn report_plugin_startup_status(plugins: &[Box<dyn Plugin>]) {
@@ -180,18 +181,15 @@ async fn main() -> Result<()> {
     // --- Step 1 & 2: Parse Args, Load Config, Initialize Logging ---
     let args = Args::parse();
     validate_config_file_exists(&args.config_path)?;
-    dotenv().ok();
-
+    dotenvy::dotenv().ok();
     let settings = config_rs::Config::builder()
         .add_source(config_rs::File::from(args.config_path.clone()))
         .add_source(config_rs::Environment::with_prefix("ROCK_NODE").separator("__"))
         .build()?;
-
     let merged_config_value: toml::Value = settings.clone().try_deserialize()?;
     let config: RockConfig = settings.try_deserialize()?;
     let config = Arc::new(config);
     let default_log_level = &config.core.log_level;
-
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::from_default_env()
@@ -230,7 +228,6 @@ async fn main() -> Result<()> {
     let (tx_items, rx_items) = mpsc::channel::<events::BlockItemsReceived>(100);
     let (tx_verified, rx_verified) = mpsc::channel::<events::BlockVerified>(100);
     let (tx_persisted, _) = broadcast::channel::<events::BlockPersisted>(100);
-    
     info!("Building application context...");
     let app_context = AppContext {
         config: config.clone(),
@@ -280,28 +277,42 @@ async fn main() -> Result<()> {
     let grpc_listen_address = format!("{}:{}", core_config.grpc_address, core_config.grpc_port);
     let grpc_socket_addr = grpc_listen_address.parse()?;
 
-    let mut server_builder = tonic::transport::Server::builder();
-    let mut services_added = false;
+    // Collect all routers from plugins
+    let mut plugin_routers = Vec::new();
+    let mut plugins_with_services = Vec::new();
 
     info!("Collecting gRPC services from enabled plugins...");
     for plugin in &mut plugins {
-        if let Some(router) = plugin.take_grpc_router() {
-            info!("✔️  Adding services from plugin: {}", plugin.name());
-            server_builder = server_builder.add_router(router);
-            services_added = true;
+        if let Some(plugin_router) = plugin.take_grpc_router() {
+            info!("✔️  Found gRPC services in plugin: {}", plugin.name());
+            plugin_routers.push(plugin_router);
+            plugins_with_services.push(plugin.name().to_string());
         }
     }
 
-    if services_added {
+    if !plugin_routers.is_empty() {
+        info!(
+            "Found {} plugins with gRPC services: {:?}",
+            plugin_routers.len(),
+            plugins_with_services
+        );
+
+        if plugin_routers.len() > 1 {
+            info!("⚠️  WARNING: Multiple plugins have gRPC services, but only the first one ({}) will be served!", plugins_with_services[0]);
+            info!(
+                "   Other plugins with services: {:?}",
+                &plugins_with_services[1..]
+            );
+            info!("   This is a known limitation due to tonic's router merging constraints.");
+            info!("   To access all services, consider enabling plugins individually or wait for future improvements.");
+        }
+
+        // For now, serve only the first router (temporary limitation)
+        let server_builder = plugin_routers.into_iter().next().unwrap();
+
         tokio::spawn(async move {
             info!("Unified gRPC server listening on {}", grpc_socket_addr);
-            if let Err(e) = server_builder
-                .serve_with_shutdown(grpc_socket_addr, async move {
-                    grpc_shutdown_rx.changed().await.ok();
-                    info!("Gracefully shutting down unified gRPC server...");
-                })
-                .await
-            {
+            if let Err(e) = server_builder.serve(grpc_socket_addr).await {
                 error!("Unified gRPC server failed: {}", e);
             }
         });

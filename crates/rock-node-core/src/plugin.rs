@@ -13,7 +13,7 @@ pub trait Plugin: Send + Sync {
     /// Called at startup to initialize the plugin.
     /// The plugin can get shared facilities from the AppContext and
     /// register its own capabilities or providers.
-    /// If the plugin provides gRPC services, it should prepare its router here.
+    /// If the plugin provides gRPC services, it should prepare its services here.
     fn initialize(&mut self, context: AppContext) -> Result<()>;
 
     /// Called after all plugins are initialized.

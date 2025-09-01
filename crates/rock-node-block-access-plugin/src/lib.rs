@@ -42,10 +42,9 @@ impl Plugin for BlockAccessPlugin {
         }
 
         let block_reader = {
-            let providers = context
-                .service_providers
-                .read()
-                .map_err(|_| CoreError::PluginInitialization("Failed to lock providers".to_string()))?;
+            let providers = context.service_providers.read().map_err(|_| {
+                CoreError::PluginInitialization("Failed to lock providers".to_string())
+            })?;
             providers
                 .get(&TypeId::of::<BlockReaderProvider>())
                 .and_then(|p| p.downcast_ref::<BlockReaderProvider>())

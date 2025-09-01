@@ -26,6 +26,7 @@ use std::{
     },
 };
 use tokio::sync::watch;
+use tonic::transport::server::Router;
 use tracing::{error, info, warn};
 
 /// The main plugin struct that registers and runs the gRPC query services.
@@ -34,6 +35,7 @@ pub struct QueryPlugin {
     context: Option<AppContext>,
     running: Arc<AtomicBool>,
     shutdown_tx: Option<watch::Sender<()>>,
+    router: Option<Router>,
 }
 
 impl QueryPlugin {
@@ -85,15 +87,6 @@ impl Plugin for QueryPlugin {
                 })?
         };
 
-        let listen_address = format!("{}:{}", config.grpc_address, config.grpc_port);
-        let socket_addr = listen_address.parse().map_err(|e| {
-            anyhow::anyhow!(
-                "Failed to parse gRPC listen address '{}': {}",
-                listen_address,
-                e
-            )
-        })?;
-
         let crypto_service = CryptoServiceImpl::new(state_reader.clone());
         let file_service = FileServiceImpl::new(state_reader.clone());
         let consensus_service = ConsensusServiceImpl::new(state_reader.clone());
@@ -110,35 +103,17 @@ impl Plugin for QueryPlugin {
         let token_service_server = TokenServiceServer::new(token_service);
         let smart_contract_service_server = SmartContractServiceServer::new(smart_contract_service);
 
-        let (shutdown_tx, mut shutdown_rx) = watch::channel(());
-        self.shutdown_tx = Some(shutdown_tx);
-        let running_clone = self.running.clone();
+        // Create router with all services
+        let router = tonic::transport::Server::builder()
+            .add_service(crypto_service_server)
+            .add_service(file_service_server)
+            .add_service(consensus_service_server)
+            .add_service(network_service_server)
+            .add_service(schedule_service_server)
+            .add_service(token_service_server)
+            .add_service(smart_contract_service_server);
 
-        self.running.store(true, Ordering::SeqCst);
-        tokio::spawn(async move {
-            info!(
-                "QueryPlugin: CryptoService gRPC listening on {}",
-                socket_addr
-            );
-
-            let server_future = tonic::transport::Server::builder()
-                .add_service(crypto_service_server)
-                .add_service(file_service_server)
-                .add_service(consensus_service_server)
-                .add_service(network_service_server)
-                .add_service(schedule_service_server)
-                .add_service(token_service_server)
-                .add_service(smart_contract_service_server)
-                .serve_with_shutdown(socket_addr, async move {
-                    shutdown_rx.changed().await.ok();
-                    info!("Gracefully shutting down Query gRPC server...");
-                });
-
-            if let Err(e) = server_future.await {
-                error!("QueryPlugin gRPC server failed: {}", e);
-            }
-            running_clone.store(false, Ordering::SeqCst);
-        });
+        self.router = Some(router);
 
         Ok(())
     }

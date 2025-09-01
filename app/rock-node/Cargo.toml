@@ -22,6 +22,9 @@ rock-node-backfill-plugin = { path = "../../crates/rock-node-backfill-plugin" }
 # The async runtime for our application
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal"] }
 
+# For the gRPC server implementation
+tonic = "0.13.1"
+
 # For structured logging
 tracing = "0.1"
 

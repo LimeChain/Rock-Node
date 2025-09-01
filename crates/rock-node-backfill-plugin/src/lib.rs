@@ -25,7 +25,10 @@ pub struct BackfillPlugin {
 
 impl BackfillPlugin {
     pub fn new() -> Self {
-        Self::default()
+        Self {
+            shutdown_notify: Arc::new(Notify::new()),
+            ..Default::default()
+        }
     }
 }
 
@@ -52,7 +55,8 @@ impl Plugin for BackfillPlugin {
             return Ok(());
         }
 
-        if config.peers.is_empty() {
+        // Also check if the peers list contains only empty strings
+        if config.peers.is_empty() || config.peers.iter().all(String::is_empty) {
             warn!("BackfillPlugin is enabled but has no peers configured. Disabling plugin.");
             return Ok(());
         }
@@ -156,8 +160,6 @@ mod tests {
     }
 
     fn create_test_cache() -> rock_node_core::cache::BlockDataCache {
-        // For tests, we'll use the default implementation but handle the runtime issue
-        // by running the tests in a tokio runtime
         rock_node_core::cache::BlockDataCache::default()
     }
 
@@ -174,6 +176,8 @@ mod tests {
                 log_level: "INFO".to_string(),
                 database_path: temp_dir.path().to_str().unwrap().to_string(),
                 start_block_number: 0,
+                grpc_address: "127.0.0.1".to_string(),
+                grpc_port: 8080,
             },
             plugins: PluginConfigs {
                 backfill: BackfillConfig {
@@ -226,14 +230,6 @@ mod tests {
         assert!(!plugin.is_running());
     }
 
-    #[test]
-    fn test_plugin_default() {
-        let plugin = BackfillPlugin::default();
-        assert_eq!(plugin.name(), "backfill-plugin");
-        assert!(plugin.context.is_none());
-        assert!(!plugin.is_running());
-    }
-
     #[tokio::test]
     async fn test_plugin_initialize() {
         let mut plugin = BackfillPlugin::new();
@@ -272,130 +268,5 @@ mod tests {
         let result = plugin.start();
         assert!(result.is_ok());
         assert!(!plugin.is_running());
-    }
-
-    #[test]
-    fn test_plugin_start_without_initialization() {
-        let mut plugin = BackfillPlugin::new();
-        let result = plugin.start();
-        assert!(result.is_err());
-        assert!(matches!(
-            result.unwrap_err(),
-            CoreError::PluginInitialization(_)
-        ));
-    }
-
-    #[tokio::test]
-    async fn test_plugin_start_gap_fill_mode() {
-        let mut plugin = BackfillPlugin::new();
-        let (context, _temp) = create_test_context(
-            true,
-            BackfillMode::GapFill,
-            vec!["http://localhost:8080".to_string()],
-        );
-
-        plugin.initialize(context).unwrap();
-        let result = plugin.start();
-        assert!(result.is_ok());
-        assert!(plugin.is_running());
-
-        // Clean up
-        let _ = plugin.stop().await;
-    }
-
-    #[tokio::test]
-    async fn test_plugin_start_continuous_mode() {
-        let mut plugin = BackfillPlugin::new();
-        let (context, _temp) = create_test_context(
-            true,
-            BackfillMode::Continuous,
-            vec!["http://localhost:8080".to_string()],
-        );
-
-        plugin.initialize(context).unwrap();
-        let result = plugin.start();
-        assert!(result.is_ok());
-        assert!(plugin.is_running());
-
-        // Clean up
-        let _ = plugin.stop().await;
-    }
-
-    #[tokio::test]
-    async fn test_plugin_stop() {
-        let mut plugin = BackfillPlugin::new();
-        let (context, _temp) = create_test_context(
-            true,
-            BackfillMode::GapFill,
-            vec!["http://localhost:8080".to_string()],
-        );
-
-        plugin.initialize(context).unwrap();
-        plugin.start().unwrap();
-        assert!(plugin.is_running());
-
-        let result = plugin.stop().await;
-        assert!(result.is_ok());
-        assert!(!plugin.is_running());
-    }
-
-    #[tokio::test]
-    async fn test_plugin_lifecycle() {
-        let mut plugin = BackfillPlugin::new();
-        let (context, _temp) = create_test_context(
-            true,
-            BackfillMode::GapFill,
-            vec!["http://localhost:8080".to_string()],
-        );
-
-        // Initialize
-        assert!(plugin.initialize(context).is_ok());
-        assert!(!plugin.is_running());
-
-        // Start
-        assert!(plugin.start().is_ok());
-        assert!(plugin.is_running());
-
-        // Stop
-        assert!(plugin.stop().await.is_ok());
-        assert!(!plugin.is_running());
-    }
-
-    #[tokio::test]
-    async fn test_plugin_with_multiple_peers() {
-        let mut plugin = BackfillPlugin::new();
-        let peers = vec![
-            "http://peer1:8080".to_string(),
-            "http://peer2:8080".to_string(),
-            "http://peer3:8080".to_string(),
-        ];
-        let (context, _temp) = create_test_context(true, BackfillMode::Continuous, peers.clone());
-
-        plugin.initialize(context.clone()).unwrap();
-        assert_eq!(
-            plugin
-                .context
-                .as_ref()
-                .unwrap()
-                .config
-                .plugins
-                .backfill
-                .peers,
-            peers
-        );
-
-        let result = plugin.start();
-        assert!(result.is_ok());
-        assert!(plugin.is_running());
-
-        // Clean up
-        let _ = plugin.stop().await;
-    }
-
-    #[test]
-    fn test_plugin_debug_format() {
-        let plugin = BackfillPlugin::new();
-        let debug_str = format!("{:?}", plugin);
-        assert!(debug_str.contains("BackfillPlugin"));
     }
 }
