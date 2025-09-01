@@ -622,29 +622,16 @@ impl<'a> Drop for DecrementingGuard<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use async_trait::async_trait;
-    use rock_node_core::{
-        config::{BackfillConfig, Config, CoreConfig, PluginConfigs},
-        database::DatabaseManager,
-        database_provider::DatabaseManagerProvider,
-        test_utils::create_isolated_metrics,
-    };
+
     use rock_node_protobufs::{
         com::hedera::hapi::block::stream::{block_item, BlockItem},
         org::hiero::block::api::{
-            block_stream_subscribe_service_server::{
-                BlockStreamSubscribeService, BlockStreamSubscribeServiceServer,
-            },
-            subscribe_stream_response::Response as SubResponse,
-            BlockItemSet, SubscribeStreamResponse,
+            block_stream_subscribe_service_server::BlockStreamSubscribeService,
+            subscribe_stream_response::Response as SubResponse, BlockItemSet,
+            SubscribeStreamResponse,
         },
     };
-    use std::collections::HashMap;
     use std::sync::atomic::{AtomicUsize, Ordering};
-    use tempfile::TempDir;
-    use tokio::net::TcpListener;
-    use tokio_stream::wrappers::TcpListenerStream;
-    use tonic::transport::Server;
 
     #[derive(Clone, Default)]
     struct MockPeerServer {

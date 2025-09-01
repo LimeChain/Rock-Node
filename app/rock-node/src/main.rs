@@ -25,7 +25,7 @@ use std::{
     time::Duration,
 };
 use tokio::sync::{broadcast, mpsc, watch};
-use tonic::transport::server::Router;
+use tonic::{service::RoutesBuilder, transport::{server::Router, Server}};
 use tracing::{error, info, warn};
 
 /// Reports the startup status of all plugins with detailed information.
@@ -289,7 +289,7 @@ async fn main() -> Result<()> {
     }
 
     if any_service_found {
-        let routes = routes_builder.build().expect("Failed to build gRPC routes");
+        let routes = routes_builder.routes();
 
         tokio::spawn(async move {
             info!("Unified gRPC server listening on {}", grpc_socket_addr);

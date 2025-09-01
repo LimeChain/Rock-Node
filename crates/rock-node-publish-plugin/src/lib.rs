@@ -1,6 +1,9 @@
 use async_trait::async_trait;
 use rock_node_core::{
-    app_context::AppContext, error::Result, plugin::Plugin, BlockReaderProvider, Error as CoreError,
+    app_context::AppContext,
+    error::{Error as CoreError, Result as CoreResult},
+    plugin::Plugin,
+    BlockReaderProvider,
 };
 use rock_node_protobufs::org::hiero::block::api::{
     block_stream_publish_service_server::BlockStreamPublishServiceServer,
@@ -17,7 +20,7 @@ use std::{
     },
     time::Duration,
 };
-use tonic::transport::server::Router;
+use tonic::service::RoutesBuilder;
 use tracing::{info, warn};
 
 mod service;
@@ -26,10 +29,9 @@ mod state;
 
 #[derive(Debug, Default)]
 pub struct PublishPlugin {
-    context: Option<AppContext>, // Restored context
+    context: Option<AppContext>,
     running: Arc<AtomicBool>,
     pub shared_state: Option<Arc<SharedState>>,
-    router: Option<Router>,
 }
 
 impl PublishPlugin {
@@ -44,20 +46,21 @@ impl Plugin for PublishPlugin {
         "publish-plugin"
     }
 
-    fn initialize(&mut self, context: AppContext) -> Result<()> {
+    fn initialize(&mut self, context: AppContext) -> CoreResult<()> {
         info!("PublishPlugin initializing...");
         if !context.config.plugins.publish_service.enabled {
             info!("PublishPlugin is disabled.");
             return Ok(());
         }
 
-        self.context = Some(context.clone()); // Store the context
+        self.context = Some(context.clone());
         let shared_state = Arc::new(SharedState::new());
         self.shared_state = Some(shared_state.clone());
 
         let providers = context.service_providers.read().map_err(|e| {
             CoreError::PluginInitialization(format!("Failed to lock providers: {}", e))
         })?;
+
         if let Some(provider) = providers
             .get(&TypeId::of::<BlockReaderProvider>())
             .and_then(|p| p.downcast_ref::<BlockReaderProvider>())
@@ -72,18 +75,10 @@ impl Plugin for PublishPlugin {
             shared_state.set_latest_persisted_block(-1);
         }
 
-        let service = PublishServiceImpl {
-            context: context.clone(),
-            shared_state,
-        };
-        const MAX_MESSAGE_SIZE: usize = 1024 * 1024 * 32;
-        let server = BlockStreamPublishServiceServer::new(service)
-            .max_decoding_message_size(MAX_MESSAGE_SIZE);
-        self.router = Some(tonic::transport::Server::builder().add_service(server));
         Ok(())
     }
 
-    fn start(&mut self) -> Result<()> {
+    fn start(&mut self) -> CoreResult<()> {
         let context = self.context.as_ref().ok_or_else(|| {
             CoreError::PluginInitialization("PublishPlugin not initialized".to_string())
         })?;
@@ -114,15 +109,32 @@ impl Plugin for PublishPlugin {
         Ok(())
     }
 
-    fn take_grpc_router(&mut self) -> Option<Router> {
-        self.router.take()
+    fn register_grpc_services(&mut self, builder: &mut RoutesBuilder) -> CoreResult<bool> {
+        let context = self.context.as_ref().ok_or_else(|| {
+            CoreError::PluginInitialization("PublishPlugin not initialized".to_string())
+        })?;
+
+        if !context.config.plugins.publish_service.enabled {
+            return Ok(false);
+        }
+
+        let service = PublishServiceImpl {
+            context: context.clone(),
+            shared_state: self.shared_state.as_ref().unwrap().clone(),
+        };
+        const MAX_MESSAGE_SIZE: usize = 1024 * 1024 * 32;
+        let server = BlockStreamPublishServiceServer::new(service)
+            .max_decoding_message_size(MAX_MESSAGE_SIZE);
+
+        builder.add_service(server);
+        Ok(true)
     }
 
     fn is_running(&self) -> bool {
         self.running.load(Ordering::SeqCst)
     }
 
-    async fn stop(&mut self) -> Result<()> {
+    async fn stop(&mut self) -> CoreResult<()> {
         if !self.is_running() {
             return Ok(());
         }
