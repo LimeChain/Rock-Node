@@ -25,7 +25,10 @@ use std::{
     time::Duration,
 };
 use tokio::sync::{broadcast, mpsc, watch};
-use tonic::{service::RoutesBuilder, transport::{server::Router, Server}};
+use tonic::{
+    service::RoutesBuilder,
+    transport::{server::Router, Server},
+};
 use tracing::{error, info, warn};
 
 /// Reports the startup status of all plugins with detailed information.
