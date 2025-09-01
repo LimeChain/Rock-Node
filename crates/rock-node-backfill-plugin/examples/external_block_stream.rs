@@ -50,7 +50,7 @@ async fn main() -> Result<()> {
             tracing::error!("Failed to establish a block stream: {}", e);
         }
     }
-    
+
     // --- Case 2: Stream from the latest block onwards (continuous mode) ---
     let start_block_live = None;
     let end_block_live = None;
@@ -73,7 +73,8 @@ async fn main() -> Result<()> {
                     });
                     info!("Received live Block #{}", block_num);
                     count += 1;
-                    if count > 5 { // Stop after 5 live blocks for the example
+                    if count > 5 {
+                        // Stop after 5 live blocks for the example
                         break;
                     }
                 }

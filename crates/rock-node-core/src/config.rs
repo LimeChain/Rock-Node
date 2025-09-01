@@ -15,6 +15,8 @@ pub struct CoreConfig {
     pub database_path: String,
     #[serde(default)]
     pub start_block_number: u64,
+    pub grpc_address: String,
+    pub grpc_port: u16,
 }
 
 impl Default for CoreConfig {
@@ -23,6 +25,8 @@ impl Default for CoreConfig {
             log_level: "INFO".to_string(),
             database_path: "data/database".to_string(),
             start_block_number: 0,
+            grpc_address: "0.0.0.0".to_string(),
+            grpc_port: 8090,
         }
     }
 }
@@ -95,8 +99,7 @@ impl Default for StateManagementServiceConfig {
 #[serde(default)]
 pub struct PublishServiceConfig {
     pub enabled: bool,
-    pub grpc_address: String,
-    pub grpc_port: u16,
+    // grpc_address and grpc_port are now in CoreConfig
     pub max_concurrent_streams: usize,
     pub persistence_ack_timeout_seconds: u64,
     pub stale_winner_timeout_seconds: u64,
@@ -108,8 +111,6 @@ impl Default for PublishServiceConfig {
     fn default() -> Self {
         Self {
             enabled: true,
-            grpc_address: "0.0.0.0".to_string(),
-            grpc_port: 8090,
             max_concurrent_streams: 250,
             persistence_ack_timeout_seconds: 60,
             stale_winner_timeout_seconds: 10,
@@ -123,8 +124,7 @@ impl Default for PublishServiceConfig {
 #[serde(default)]
 pub struct SubscriberServiceConfig {
     pub enabled: bool,
-    pub grpc_address: String,
-    pub grpc_port: u16,
+    // grpc_address and grpc_port are now in CoreConfig
     pub max_concurrent_streams: usize,
     pub session_timeout_seconds: u64,
     pub live_stream_queue_size: usize,
@@ -135,8 +135,6 @@ impl Default for SubscriberServiceConfig {
     fn default() -> Self {
         Self {
             enabled: true,
-            grpc_address: "0.0.0.0".to_string(),
-            grpc_port: 6895,
             max_concurrent_streams: 100,
             session_timeout_seconds: 60,
             live_stream_queue_size: 250,
@@ -161,17 +159,11 @@ impl Default for VerificationServiceConfig {
 #[serde(default)]
 pub struct BlockAccessServiceConfig {
     pub enabled: bool,
-    pub grpc_address: String,
-    pub grpc_port: u16,
 }
 
 impl Default for BlockAccessServiceConfig {
     fn default() -> Self {
-        Self {
-            enabled: true,
-            grpc_address: "0.0.0.0".to_string(),
-            grpc_port: 6791,
-        }
+        Self { enabled: true }
     }
 }
 
@@ -179,17 +171,11 @@ impl Default for BlockAccessServiceConfig {
 #[serde(default)]
 pub struct ServerStatusServiceConfig {
     pub enabled: bool,
-    pub grpc_address: String,
-    pub grpc_port: u16,
 }
 
 impl Default for ServerStatusServiceConfig {
     fn default() -> Self {
-        Self {
-            enabled: true,
-            grpc_address: "0.0.0.0".to_string(),
-            grpc_port: 6792,
-        }
+        Self { enabled: true }
     }
 }
 
@@ -197,23 +183,16 @@ impl Default for ServerStatusServiceConfig {
 #[serde(default)]
 pub struct QueryServiceConfig {
     pub enabled: bool,
-    pub grpc_address: String,
-    pub grpc_port: u16,
 }
 
 impl Default for QueryServiceConfig {
     fn default() -> Self {
-        Self {
-            enabled: true,
-            grpc_address: "0.0.0.0".to_string(),
-            grpc_port: 6793,
-        }
+        Self { enabled: true }
     }
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub enum BackfillMode {
-    // Accept various case variants for gap-fill
     #[serde(
         rename = "gap-fill",
         alias = "GapFill",
@@ -221,7 +200,6 @@ pub enum BackfillMode {
         alias = "GAPFILL"
     )]
     GapFill,
-    // The Continuous variant - serde will accept "Continuous" by default
     #[serde(alias = "continuous", alias = "CONTINUOUS")]
     Continuous,
 }
@@ -304,8 +282,6 @@ mod tests {
     fn test_publish_service_config_default_values() {
         let config = PublishServiceConfig::default();
         assert_eq!(config.enabled, true);
-        assert_eq!(config.grpc_address, "0.0.0.0");
-        assert_eq!(config.grpc_port, 8090);
         assert_eq!(config.max_concurrent_streams, 250);
         assert_eq!(config.persistence_ack_timeout_seconds, 60);
         assert_eq!(config.stale_winner_timeout_seconds, 10);
@@ -317,8 +293,6 @@ mod tests {
     fn test_subscriber_service_config_default_values() {
         let config = SubscriberServiceConfig::default();
         assert_eq!(config.enabled, true);
-        assert_eq!(config.grpc_address, "0.0.0.0");
-        assert_eq!(config.grpc_port, 6895);
         assert_eq!(config.max_concurrent_streams, 100);
         assert_eq!(config.session_timeout_seconds, 60);
         assert_eq!(config.live_stream_queue_size, 250);
@@ -335,24 +309,18 @@ mod tests {
     fn test_block_access_service_config_default_values() {
         let config = BlockAccessServiceConfig::default();
         assert_eq!(config.enabled, true);
-        assert_eq!(config.grpc_address, "0.0.0.0");
-        assert_eq!(config.grpc_port, 6791);
     }
 
     #[test]
     fn test_server_status_service_config_default_values() {
         let config = ServerStatusServiceConfig::default();
         assert_eq!(config.enabled, true);
-        assert_eq!(config.grpc_address, "0.0.0.0");
-        assert_eq!(config.grpc_port, 6792);
     }
 
     #[test]
     fn test_query_service_config_default_values() {
         let config = QueryServiceConfig::default();
         assert_eq!(config.enabled, true);
-        assert_eq!(config.grpc_address, "0.0.0.0");
-        assert_eq!(config.grpc_port, 6793);
     }
 
     #[test]
@@ -378,6 +346,8 @@ mod tests {
                 log_level: "DEBUG".to_string(),
                 database_path: "/custom/path".to_string(),
                 start_block_number: 42,
+                grpc_address: "0.0.0.0".to_string(),
+                grpc_port: 8090,
             },
             plugins: PluginConfigs {
                 backfill: BackfillConfig {

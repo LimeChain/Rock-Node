@@ -1,29 +1,29 @@
 use crate::common::{publish_blocks, TestContext};
 use anyhow::Result;
+use prost::Message;
+use rock_node_protobufs::com::hedera::hapi::block::stream::{block_item, Block, BlockItem};
+use rock_node_protobufs::org::hiero::block::api::{
+    block_node_service_server::{BlockNodeService, BlockNodeServiceServer},
+    block_stream_subscribe_service_server::{
+        BlockStreamSubscribeService, BlockStreamSubscribeServiceServer,
+    },
+    subscribe_stream_response::Response as SubResponse,
+    BlockItemSet, ServerStatusRequest, ServerStatusResponse, SubscribeStreamRequest,
+    SubscribeStreamResponse,
+};
 use rock_node_protobufs::org::hiero::block::api::{
     block_request::BlockSpecifier, block_response, BlockRequest,
 };
 use serial_test::serial;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 use testcontainers::core::Host;
 use tokio::net::TcpListener;
 use tokio::sync::{mpsc, Mutex};
 use tokio_stream::wrappers::TcpListenerStream;
-use tonic::{transport::Server, Request, Response, Status};
-use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
-use rock_node_protobufs::org::hiero::block::api::{
-    block_stream_subscribe_service_server::{
-        BlockStreamSubscribeService, BlockStreamSubscribeServiceServer,
-    },
-    subscribe_stream_response::Response as SubResponse, BlockItemSet, SubscribeStreamRequest,
-    SubscribeStreamResponse, ServerStatusRequest, ServerStatusResponse,
-    block_node_service_server::{BlockNodeService, BlockNodeServiceServer},
-};
 use tokio_stream::StreamExt;
-use rock_node_protobufs::com::hedera::hapi::block::stream::{block_item, Block, BlockItem};
-use prost::Message;
-
+use tonic::{transport::Server, Request, Response, Status};
 
 /// A mock peer server that can be configured to fail a specific number of times
 /// before it starts successfully streaming blocks. It also responds to ServerStatus requests.
@@ -37,7 +37,10 @@ struct MockFailingPeerServer {
 
 #[tonic::async_trait]
 impl BlockNodeService for MockFailingPeerServer {
-    async fn server_status(&self, _request: Request<ServerStatusRequest>) -> Result<Response<ServerStatusResponse>, Status> {
+    async fn server_status(
+        &self,
+        _request: Request<ServerStatusRequest>,
+    ) -> Result<Response<ServerStatusResponse>, Status> {
         Ok(Response::new(ServerStatusResponse {
             first_available_block: self.available_first,
             last_available_block: self.available_last,
@@ -87,7 +90,9 @@ impl BlockStreamSubscribeService for MockFailingPeerServer {
             }
         });
 
-        Ok(Response::new(tokio_stream::wrappers::ReceiverStream::new(rx)))
+        Ok(Response::new(tokio_stream::wrappers::ReceiverStream::new(
+            rx,
+        )))
     }
 }
 
@@ -156,7 +161,6 @@ async fn spawn_mock_failing_peer(
     println!("Using host IP for mock server: {}", host_ip);
     Ok((format!("http://{}:{}", host_ip, addr.port()), server_clone))
 }
-
 
 /// Test Case: Backfill with a peer that fails and then succeeds.
 /// Objective: Verify that the backfill plugin can handle an intermittent failure
@@ -239,7 +243,10 @@ start_block_number = 0
         .await?
         .into_inner();
 
-    println!("Block 12 status after backfill: {:?}", response_after.status);
+    println!(
+        "Block 12 status after backfill: {:?}",
+        response_after.status
+    );
 
     assert_eq!(
         response_after.status,
@@ -307,7 +314,10 @@ start_block_number = 0
         .await?
         .into_inner();
 
-    println!("Block 15 status (should be NotFound): {:?}", response_after.status);
+    println!(
+        "Block 15 status (should be NotFound): {:?}",
+        response_after.status
+    );
 
     assert_eq!(
         response_after.status,
@@ -381,7 +391,10 @@ start_block_number = 0
         .await?
         .into_inner();
 
-    println!("Block 15 status after failover backfill: {:?}", response_after.status);
+    println!(
+        "Block 15 status after failover backfill: {:?}",
+        response_after.status
+    );
 
     assert_eq!(
         response_after.status,

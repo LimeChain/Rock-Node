@@ -1,3 +1,4 @@
+pub mod backfill_resilience_suite;
 pub mod backfill_suite;
 pub mod block_access_suite;
 pub mod gap_ingestion_suite;
@@ -7,4 +8,3 @@ pub mod query_suites;
 pub mod resiliency_suite;
 pub mod server_status_suite;
 pub mod subscription_suite;
-pub mod backfill_resilience_suite;

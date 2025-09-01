@@ -6,11 +6,12 @@ use rock_node_core::{
     config::BackfillMode, database::CF_GAPS, BlockReaderProvider, BlockWriterProvider,
 };
 use rock_node_protobufs::{
-    com::hedera::hapi::block::stream::{block_item, Block, BlockItem},
+    com::hedera::hapi::block::stream::{Block},
     org::hiero::block::api::{
+        block_node_service_client::BlockNodeServiceClient,
         block_stream_subscribe_service_client::BlockStreamSubscribeServiceClient,
-        block_node_service_client::BlockNodeServiceClient, ServerStatusRequest,
-        subscribe_stream_response::Response as SubResponse, SubscribeStreamRequest,
+        subscribe_stream_response::Response as SubResponse, ServerStatusRequest,
+        SubscribeStreamRequest,
     },
 };
 use rocksdb::IteratorMode;
@@ -73,10 +74,16 @@ pub async fn stream_blocks_from_peers(
                         );
 
                         if retries >= PEER_RETRY_LIMIT {
-                            warn!("Maximum retries reached for peer {}. Trying next peer.", peer_addr);
+                            warn!(
+                                "Maximum retries reached for peer {}. Trying next peer.",
+                                peer_addr
+                            );
                             break;
                         }
-                        tokio::time::sleep(Duration::from_secs(PEER_BACKOFF_BASE_SECONDS.saturating_mul(2u64.pow(retries)))).await;
+                        tokio::time::sleep(Duration::from_secs(
+                            PEER_BACKOFF_BASE_SECONDS.saturating_mul(2u64.pow(retries)),
+                        ))
+                        .await;
                         retries += 1;
                     }
                 }
@@ -105,7 +112,9 @@ async fn try_connect_and_stream(
     end_block_opt: Option<u64>,
 ) -> Result<Option<impl Stream<Item = Result<Block, tonic::Status>>>, anyhow::Error> {
     let mut status_client = BlockNodeServiceClient::connect(peer_addr.to_string()).await?;
-    let status_res = status_client.server_status(Request::new(ServerStatusRequest {})).await?;
+    let status_res = status_client
+        .server_status(Request::new(ServerStatusRequest {}))
+        .await?;
     let status_res = status_res.into_inner();
     let peer_latest = status_res.last_available_block;
 
@@ -116,21 +125,33 @@ async fn try_connect_and_stream(
     let end_block = end_block_opt.unwrap_or(u64::MAX);
 
     if start_block > end_block {
-        return Err(anyhow!("Requested start block {} is after end block {}", start_block, end_block));
+        return Err(anyhow!(
+            "Requested start block {} is after end block {}",
+            start_block,
+            end_block
+        ));
     }
-    
+
     if start_block > peer_latest && end_block == u64::MAX {
         // This is a continuous stream request, and the peer is behind.
         // We can proceed, assuming the peer will catch up.
-        info!("Peer {} is behind. Starting continuous stream from its latest block #{}", peer_addr, peer_latest);
+        info!(
+            "Peer {} is behind. Starting continuous stream from its latest block #{}",
+            peer_addr, peer_latest
+        );
         // Fall back to peer's latest block
     } else if start_block > peer_latest {
         // This is a historical stream request for blocks the peer doesn't have.
-        warn!("Peer {} does not have the requested block range [{} - {}]. It's latest block is #{}.", peer_addr, start_block, end_block, peer_latest);
+        warn!(
+            "Peer {} does not have the requested block range [{} - {}]. It's latest block is #{}.",
+            peer_addr, start_block, end_block, peer_latest
+        );
         return Ok(None);
     }
-    
-    let channel = Channel::from_shared(peer_addr.to_string())?.connect().await?;
+
+    let channel = Channel::from_shared(peer_addr.to_string())?
+        .connect()
+        .await?;
     let mut client = BlockStreamSubscribeServiceClient::new(channel);
     let request = SubscribeStreamRequest {
         start_block_number: start_block,
@@ -215,7 +236,7 @@ impl BackfillWorker {
         let interval_secs = self.context.config.plugins.backfill.check_interval_seconds;
         let mut interval = tokio::time::interval(Duration::from_secs(interval_secs));
         let mut shuffled_peers = self.context.config.plugins.backfill.peers.clone();
-        
+
         loop {
             tokio::select! {
                 _ = shutdown_notify.notified() => {
@@ -249,7 +270,12 @@ impl BackfillWorker {
         shuffled_peers.shuffle(&mut rand::rng());
 
         for peer_addr in shuffled_peers.iter() {
-            let local_latest_block = self.block_reader.get_latest_persisted_block_number().ok().flatten().unwrap_or(0);
+            let local_latest_block = self
+                .block_reader
+                .get_latest_persisted_block_number()
+                .ok()
+                .flatten()
+                .unwrap_or(0);
             let mut retries = 0;
             loop {
                 // First check peer status
@@ -261,13 +287,17 @@ impl BackfillWorker {
                                 "Peer {} is behind local node (peer_latest: {}, local_latest: {}). Waiting for peer to catch up.",
                                 peer_addr, peer_latest, local_latest_block
                             );
-                            tokio::time::sleep(Duration::from_secs(BEHIND_PEER_DELAY_SECONDS)).await;
+                            tokio::time::sleep(Duration::from_secs(BEHIND_PEER_DELAY_SECONDS))
+                                .await;
                             break; // Try next peer
                         }
-                        
+
                         let start_from = local_latest_block + 1;
                         if start_from > peer_latest && start_from > 0 {
-                            info!("Peer {} does not have block #{} yet. Waiting for peer to publish.", peer_addr, start_from);
+                            info!(
+                                "Peer {} does not have block #{} yet. Waiting for peer to publish.",
+                                peer_addr, start_from
+                            );
                             tokio::time::sleep(Duration::from_secs(5)).await;
                             continue;
                         }
@@ -276,34 +306,59 @@ impl BackfillWorker {
                             "Starting continuous backfill stream from block #{} from peer {}",
                             start_from, peer_addr
                         );
-                        
-                        match self.stream_from_peer(peer_addr, start_from, u64::MAX, BackfillMode::Continuous).await {
+
+                        match self
+                            .stream_from_peer(
+                                peer_addr,
+                                start_from,
+                                u64::MAX,
+                                BackfillMode::Continuous,
+                            )
+                            .await
+                        {
                             Ok(()) => {
                                 info!("Continuous stream from {} ended gracefully.", peer_addr);
                                 return; // Go back to top and find a new peer
                             }
                             Err(e) => {
-                                error!("Continuous stream from {} failed: {}. Retrying peer.", peer_addr, e);
+                                error!(
+                                    "Continuous stream from {} failed: {}. Retrying peer.",
+                                    peer_addr, e
+                                );
                                 retries += 1;
-                                tokio::time::sleep(Duration::from_secs(PEER_BACKOFF_BASE_SECONDS.saturating_mul(2u64.pow(retries)))).await;
+                                tokio::time::sleep(Duration::from_secs(
+                                    PEER_BACKOFF_BASE_SECONDS.saturating_mul(2u64.pow(retries)),
+                                ))
+                                .await;
                                 if retries > PEER_RETRY_LIMIT {
                                     break; // Max retries for this peer reached, try next peer.
                                 }
                             }
                         }
-                    },
+                    }
                     Ok(None) => {
-                        warn!("Could not get server status from peer {}. Trying next peer.", peer_addr);
+                        warn!(
+                            "Could not get server status from peer {}. Trying next peer.",
+                            peer_addr
+                        );
                         break;
-                    },
+                    }
                     Err(e) => {
-                        warn!("Failed to connect for status check to peer {}: {}. Retrying in {}s.", peer_addr, e, PEER_BACKOFF_BASE_SECONDS.saturating_mul(2u64.pow(retries)));
+                        warn!(
+                            "Failed to connect for status check to peer {}: {}. Retrying in {}s.",
+                            peer_addr,
+                            e,
+                            PEER_BACKOFF_BASE_SECONDS.saturating_mul(2u64.pow(retries))
+                        );
                         retries += 1;
-                        tokio::time::sleep(Duration::from_secs(PEER_BACKOFF_BASE_SECONDS.saturating_mul(2u64.pow(retries)))).await;
+                        tokio::time::sleep(Duration::from_secs(
+                            PEER_BACKOFF_BASE_SECONDS.saturating_mul(2u64.pow(retries)),
+                        ))
+                        .await;
                         if retries > PEER_RETRY_LIMIT {
                             break; // Max retries for this peer reached, try next peer.
                         }
-                    },
+                    }
                 }
             }
         }
@@ -327,38 +382,66 @@ impl BackfillWorker {
             if effective_start > end {
                 continue;
             }
-            
+
             'peer_loop: for peer_addr in shuffled_peers.iter() {
                 let mut retries = 0;
                 loop {
                     match self.get_peer_status(peer_addr).await {
                         Ok(Some(status)) => {
-                            if status.first_available_block > effective_start || status.last_available_block < end {
+                            if status.first_available_block > effective_start
+                                || status.last_available_block < end
+                            {
                                 warn!("Peer {} does not have the full gap [{} - {}]. It's range is [{} - {}]. Trying next peer.", 
                                     peer_addr, effective_start, end, status.first_available_block, status.last_available_block);
                                 break;
                             }
-                            info!("Attempting to fill gap [{}, {}] from peer {}", effective_start, end, peer_addr);
-                            if let Err(e) = self.stream_from_peer(peer_addr, effective_start, end, BackfillMode::GapFill).await {
-                                warn!("Failed to fill gap [{}, {}] from {}: {}. Retrying peer.", effective_start, end, peer_addr, e);
+                            info!(
+                                "Attempting to fill gap [{}, {}] from peer {}",
+                                effective_start, end, peer_addr
+                            );
+                            if let Err(e) = self
+                                .stream_from_peer(
+                                    peer_addr,
+                                    effective_start,
+                                    end,
+                                    BackfillMode::GapFill,
+                                )
+                                .await
+                            {
+                                warn!(
+                                    "Failed to fill gap [{}, {}] from {}: {}. Retrying peer.",
+                                    effective_start, end, peer_addr, e
+                                );
                                 retries += 1;
-                                tokio::time::sleep(Duration::from_secs(PEER_BACKOFF_BASE_SECONDS.saturating_mul(2u64.pow(retries)))).await;
+                                tokio::time::sleep(Duration::from_secs(
+                                    PEER_BACKOFF_BASE_SECONDS.saturating_mul(2u64.pow(retries)),
+                                ))
+                                .await;
                                 if retries > PEER_RETRY_LIMIT {
                                     break; // Max retries for this peer reached, try next peer.
                                 }
                             } else {
-                                info!("Successfully filled gap [{}, {}] from {}.", effective_start, end, peer_addr);
+                                info!(
+                                    "Successfully filled gap [{}, {}] from {}.",
+                                    effective_start, end, peer_addr
+                                );
                                 break 'peer_loop;
                             }
-                        },
+                        }
                         Ok(None) => {
-                            warn!("Could not get server status from peer {}. Trying next peer.", peer_addr);
+                            warn!(
+                                "Could not get server status from peer {}. Trying next peer.",
+                                peer_addr
+                            );
                             break;
-                        },
+                        }
                         Err(e) => {
-                             warn!("Failed to connect for status check to peer {}: {}. Retrying in {}s.", peer_addr, e, PEER_BACKOFF_BASE_SECONDS.saturating_mul(2u64.pow(retries)));
+                            warn!("Failed to connect for status check to peer {}: {}. Retrying in {}s.", peer_addr, e, PEER_BACKOFF_BASE_SECONDS.saturating_mul(2u64.pow(retries)));
                             retries += 1;
-                            tokio::time::sleep(Duration::from_secs(PEER_BACKOFF_BASE_SECONDS.saturating_mul(2u64.pow(retries)))).await;
+                            tokio::time::sleep(Duration::from_secs(
+                                PEER_BACKOFF_BASE_SECONDS.saturating_mul(2u64.pow(retries)),
+                            ))
+                            .await;
                             if retries > PEER_RETRY_LIMIT {
                                 break; // Max retries for this peer reached, try next peer.
                             }
@@ -370,13 +453,19 @@ impl BackfillWorker {
         Ok(())
     }
 
-    async fn get_peer_status(&self, peer_addr: &str) -> Result<Option<rock_node_protobufs::org::hiero::block::api::ServerStatusResponse>> {
+    async fn get_peer_status(
+        &self,
+        peer_addr: &str,
+    ) -> Result<Option<rock_node_protobufs::org::hiero::block::api::ServerStatusResponse>> {
         let channel = match Channel::from_shared(peer_addr.to_string())?.connect().await {
             Ok(c) => c,
             Err(_) => return Ok(None),
         };
         let mut client = BlockNodeServiceClient::new(channel);
-        match client.server_status(Request::new(ServerStatusRequest {})).await {
+        match client
+            .server_status(Request::new(ServerStatusRequest {}))
+            .await
+        {
             Ok(res) => Ok(Some(res.into_inner())),
             Err(e) => {
                 warn!("Failed to get server status from peer {}: {}", peer_addr, e);
@@ -397,8 +486,10 @@ impl BackfillWorker {
         } else {
             "Continuous"
         };
-        
-        let channel = Channel::from_shared(peer_addr.to_string())?.connect().await?;
+
+        let channel = Channel::from_shared(peer_addr.to_string())?
+            .connect()
+            .await?;
         let mut client = BlockStreamSubscribeServiceClient::new(channel);
         let request = SubscribeStreamRequest {
             start_block_number: start,
@@ -457,8 +548,6 @@ impl BackfillWorker {
         }
         Ok(gaps)
     }
-
-
 
     /// Test helper method that directly creates and processes blocks without network dependencies
     /// This method is used for unit testing to avoid network-related hanging issues
@@ -559,12 +648,11 @@ mod tests {
         },
     };
     use std::collections::HashMap;
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use tempfile::TempDir;
     use tokio::net::TcpListener;
     use tokio_stream::wrappers::TcpListenerStream;
     use tonic::transport::Server;
-    use std::sync::atomic::{AtomicUsize, Ordering};
-
 
     // --- Mock gRPC Peer Server ---
     #[derive(Clone, Default)]
@@ -637,9 +725,7 @@ mod tests {
         // Spawn the server with a timeout to prevent hanging
         tokio::spawn(async move {
             let server_future = Server::builder()
-                .add_service(BlockStreamSubscribeServiceServer::new(
-                    server_for_task,
-                ))
+                .add_service(BlockStreamSubscribeServiceServer::new(server_for_task))
                 .serve_with_incoming(listener_stream);
 
             // Add a timeout to the server to prevent it from running indefinitely
@@ -664,7 +750,9 @@ mod tests {
         let (peer_addr, _) = spawn_mock_peer(0).await.unwrap();
         let peers = vec![peer_addr];
 
-        let mut stream = stream_blocks_from_peers(&peers, Some(5), Some(10)).await.unwrap();
+        let mut stream = stream_blocks_from_peers(&peers, Some(5), Some(10))
+            .await
+            .unwrap();
 
         let mut received_blocks = Vec::new();
         while let Some(Ok(block)) = stream.next().await {
@@ -680,12 +768,11 @@ mod tests {
     async fn test_stream_blocks_failover() {
         let bad_peer = "http://127.0.0.1:1".to_string(); // A bad peer that will fail to connect
         let (good_peer, _) = spawn_mock_peer(0).await.unwrap();
-        let peers = vec![
-            bad_peer,
-            good_peer,
-        ];
+        let peers = vec![bad_peer, good_peer];
 
-        let mut stream = stream_blocks_from_peers(&peers, Some(1), Some(3)).await.unwrap();
+        let mut stream = stream_blocks_from_peers(&peers, Some(1), Some(3))
+            .await
+            .unwrap();
         let mut received_blocks = Vec::new();
         while let Some(Ok(block)) = stream.next().await {
             let num = get_block_number_from_block(&block).unwrap();
