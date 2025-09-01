@@ -19,7 +19,7 @@ async fn test_gap_fill_mode_successfully_fills_gap() -> Result<()> {
     let subscriber_port = source_ctx.subscriber_client_port().await?;
     // Use host.docker.internal for macOS and host-gateway for Linux
     let peer_address = if cfg!(target_os = "macos") {
-        format!("[http://host.docker.internal](http://host.docker.internal):{}", subscriber_port)
+        format!("http://host.docker.internal:{}", subscriber_port)
     } else {
         format!("http://host-gateway:{}", subscriber_port)
     };
@@ -129,7 +129,7 @@ async fn test_continuous_mode_successfully_catches_up_and_streams() -> Result<()
     let subscriber_port = source_ctx.subscriber_client_port().await?;
     // Use host.docker.internal for macOS and host-gateway for Linux
     let peer_address = if cfg!(target_os = "macos") {
-        format!("[http://host.docker.internal](http://host.docker.internal):{}", subscriber_port)
+        format!("http://host.docker.internal:{}", subscriber_port)
     } else {
         format!("http://host-gateway:{}", subscriber_port)
     };
