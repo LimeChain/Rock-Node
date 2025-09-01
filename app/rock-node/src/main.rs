@@ -271,48 +271,35 @@ async fn main() -> Result<()> {
     }
     info!("{}", "-".repeat(16));
 
-    // --- Step 8: Dynamically Build and Spawn the Unified gRPC Server ---
+    // --- Step 8: - Dynamically Build and Spawn the Unified gRPC Server - ---
     let (grpc_shutdown_tx, mut grpc_shutdown_rx) = watch::channel(());
     let core_config = &app_context.config.core;
     let grpc_listen_address = format!("{}:{}", core_config.grpc_address, core_config.grpc_port);
     let grpc_socket_addr = grpc_listen_address.parse()?;
 
-    // Collect all routers from plugins
-    let mut plugin_routers = Vec::new();
-    let mut plugins_with_services = Vec::new();
+    let mut routes_builder = RoutesBuilder::default();
+    let mut any_service_found = false;
 
     info!("Collecting gRPC services from enabled plugins...");
     for plugin in &mut plugins {
-        if let Some(plugin_router) = plugin.take_grpc_router() {
+        if plugin.register_grpc_services(&mut routes_builder)? {
             info!("✔️  Found gRPC services in plugin: {}", plugin.name());
-            plugin_routers.push(plugin_router);
-            plugins_with_services.push(plugin.name().to_string());
+            any_service_found = true;
         }
     }
 
-    if !plugin_routers.is_empty() {
-        info!(
-            "Found {} plugins with gRPC services: {:?}",
-            plugin_routers.len(),
-            plugins_with_services
-        );
-
-        if plugin_routers.len() > 1 {
-            info!("⚠️  WARNING: Multiple plugins have gRPC services, but only the first one ({}) will be served!", plugins_with_services[0]);
-            info!(
-                "   Other plugins with services: {:?}",
-                &plugins_with_services[1..]
-            );
-            info!("   This is a known limitation due to tonic's router merging constraints.");
-            info!("   To access all services, consider enabling plugins individually or wait for future improvements.");
-        }
-
-        // For now, serve only the first router (temporary limitation)
-        let server_builder = plugin_routers.into_iter().next().unwrap();
+    if any_service_found {
+        let routes = routes_builder.build().expect("Failed to build gRPC routes");
 
         tokio::spawn(async move {
             info!("Unified gRPC server listening on {}", grpc_socket_addr);
-            if let Err(e) = server_builder.serve(grpc_socket_addr).await {
+
+            if let Err(e) = Server::builder()
+                .serve_with_shutdown(grpc_socket_addr, routes, async {
+                    grpc_shutdown_rx.changed().await.ok();
+                })
+                .await
+            {
                 error!("Unified gRPC server failed: {}", e);
             }
         });

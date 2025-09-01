@@ -25,17 +25,14 @@ use std::{
         Arc,
     },
 };
-use tokio::sync::watch;
-use tonic::transport::server::Router;
-use tracing::{error, info, warn};
+use tonic::service::RoutesBuilder;
+use tracing::{info, warn};
 
 /// The main plugin struct that registers and runs the gRPC query services.
 #[derive(Debug, Default)]
 pub struct QueryPlugin {
     context: Option<AppContext>,
     running: Arc<AtomicBool>,
-    shutdown_tx: Option<watch::Sender<()>>,
-    router: Option<Router>,
 }
 
 impl QueryPlugin {
@@ -58,33 +55,42 @@ impl Plugin for QueryPlugin {
     }
 
     fn start(&mut self) -> CoreResult<()> {
-        let context = self
-            .context
-            .as_ref()
-            .ok_or_else(|| anyhow::anyhow!("QueryPlugin not initialized"))?
-            .clone();
-        let config = &context.config.plugins.query_service;
+        let context = self.context.as_ref().ok_or_else(|| {
+            CoreError::PluginInitialization("QueryPlugin not initialized".to_string())
+        })?;
 
-        if !config.enabled {
-            info!("QueryPlugin is disabled. Skipping start.");
-            return Ok(());
+        if context.config.plugins.query_service.enabled {
+            self.running.store(true, Ordering::SeqCst);
+        }
+        Ok(())
+    }
+
+    fn register_grpc_services(&mut self, builder: &mut RoutesBuilder) -> CoreResult<bool> {
+        let context = self.context.as_ref().ok_or_else(|| {
+            CoreError::PluginInitialization("QueryPlugin not initialized".to_string())
+        })?;
+
+        if !context.config.plugins.query_service.enabled {
+            return Ok(false);
         }
 
         let state_reader = {
-            let providers = context
-                .service_providers
-                .read()
-                .map_err(|_| anyhow::anyhow!("Failed to acquire read lock on service providers"))?;
-            providers
+            let providers = context.service_providers.read().map_err(|_| {
+                CoreError::PluginInitialization(
+                    "Failed to acquire read lock on service providers".to_string(),
+                )
+            })?;
+            match providers
                 .get(&TypeId::of::<StateReaderProvider>())
                 .and_then(|p| p.downcast_ref::<StateReaderProvider>())
                 .map(|p| p.get_reader())
-                .ok_or_else(|| {
-                    warn!("StateReaderProvider not found. QueryPlugin cannot start.");
-                    rock_node_core::Error::PluginInitialization(
-                        "StateReaderProvider not found".to_string(),
-                    )
-                })?
+            {
+                Some(reader) => reader,
+                None => {
+                    warn!("StateReaderProvider not found. QueryPlugin cannot register services.");
+                    return Ok(false); // Can't proceed without the state reader.
+                }
+            }
         };
 
         let crypto_service = CryptoServiceImpl::new(state_reader.clone());
@@ -93,29 +99,18 @@ impl Plugin for QueryPlugin {
         let network_service = NetworkServiceImpl::new(state_reader.clone());
         let schedule_service = ScheduleServiceImpl::new(state_reader.clone());
         let token_service = TokenServiceImpl::new(state_reader.clone());
-        let smart_contract_service = SmartContractServiceImpl::new(state_reader.clone());
+        let smart_contract_service = SmartContractServiceImpl::new(state_reader);
 
-        let crypto_service_server = CryptoServiceServer::new(crypto_service);
-        let file_service_server = FileServiceServer::new(file_service);
-        let consensus_service_server = ConsensusServiceServer::new(consensus_service);
-        let network_service_server = NetworkServiceServer::new(network_service);
-        let schedule_service_server = ScheduleServiceServer::new(schedule_service);
-        let token_service_server = TokenServiceServer::new(token_service);
-        let smart_contract_service_server = SmartContractServiceServer::new(smart_contract_service);
+        builder
+            .add_service(CryptoServiceServer::new(crypto_service))
+            .add_service(FileServiceServer::new(file_service))
+            .add_service(ConsensusServiceServer::new(consensus_service))
+            .add_service(NetworkServiceServer::new(network_service))
+            .add_service(ScheduleServiceServer::new(schedule_service))
+            .add_service(TokenServiceServer::new(token_service))
+            .add_service(SmartContractServiceServer::new(smart_contract_service));
 
-        // Create router with all services
-        let router = tonic::transport::Server::builder()
-            .add_service(crypto_service_server)
-            .add_service(file_service_server)
-            .add_service(consensus_service_server)
-            .add_service(network_service_server)
-            .add_service(schedule_service_server)
-            .add_service(token_service_server)
-            .add_service(smart_contract_service_server);
-
-        self.router = Some(router);
-
-        Ok(())
+        Ok(true)
     }
 
     fn is_running(&self) -> bool {
@@ -123,13 +118,6 @@ impl Plugin for QueryPlugin {
     }
 
     async fn stop(&mut self) -> CoreResult<()> {
-        if let Some(shutdown_tx) = self.shutdown_tx.take() {
-            if shutdown_tx.send(()).is_err() {
-                let msg = "Failed to send shutdown signal to Query gRPC server: receiver dropped.";
-                error!("{}", msg);
-                return Err(CoreError::PluginShutdown(msg.to_string()));
-            }
-        }
         self.running.store(false, Ordering::SeqCst);
         Ok(())
     }

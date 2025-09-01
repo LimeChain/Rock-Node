@@ -1,6 +1,9 @@
 use async_trait::async_trait;
 use rock_node_core::{
-    app_context::AppContext, error::Result, plugin::Plugin, BlockReaderProvider, Error as CoreError,
+    app_context::AppContext,
+    error::{Error as CoreError, Result as CoreResult},
+    plugin::Plugin,
+    BlockReaderProvider,
 };
 use rock_node_protobufs::org::hiero::block::api::block_access_service_server::BlockAccessServiceServer;
 use service::BlockAccessServiceImpl;
@@ -11,15 +14,15 @@ use std::{
         Arc,
     },
 };
-use tonic::transport::server::Router;
+use tonic::service::RoutesBuilder;
 use tracing::{info, warn};
 
 mod service;
 
 #[derive(Debug, Default)]
 pub struct BlockAccessPlugin {
+    context: Option<AppContext>,
     running: Arc<AtomicBool>,
-    router: Option<Router>,
 }
 
 impl BlockAccessPlugin {
@@ -34,52 +37,64 @@ impl Plugin for BlockAccessPlugin {
         "block-access-plugin"
     }
 
-    fn initialize(&mut self, context: AppContext) -> Result<()> {
+    fn initialize(&mut self, context: AppContext) -> CoreResult<()> {
         info!("BlockAccessPlugin initializing...");
+        self.context = Some(context);
+        Ok(())
+    }
+
+    fn start(&mut self) -> CoreResult<()> {
+        let context = self.context.as_ref().ok_or_else(|| {
+            CoreError::PluginInitialization("BlockAccessPlugin not initialized".to_string())
+        })?;
+        if context.config.plugins.block_access_service.enabled {
+            self.running.store(true, Ordering::SeqCst);
+        }
+        Ok(())
+    }
+
+    fn register_grpc_services(&mut self, builder: &mut RoutesBuilder) -> CoreResult<bool> {
+        let context = self.context.as_ref().ok_or_else(|| {
+            CoreError::PluginInitialization("BlockAccessPlugin not initialized".to_string())
+        })?;
+
         if !context.config.plugins.block_access_service.enabled {
-            info!("BlockAccessPlugin is disabled.");
-            return Ok(());
+            return Ok(false);
         }
 
         let block_reader = {
             let providers = context.service_providers.read().map_err(|_| {
                 CoreError::PluginInitialization("Failed to lock providers".to_string())
             })?;
-            providers
+            match providers
                 .get(&TypeId::of::<BlockReaderProvider>())
                 .and_then(|p| p.downcast_ref::<BlockReaderProvider>())
                 .map(|p| p.get_reader())
-                .ok_or_else(|| {
-                    warn!("BlockReaderProvider not found. Service will not be available.");
-                    CoreError::PluginInitialization("BlockReaderProvider not found".to_string())
-                })?
+            {
+                Some(reader) => reader,
+                None => {
+                    warn!(
+                        "BlockReaderProvider not found. BlockAccessService will not be available."
+                    );
+                    return Ok(false);
+                }
+            }
         };
 
         let service = BlockAccessServiceImpl {
             block_reader,
             metrics: context.metrics.clone(),
         };
-        let server = BlockAccessServiceServer::new(service);
-        self.router = Some(tonic::transport::Server::builder().add_service(server));
+        builder.add_service(BlockAccessServiceServer::new(service));
 
-        Ok(())
-    }
-
-    fn start(&mut self) -> Result<()> {
-        // The gRPC server is started by main; this just marks the plugin as running.
-        self.running.store(true, Ordering::SeqCst);
-        Ok(())
-    }
-
-    fn take_grpc_router(&mut self) -> Option<Router> {
-        self.router.take()
+        Ok(true)
     }
 
     fn is_running(&self) -> bool {
         self.running.load(Ordering::SeqCst)
     }
 
-    async fn stop(&mut self) -> Result<()> {
+    async fn stop(&mut self) -> CoreResult<()> {
         self.running.store(false, Ordering::SeqCst);
         Ok(())
     }
@@ -171,35 +186,25 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_plugin_initialization_creates_router() {
+    async fn test_plugin_registers_services_when_enabled() {
         let mut plugin = BlockAccessPlugin::new();
         let context = create_test_context(true);
+        plugin.initialize(context).unwrap();
 
-        let result = plugin.initialize(context);
-        assert!(result.is_ok());
-        assert!(!plugin.is_running());
-        assert!(plugin.router.is_some());
-    }
-
-    #[test]
-    fn test_start_without_initialization_is_ok() {
-        let mut plugin = BlockAccessPlugin::new();
-        // Since start no longer accesses context, it doesn't need to be initialized to run
-        let result = plugin.start();
-        assert!(result.is_ok());
+        let mut builder = RoutesBuilder::default();
+        let result = plugin.register_grpc_services(&mut builder).unwrap();
+        assert!(result);
     }
 
     #[tokio::test]
-    async fn test_start_disabled_plugin() {
+    async fn test_plugin_does_not_register_services_when_disabled() {
         let mut plugin = BlockAccessPlugin::new();
-        let context = create_test_context(false); // Disabled
-
+        let context = create_test_context(false);
         plugin.initialize(context).unwrap();
-        assert!(plugin.router.is_none()); // Router is not created if disabled
 
-        let result = plugin.start();
-        assert!(result.is_ok());
-        assert!(!plugin.is_running()); // Should not be set to running if disabled
+        let mut builder = RoutesBuilder::default();
+        let result = plugin.register_grpc_services(&mut builder).unwrap();
+        assert!(!result);
     }
 
     #[tokio::test]
@@ -208,15 +213,12 @@ mod tests {
         let context = create_test_context(true);
 
         plugin.initialize(context).unwrap();
-        assert!(plugin.router.is_some());
 
-        let result = plugin.start();
-        assert!(result.is_ok());
+        let mut builder = RoutesBuilder::default();
+        assert!(plugin.register_grpc_services(&mut builder).unwrap());
+
+        plugin.start().unwrap();
         assert!(plugin.is_running());
-
-        let router = plugin.take_grpc_router();
-        assert!(router.is_some());
-        assert!(plugin.router.is_none()); // Router should be gone after take
 
         plugin.stop().await.unwrap();
         assert!(!plugin.is_running());
