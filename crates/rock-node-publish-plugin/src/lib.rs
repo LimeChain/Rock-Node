@@ -21,7 +21,7 @@ use std::{
     time::Duration,
 };
 use tonic::service::RoutesBuilder;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 mod service;
 mod session_manager;
@@ -65,11 +65,23 @@ impl Plugin for PublishPlugin {
             .get(&TypeId::of::<BlockReaderProvider>())
             .and_then(|p| p.downcast_ref::<BlockReaderProvider>())
         {
-            let latest = provider
-                .get_reader()
-                .get_latest_persisted_block_number()?
-                .unwrap_or(0);
-            shared_state.set_latest_persisted_block(latest as i64);
+            let latest = match provider.get_reader().get_latest_persisted_block_number() {
+                Ok(Some(num)) => num as i64,
+                Ok(None) => -1,
+                Err(e) => {
+                    warn!(
+                        "Could not get latest persisted block on startup: {}. Defaulting to -1.",
+                        e
+                    );
+                    -1
+                }
+            };
+
+            shared_state.set_latest_persisted_block(latest);
+            debug!(
+                "Initialized PublishPlugin state. Latest persisted block is: {}",
+                latest
+            );
         } else {
             warn!("BlockReaderProvider not found; latest persisted block state may be stale.");
             shared_state.set_latest_persisted_block(-1);

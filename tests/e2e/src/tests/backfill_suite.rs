@@ -1,11 +1,10 @@
 use crate::common::{publish_blocks, TestContext};
 use anyhow::Result;
 use rock_node_protobufs::org::hiero::block::api::{
-    block_request::BlockSpecifier, block_response, BlockRequest, ServerStatusRequest,
+    block_request::BlockSpecifier, block_response, BlockRequest,
 };
 use serial_test::serial;
 use std::time::Duration;
-use testcontainers::core::Host;
 
 /// Test Case: GapFill Mode
 /// Objective: Verify that a node with a gap in its block history can fill it from a peer.
@@ -127,6 +126,7 @@ async fn test_continuous_mode_successfully_catches_up_and_streams() -> Result<()
     publish_blocks(&source_ctx, 0, 10).await?;
 
     let subscriber_port = source_ctx.subscriber_client_port().await?;
+
     // Use host.docker.internal for macOS and host-gateway for Linux
     let peer_address = if cfg!(target_os = "macos") {
         format!("http://host.docker.internal:{}", subscriber_port)
