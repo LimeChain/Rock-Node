@@ -147,13 +147,10 @@ start_block_number = 0
     enabled = true
     [plugins.publish_service]
     enabled = true
-    grpc_port = 50051
     [plugins.block_access_service]
     enabled = true
-    grpc_port = 50053
     [plugins.subscriber_service]
     enabled = true
-    grpc_port = 50052
     [plugins.backfill]
     enabled = true
     mode = "Continuous"
@@ -165,7 +162,6 @@ start_block_number = 0
 
     // --- 3. Wait for the initial catch-up ---
     println!("Waiting for Continuous mode to catch up...");
-    tokio::time::sleep(Duration::from_secs(20)).await;
 
     // --- 4. Verify the initial set of blocks was backfilled ---
     let mut access_client = dest_ctx.access_client().await?;

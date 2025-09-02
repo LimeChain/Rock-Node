@@ -263,17 +263,22 @@ impl BackfillWorker {
         shuffled_peers.shuffle(&mut rand::rng());
 
         for peer_addr in shuffled_peers.iter() {
-            let local_latest_block = self
-                .block_reader
-                .get_latest_persisted_block_number()
-                .ok()
-                .flatten()
-                .unwrap_or(0);
+            let local_latest_block = match self.block_reader.get_latest_persisted_block_number() {
+                Ok(Some(num)) => num as i64,
+                Ok(None) => -1,
+                Err(e) => {
+                    warn!(
+                        "Could not get latest persisted block on startup: {}. Defaulting to -1.",
+                        e
+                    );
+                    -1
+                }
+            };
             let mut retries = 0;
             loop {
                 match self.get_peer_status(peer_addr).await {
                     Ok(Some(status)) => {
-                        let peer_latest = status.last_available_block;
+                        let peer_latest = status.last_available_block as i64;
                         if peer_latest < local_latest_block {
                             warn!(
                                 "Peer {} is behind local node (peer_latest: {}, local_latest: {}).",
@@ -302,7 +307,7 @@ impl BackfillWorker {
                         match self
                             .stream_from_peer(
                                 peer_addr,
-                                start_from,
+                                start_from as u64,
                                 u64::MAX,
                                 BackfillMode::Continuous,
                             )
