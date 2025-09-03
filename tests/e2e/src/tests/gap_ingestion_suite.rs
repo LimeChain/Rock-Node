@@ -73,8 +73,6 @@ start_block_number = 0
 
     [plugins.publish_service]
     enabled = true
-    grpc_address = "0.0.0.0"
-    grpc_port = 50051
     max_concurrent_streams = 10
     persistence_ack_timeout_seconds = 10
     stale_winner_timeout_seconds = 10
@@ -83,8 +81,6 @@ start_block_number = 0
 
     [plugins.subscriber_service]
     enabled = true
-    grpc_address = "0.0.0.0"
-    grpc_port = 50052
     max_concurrent_streams = 10
     live_stream_queue_size = 100
     max_future_block_lookahead = 100
@@ -92,18 +88,12 @@ start_block_number = 0
 
     [plugins.block_access_service]
     enabled = true
-    grpc_address = "0.0.0.0"
-    grpc_port = 50053
 
     [plugins.server_status_service]
     enabled = true
-    grpc_address = "0.0.0.0"
-    grpc_port = 50054
 
     [plugins.query_service]
     enabled = true
-    grpc_address = "0.0.0.0"
-    grpc_port = 50055
 "#;
     let ctx = TestContext::with_config(Some(custom_config), None).await?;
 

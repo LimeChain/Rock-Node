@@ -31,19 +31,18 @@ async fn test_gap_fill_mode_successfully_fills_gap() -> Result<()> {
 log_level = "info"
 database_path = "/app/data"
 start_block_number = 0
+grpc_address = "0.0.0.0"
+grpc_port = 50051
 
 [plugins]
     [plugins.persistence_service]
     enabled = true
     [plugins.publish_service]
     enabled = true
-    grpc_port = 50051
     [plugins.block_access_service]
     enabled = true
-    grpc_port = 50053
     [plugins.subscriber_service]
     enabled = true
-    grpc_port = 50052
     [plugins.backfill]
     enabled = true
     mode = "GapFill"
@@ -125,8 +124,8 @@ async fn test_continuous_mode_successfully_catches_up_and_streams() -> Result<()
     let source_ctx = TestContext::new().await?;
     publish_blocks(&source_ctx, 0, 10).await?;
 
-    let subscriber_port = source_ctx.subscriber_client_port().await?;
-
+    let subscriber_port = source_ctx.container.get_host_port_ipv4(50051).await?;
+    println!("source address: {}", subscriber_port);
     // Use host.docker.internal for macOS and host-gateway for Linux
     let peer_address = if cfg!(target_os = "macos") {
         format!("http://host.docker.internal:{}", subscriber_port)
@@ -141,6 +140,8 @@ async fn test_continuous_mode_successfully_catches_up_and_streams() -> Result<()
 log_level = "info"
 database_path = "/app/data"
 start_block_number = 0
+grpc_address = "0.0.0.0"
+grpc_port = 50051
 
 [plugins]
     [plugins.persistence_service]
@@ -162,7 +163,6 @@ start_block_number = 0
 
     // --- 3. Wait for the initial catch-up ---
     println!("Waiting for Continuous mode to catch up...");
-
     // --- 4. Verify the initial set of blocks was backfilled ---
     let mut access_client = dest_ctx.access_client().await?;
     for i in 0..=10 {
@@ -185,7 +185,8 @@ start_block_number = 0
     publish_blocks(&source_ctx, 11, 15).await?;
 
     // --- 6. Wait for the continuous stream to deliver the new blocks ---
-    tokio::time::sleep(Duration::from_secs(15)).await;
+    println!("Waiting for new blocks to be streamed...");
+    tokio::time::sleep(Duration::from_secs(10)).await;
 
     // --- 7. Verify the new blocks have been streamed ---
     for i in 11..=15 {

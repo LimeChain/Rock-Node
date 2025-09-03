@@ -193,13 +193,10 @@ start_block_number = 0
     enabled = true
     [plugins.publish_service]
     enabled = true
-    grpc_port = 50051
     [plugins.block_access_service]
     enabled = true
-    grpc_port = 50053
     [plugins.subscriber_service]
     enabled = true
-    grpc_port = 50052
     [plugins.backfill]
     enabled = true
     mode = "GapFill"
