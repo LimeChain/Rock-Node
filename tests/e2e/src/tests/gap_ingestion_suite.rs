@@ -53,6 +53,8 @@ async fn test_fill_gap_and_verify_archival() -> Result<()> {
 log_level = "info"
 database_path = "/app/data/db"
 start_block_number = 0
+grpc_address = "0.0.0.0"
+grpc_port = 50051
 
 [plugins]
     [plugins.persistence_service]

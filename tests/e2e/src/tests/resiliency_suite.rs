@@ -87,6 +87,8 @@ async fn test_hot_to_cold_storage_archival() -> Result<()> {
 log_level = "info"
 database_path = "/app/data/db"
 start_block_number = 0
+grpc_address = "0.0.0.0"
+grpc_port = 50051
 
 [plugins]
     [plugins.observability]

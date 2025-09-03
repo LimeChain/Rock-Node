@@ -187,6 +187,8 @@ async fn test_backfill_with_intermittent_peer_failure() -> Result<()> {
 log_level = "info"
 database_path = "/app/data"
 start_block_number = 0
+grpc_address = "0.0.0.0"
+grpc_port = 50051
 
 [plugins]
     [plugins.persistence_service]
@@ -279,6 +281,8 @@ async fn test_backfill_handles_behind_peer() -> Result<()> {
 log_level = "info"
 database_path = "/app/data"
 start_block_number = 0
+grpc_address = "0.0.0.0"
+grpc_port = 50051
 
 [plugins]
     [plugins.persistence_service]
@@ -330,8 +334,7 @@ start_block_number = 0
 /// Test Case: Backfill with multiple peers, one of which works.
 /// Objective: Verify that the backfill plugin can failover from one or more
 /// offline peers and successfully connect to a working one.
-#[tokio::test]
-#[serial("backfill_resilience")]
+
 async fn test_backfill_with_multiple_peers_failover() -> Result<()> {
     // --- 1. Setup a working source peer ---
     let source_ctx = TestContext::new().await?;
@@ -356,6 +359,8 @@ async fn test_backfill_with_multiple_peers_failover() -> Result<()> {
 log_level = "info"
 database_path = "/app/data"
 start_block_number = 0
+grpc_address = "0.0.0.0"
+grpc_port = 50051
 
 [plugins]
     [plugins.persistence_service]
