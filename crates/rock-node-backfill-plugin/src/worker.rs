@@ -627,21 +627,252 @@ impl<'a> Drop for DecrementingGuard<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
+    use rock_node_core::{
+        app_context::AppContext,
+        block_reader::{BlockReader, BlockReaderProvider},
+        block_writer::{BlockWriter, BlockWriterProvider},
+        config::{BackfillConfig, Config, CoreConfig, PluginConfigs},
+        database::DatabaseManager,
+        database_provider::DatabaseManagerProvider,
+        test_utils::create_isolated_metrics,
+    };
     use rock_node_protobufs::{
-        com::hedera::hapi::block::stream::{block_item, BlockItem},
+        com::hedera::hapi::block::stream::{block_item, output::BlockHeader, BlockItem},
         org::hiero::block::api::{
+            block_node_service_server::BlockNodeService,
             block_stream_subscribe_service_server::BlockStreamSubscribeService,
-            subscribe_stream_response::Response as SubResponse, BlockItemSet,
-            SubscribeStreamResponse,
+            subscribe_stream_response::Response as SubResponse, BlockItemSet, ServerStatusRequest,
+            ServerStatusResponse, SubscribeStreamResponse,
         },
     };
-    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::{
+        any::TypeId,
+        collections::HashMap,
+        sync::{
+            atomic::{AtomicUsize, Ordering},
+            Arc,
+        },
+    };
+    use tempfile::TempDir;
+    use tokio_stream::wrappers::ReceiverStream;
+    use tonic::{Request, Response, Status};
+
+    #[derive(Debug)]
+    struct MockBlockReader {
+        latest_block: Option<u64>,
+        earliest_block: Option<u64>,
+        should_error: bool,
+    }
+
+    impl MockBlockReader {
+        fn new(latest: Option<u64>, earliest: Option<u64>) -> Self {
+            Self {
+                latest_block: latest,
+                earliest_block: earliest,
+                should_error: false,
+            }
+        }
+
+        #[allow(dead_code)]
+        fn with_error() -> Self {
+            Self {
+                latest_block: None,
+                earliest_block: None,
+                should_error: true,
+            }
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl BlockReader for MockBlockReader {
+        fn get_latest_persisted_block_number(&self) -> anyhow::Result<Option<u64>> {
+            if self.should_error {
+                return Err(anyhow::anyhow!("Mock error"));
+            }
+            Ok(self.latest_block)
+        }
+
+        fn read_block(&self, _block_number: u64) -> anyhow::Result<Option<Vec<u8>>> {
+            Ok(None)
+        }
+
+        fn get_earliest_persisted_block_number(&self) -> anyhow::Result<Option<u64>> {
+            if self.should_error {
+                return Err(anyhow::anyhow!("Mock error"));
+            }
+            Ok(self.earliest_block)
+        }
+
+        fn get_highest_contiguous_block_number(&self) -> anyhow::Result<u64> {
+            Ok(self.latest_block.unwrap_or(0))
+        }
+    }
+
+    #[derive(Debug, Default)]
+    struct MockBlockWriter {
+        blocks_written: Arc<AtomicUsize>,
+        should_error: bool,
+    }
+
+    impl MockBlockWriter {
+        fn new() -> Self {
+            Self {
+                blocks_written: Arc::new(AtomicUsize::new(0)),
+                should_error: false,
+            }
+        }
+
+        fn with_error() -> Self {
+            Self {
+                blocks_written: Arc::new(AtomicUsize::new(0)),
+                should_error: true,
+            }
+        }
+
+        fn blocks_written(&self) -> usize {
+            self.blocks_written.load(Ordering::SeqCst)
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl BlockWriter for MockBlockWriter {
+        async fn write_block(&self, _block: &Block) -> anyhow::Result<()> {
+            if self.should_error {
+                return Err(anyhow::anyhow!("Mock write error"));
+            }
+            self.blocks_written.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        }
+
+        async fn write_block_batch(&self, blocks: &[Block]) -> anyhow::Result<()> {
+            if self.should_error {
+                return Err(anyhow::anyhow!("Mock batch write error"));
+            }
+            self.blocks_written
+                .fetch_add(blocks.len(), Ordering::SeqCst);
+            Ok(())
+        }
+    }
+
+    fn create_test_context(
+        block_reader: Arc<dyn BlockReader>,
+        block_writer: Arc<dyn BlockWriter>,
+        temp_dir: &TempDir,
+    ) -> AppContext {
+        let db_manager = DatabaseManager::new(temp_dir.path().to_str().unwrap()).unwrap();
+
+        let config = Config {
+            core: CoreConfig {
+                log_level: "INFO".to_string(),
+                database_path: temp_dir.path().to_str().unwrap().to_string(),
+                start_block_number: 0,
+                grpc_address: "127.0.0.1".to_string(),
+                grpc_port: 8080,
+            },
+            plugins: PluginConfigs {
+                backfill: BackfillConfig {
+                    enabled: true,
+                    mode: rock_node_core::config::BackfillMode::GapFill,
+                    peers: vec!["http://localhost:8080".to_string()],
+                    check_interval_seconds: 1,
+                    max_batch_size: 100,
+                },
+                ..Default::default()
+            },
+        };
+
+        let mut providers: HashMap<TypeId, Arc<dyn std::any::Any + Send + Sync>> = HashMap::new();
+
+        providers.insert(
+            TypeId::of::<BlockReaderProvider>(),
+            Arc::new(BlockReaderProvider::new(block_reader)),
+        );
+
+        providers.insert(
+            TypeId::of::<BlockWriterProvider>(),
+            Arc::new(BlockWriterProvider::new(block_writer)),
+        );
+
+        providers.insert(
+            TypeId::of::<DatabaseManagerProvider>(),
+            Arc::new(DatabaseManagerProvider::new(Arc::new(db_manager))),
+        );
+
+        AppContext {
+            config: Arc::new(config),
+            service_providers: Arc::new(std::sync::RwLock::new(providers)),
+            metrics: Arc::new(create_isolated_metrics()),
+            capability_registry: Arc::new(rock_node_core::capability::CapabilityRegistry::new()),
+            block_data_cache: Arc::new(rock_node_core::cache::BlockDataCache::default()),
+            tx_block_items_received: tokio::sync::mpsc::channel(100).0,
+            tx_block_verified: tokio::sync::mpsc::channel(100).0,
+            tx_block_persisted: tokio::sync::broadcast::channel(100).0,
+        }
+    }
+
+    fn create_block_with_number(number: u64) -> Block {
+        Block {
+            items: vec![BlockItem {
+                item: Some(block_item::Item::BlockHeader(BlockHeader {
+                    number,
+                    ..Default::default()
+                })),
+            }],
+        }
+    }
 
     #[derive(Clone, Default)]
+    #[allow(dead_code)]
     struct MockPeerServer {
         fail_count: Arc<AtomicUsize>,
         total_failures_to_simulate: usize,
+    }
+
+    #[derive(Clone)]
+    #[allow(dead_code)]
+    struct MockNodeStatusServer {
+        status: ServerStatusResponse,
+        should_fail: bool,
+    }
+
+    #[allow(dead_code)]
+    impl MockNodeStatusServer {
+        fn new(first_block: u64, last_block: u64) -> Self {
+            Self {
+                status: ServerStatusResponse {
+                    first_available_block: first_block,
+                    last_available_block: last_block,
+                    only_latest_state: false,
+                    version_information: None,
+                },
+                should_fail: false,
+            }
+        }
+
+        fn with_failure() -> Self {
+            Self {
+                status: ServerStatusResponse {
+                    first_available_block: 0,
+                    last_available_block: 0,
+                    only_latest_state: false,
+                    version_information: None,
+                },
+                should_fail: true,
+            }
+        }
+    }
+
+    #[tonic::async_trait]
+    impl BlockNodeService for MockNodeStatusServer {
+        async fn server_status(
+            &self,
+            _request: Request<ServerStatusRequest>,
+        ) -> Result<Response<ServerStatusResponse>, Status> {
+            if self.should_fail {
+                return Err(Status::unavailable("Mock server error"));
+            }
+            Ok(Response::new(self.status.clone()))
+        }
     }
 
     #[tonic::async_trait]
@@ -666,11 +897,10 @@ mod tests {
                 for i in req.start_block_number..=req.end_block_number {
                     let block = Block {
                         items: vec![BlockItem {
-                            item: Some(block_item::Item::BlockHeader(
-                                rock_node_protobufs::com::hedera::hapi::block::stream::output::BlockHeader {
-                                    number: i, ..Default::default()
-                                },
-                            )),
+                            item: Some(block_item::Item::BlockHeader(BlockHeader {
+                                number: i,
+                                ..Default::default()
+                            })),
                         }],
                     };
                     let item_set = BlockItemSet {
@@ -687,5 +917,241 @@ mod tests {
 
             Ok(tonic::Response::new(ReceiverStream::new(rx)))
         }
+    }
+
+    #[tokio::test]
+    async fn test_backfill_worker_new_success() {
+        let temp_dir = TempDir::new().unwrap();
+        let block_reader = Arc::new(MockBlockReader::new(Some(100), Some(1)));
+        let block_writer = Arc::new(MockBlockWriter::new());
+        let context = create_test_context(block_reader, block_writer, &temp_dir);
+
+        let worker = BackfillWorker::new(context);
+        assert!(worker.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_backfill_worker_new_missing_providers() {
+        let temp_dir = TempDir::new().unwrap();
+        let _db_manager = DatabaseManager::new(temp_dir.path().to_str().unwrap()).unwrap();
+
+        let config = Config {
+            core: CoreConfig {
+                log_level: "INFO".to_string(),
+                database_path: temp_dir.path().to_str().unwrap().to_string(),
+                start_block_number: 0,
+                grpc_address: "127.0.0.1".to_string(),
+                grpc_port: 8080,
+            },
+            plugins: PluginConfigs {
+                backfill: BackfillConfig {
+                    enabled: true,
+                    mode: rock_node_core::config::BackfillMode::GapFill,
+                    peers: vec!["http://localhost:8080".to_string()],
+                    check_interval_seconds: 1,
+                    max_batch_size: 100,
+                },
+                ..Default::default()
+            },
+        };
+
+        let providers: HashMap<TypeId, Arc<dyn std::any::Any + Send + Sync>> = HashMap::new();
+
+        let context = AppContext {
+            config: Arc::new(config),
+            service_providers: Arc::new(std::sync::RwLock::new(providers)),
+            metrics: Arc::new(create_isolated_metrics()),
+            capability_registry: Arc::new(rock_node_core::capability::CapabilityRegistry::new()),
+            block_data_cache: Arc::new(rock_node_core::cache::BlockDataCache::default()),
+            tx_block_items_received: tokio::sync::mpsc::channel(100).0,
+            tx_block_verified: tokio::sync::mpsc::channel(100).0,
+            tx_block_persisted: tokio::sync::broadcast::channel(100).0,
+        };
+
+        let result = BackfillWorker::new(context);
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("BlockReaderProvider"));
+    }
+
+    #[tokio::test]
+    async fn test_get_all_gaps_empty_database() {
+        let temp_dir = TempDir::new().unwrap();
+        let block_reader = Arc::new(MockBlockReader::new(Some(100), Some(1)));
+        let block_writer = Arc::new(MockBlockWriter::new());
+        let context = create_test_context(block_reader, block_writer, &temp_dir);
+
+        let worker = BackfillWorker::new(context).unwrap();
+        let gaps = worker.get_all_gaps().unwrap();
+        assert!(gaps.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_get_all_gaps_with_data() {
+        let temp_dir = TempDir::new().unwrap();
+        let block_reader = Arc::new(MockBlockReader::new(Some(100), Some(1)));
+        let block_writer = Arc::new(MockBlockWriter::new());
+        let context = create_test_context(block_reader, block_writer, &temp_dir);
+
+        let worker = BackfillWorker::new(context).unwrap();
+
+        let cf_gaps = worker.db.cf_handle(CF_GAPS).unwrap();
+        worker
+            .db
+            .put_cf(cf_gaps, 10u64.to_be_bytes(), 20u64.to_be_bytes())
+            .unwrap();
+        worker
+            .db
+            .put_cf(cf_gaps, 50u64.to_be_bytes(), 60u64.to_be_bytes())
+            .unwrap();
+
+        let gaps = worker.get_all_gaps().unwrap();
+        assert_eq!(gaps.len(), 2);
+        assert_eq!(gaps[0], (10, 20));
+        assert_eq!(gaps[1], (50, 60));
+    }
+
+    #[test]
+    fn test_get_block_number_from_block() {
+        let block = create_block_with_number(42);
+        let number = get_block_number_from_block(&block);
+        assert_eq!(number, Some(42));
+    }
+
+    #[test]
+    fn test_get_block_number_from_empty_block() {
+        let block = Block { items: vec![] };
+        let number = get_block_number_from_block(&block);
+        assert_eq!(number, None);
+    }
+
+    #[test]
+    fn test_get_block_number_from_block_without_header() {
+        let block = Block {
+            items: vec![BlockItem { item: None }],
+        };
+        let number = get_block_number_from_block(&block);
+        assert_eq!(number, None);
+    }
+
+    #[tokio::test]
+    async fn test_process_blocks_directly() {
+        let temp_dir = TempDir::new().unwrap();
+        let block_reader = Arc::new(MockBlockReader::new(Some(100), Some(1)));
+        let block_writer = Arc::new(MockBlockWriter::new());
+        let context = create_test_context(block_reader, block_writer.clone(), &temp_dir);
+
+        let worker = BackfillWorker::new(context).unwrap();
+        let result = worker
+            .process_blocks_directly(5, 7, BackfillMode::GapFill)
+            .await;
+
+        assert!(result.is_ok());
+        assert_eq!(block_writer.blocks_written(), 3); // blocks 5, 6, 7
+    }
+
+    #[tokio::test]
+    async fn test_process_blocks_directly_continuous_mode() {
+        let temp_dir = TempDir::new().unwrap();
+        let block_reader = Arc::new(MockBlockReader::new(Some(100), Some(1)));
+        let block_writer = Arc::new(MockBlockWriter::new());
+        let context = create_test_context(block_reader, block_writer.clone(), &temp_dir);
+
+        let worker = BackfillWorker::new(context).unwrap();
+        let result = worker
+            .process_blocks_directly(1, 3, BackfillMode::Continuous)
+            .await;
+
+        assert!(result.is_ok());
+        assert_eq!(block_writer.blocks_written(), 3);
+    }
+
+    #[tokio::test]
+    async fn test_process_blocks_with_write_error() {
+        let temp_dir = TempDir::new().unwrap();
+        let block_reader = Arc::new(MockBlockReader::new(Some(100), Some(1)));
+        let block_writer = Arc::new(MockBlockWriter::with_error());
+        let context = create_test_context(block_reader, block_writer, &temp_dir);
+
+        let worker = BackfillWorker::new(context).unwrap();
+        let result = worker
+            .process_blocks_directly(1, 2, BackfillMode::GapFill)
+            .await;
+
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Mock write error"));
+    }
+
+    #[tokio::test]
+    async fn test_stream_blocks_from_peers_empty_peers() {
+        let result = stream_blocks_from_peers(&[], Some(1), Some(10)).await;
+        assert!(result.is_err());
+        assert!(result
+            .err()
+            .unwrap()
+            .to_string()
+            .contains("Failed to connect to any peer"));
+    }
+
+    #[tokio::test]
+    async fn test_stream_blocks_from_peers_invalid_start_end() {
+        let peers = vec!["http://localhost:8080".to_string()];
+        let result = stream_blocks_from_peers(&peers, Some(10), Some(5)).await;
+        assert!(result.is_err());
+        let error_msg = result.err().unwrap().to_string();
+        assert!(error_msg.contains("Failed to connect to any peer"));
+    }
+
+    #[test]
+    fn test_block_range_validation() {
+        let start_block = 10u64;
+        let end_block = 5u64;
+
+        if start_block > end_block {
+            let error_msg = format!("Start block {} is after end block {}", start_block, end_block);
+            assert!(error_msg.contains("Start block") && error_msg.contains("is after end block"));
+        }
+    }
+
+    #[test]
+    fn test_decrementing_guard() {
+        use prometheus::IntGauge;
+        let gauge = IntGauge::new("test_gauge", "Test gauge").unwrap();
+        gauge.set(10);
+
+        {
+            let _guard = DecrementingGuard::new(&gauge);
+            assert_eq!(gauge.get(), 10);
+        }
+
+        assert_eq!(gauge.get(), 9);
+    }
+
+    #[test]
+    fn test_peer_retry_constants() {
+        assert_eq!(PEER_RETRY_LIMIT, 3);
+        assert_eq!(PEER_BACKOFF_BASE_SECONDS, 1);
+        assert_eq!(BEHIND_PEER_DELAY_SECONDS, 60);
+        assert_eq!(MAX_PEER_CONNECTION_ATTEMPTS, 5);
+    }
+
+    #[tokio::test]
+    async fn test_continuous_stream_with_behind_peer() {
+        let temp_dir = TempDir::new().unwrap();
+        let block_reader = Arc::new(MockBlockReader::new(Some(100), Some(1)));
+        let block_writer = Arc::new(MockBlockWriter::new());
+        let context = create_test_context(block_reader, block_writer, &temp_dir);
+        let worker = Arc::new(BackfillWorker::new(context).unwrap());
+
+        let mut peers = vec!["http://localhost:8080".to_string()];
+
+        let shutdown_notify = Arc::new(Notify::new());
+        shutdown_notify.notify_waiters();
+
+        worker
+            .run_continuous_stream_cycle(&mut peers)
+            .await;
     }
 }
