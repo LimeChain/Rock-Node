@@ -1110,7 +1110,10 @@ mod tests {
         let end_block = 5u64;
 
         if start_block > end_block {
-            let error_msg = format!("Start block {} is after end block {}", start_block, end_block);
+            let error_msg = format!(
+                "Start block {} is after end block {}",
+                start_block, end_block
+            );
             assert!(error_msg.contains("Start block") && error_msg.contains("is after end block"));
         }
     }
@@ -1150,8 +1153,6 @@ mod tests {
         let shutdown_notify = Arc::new(Notify::new());
         shutdown_notify.notify_waiters();
 
-        worker
-            .run_continuous_stream_cycle(&mut peers)
-            .await;
+        worker.run_continuous_stream_cycle(&mut peers).await;
     }
 }
