@@ -422,6 +422,8 @@ mod tests {
                 log_level: "info".to_string(),
                 database_path: ":memory:".to_string(),
                 start_block_number: 0,
+                grpc_address: "0.0.0.0".to_string(),
+                grpc_port: 0,
             },
             plugins: PluginConfigs {
                 observability: rock_node_core::config::ObservabilityConfig {
@@ -436,8 +438,6 @@ mod tests {
                 },
                 publish_service: PublishServiceConfig {
                     enabled: true,
-                    grpc_address: "127.0.0.1".to_string(),
-                    grpc_port: 0,
                     max_concurrent_streams: 8,
                     persistence_ack_timeout_seconds: 1,
                     stale_winner_timeout_seconds: 1,
@@ -445,31 +445,17 @@ mod tests {
                     winner_cleanup_threshold_blocks: 100,
                 },
                 verification_service: VerificationServiceConfig { enabled: true },
-                block_access_service: BlockAccessServiceConfig {
-                    enabled: true,
-                    grpc_address: "127.0.0.1".to_string(),
-                    grpc_port: 0,
-                },
-                server_status_service: ServerStatusServiceConfig {
-                    enabled: true,
-                    grpc_address: "127.0.0.1".to_string(),
-                    grpc_port: 0,
-                },
+                block_access_service: BlockAccessServiceConfig { enabled: true },
+                server_status_service: ServerStatusServiceConfig { enabled: true },
                 state_management_service: StateManagementServiceConfig { enabled: true },
                 subscriber_service: SubscriberServiceConfig {
                     enabled: true,
-                    grpc_address: "127.0.0.1".to_string(),
-                    grpc_port: 0,
                     max_concurrent_streams: 8,
                     session_timeout_seconds: 1,
                     live_stream_queue_size: 64,
                     max_future_block_lookahead: 5,
                 },
-                query_service: QueryServiceConfig {
-                    enabled: true,
-                    grpc_address: "127.0.0.1".to_string(),
-                    grpc_port: 0,
-                },
+                query_service: QueryServiceConfig { enabled: true },
                 backfill: BackfillConfig {
                     enabled: false,
                     peers: vec![],

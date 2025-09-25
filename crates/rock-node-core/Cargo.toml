@@ -7,6 +7,7 @@ edition = "2021"
 rock-node-protobufs = { path = "../rock-node-protobufs" }
 tokio = { version = "1", features = ["sync", "macros"] } # Added macros feature
 serde = { version = "1", features = ["derive"] }
+tonic = "0.13.1"
 thiserror = "1"
 anyhow = "1"
 rocksdb = "0.22"

@@ -1,41 +1,37 @@
 use crate::service::SubscriberServiceImpl;
 use async_trait::async_trait;
 use rock_node_core::{
-    app_context::AppContext, error::Result as CoreResult, plugin::Plugin, Error as CoreError,
+    app_context::AppContext,
+    error::{Error as CoreError, Result as CoreResult},
+    plugin::Plugin,
 };
 use rock_node_protobufs::org::hiero::block::api::block_stream_subscribe_service_server::BlockStreamSubscribeServiceServer;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc,
 };
-use tokio::sync::{watch, Notify};
-use tracing::{error, info};
+use tokio::sync::Notify;
+use tonic::service::RoutesBuilder;
+use tracing::info;
 
 mod error;
 mod service;
 mod session;
 
+#[derive(Debug, Default)]
 pub struct SubscriberPlugin {
-    context: Option<Arc<AppContext>>,
+    context: Option<AppContext>,
     running: Arc<AtomicBool>,
-    shutdown_tx: Option<watch::Sender<()>>,
     service_shutdown_notify: Arc<Notify>,
 }
 
 impl SubscriberPlugin {
     pub fn new() -> Self {
         Self {
-            context: None,
             running: Arc::new(AtomicBool::new(false)),
-            shutdown_tx: None,
             service_shutdown_notify: Arc::new(Notify::new()),
+            context: None,
         }
-    }
-}
-
-impl Default for SubscriberPlugin {
-    fn default() -> Self {
-        Self::new()
     }
 }
 
@@ -46,58 +42,38 @@ impl Plugin for SubscriberPlugin {
     }
 
     fn initialize(&mut self, context: AppContext) -> CoreResult<()> {
-        self.context = Some(Arc::new(context));
-        info!("SubscriberPlugin initialized.");
+        info!("SubscriberPlugin initializing...");
+        self.context = Some(context);
         Ok(())
     }
 
     fn start(&mut self) -> CoreResult<()> {
-        info!("Starting SubscriberPlugin gRPC Server...");
-        let context = self
-            .context
-            .as_ref()
-            .cloned()
-            .ok_or_else(|| anyhow::anyhow!("SubscriberPlugin not initialized"))?;
-
-        let config = &context.config.plugins.subscriber_service;
-        if !config.enabled {
-            info!("SubscriberPlugin is disabled. Skipping start.");
-            return Ok(());
-        }
-        let listen_address = format!("{}:{}", config.grpc_address, config.grpc_port);
-        let socket_addr: std::net::SocketAddr = listen_address.parse().map_err(|e| {
-            anyhow::anyhow!(
-                "Failed to parse gRPC listen address '{}': {}",
-                listen_address,
-                e
-            )
+        let context = self.context.as_ref().ok_or_else(|| {
+            CoreError::PluginInitialization("SubscriberPlugin not initialized".to_string())
         })?;
 
-        let service = SubscriberServiceImpl::new(context, self.service_shutdown_notify.clone());
-        let server = BlockStreamSubscribeServiceServer::new(service);
-
-        let (shutdown_tx, mut shutdown_rx) = watch::channel(());
-        self.shutdown_tx = Some(shutdown_tx);
-        let running_clone = self.running.clone();
-
-        self.running.store(true, Ordering::SeqCst);
-        tokio::spawn(async move {
-            info!("Subscriber gRPC service listening on {}", socket_addr);
-
-            let server_future = tonic::transport::Server::builder()
-                .add_service(server)
-                .serve_with_shutdown(socket_addr, async move {
-                    shutdown_rx.changed().await.ok();
-                    info!("Gracefully shutting down Subscriber gRPC server...");
-                });
-
-            if let Err(e) = server_future.await {
-                error!("Subscriber gRPC server failed: {}", e);
-            }
-            running_clone.store(false, Ordering::SeqCst);
-        });
-
+        if context.config.plugins.subscriber_service.enabled {
+            self.running.store(true, Ordering::SeqCst);
+        }
         Ok(())
+    }
+
+    fn register_grpc_services(&mut self, builder: &mut RoutesBuilder) -> CoreResult<bool> {
+        let context = self.context.as_ref().ok_or_else(|| {
+            CoreError::PluginInitialization("SubscriberPlugin not initialized".to_string())
+        })?;
+
+        if !context.config.plugins.subscriber_service.enabled {
+            return Ok(false);
+        }
+
+        let service = SubscriberServiceImpl::new(
+            Arc::new(context.clone()),
+            self.service_shutdown_notify.clone(),
+        );
+        let server = BlockStreamSubscribeServiceServer::new(service);
+        builder.add_service(server);
+        Ok(true)
     }
 
     fn is_running(&self) -> bool {
@@ -106,18 +82,7 @@ impl Plugin for SubscriberPlugin {
 
     async fn stop(&mut self) -> CoreResult<()> {
         info!("Stopping SubscriberPlugin...");
-        // Notify all active session tasks to shut down.
         self.service_shutdown_notify.notify_waiters();
-
-        // Signal the main gRPC server to stop accepting new connections.
-        if let Some(tx) = self.shutdown_tx.take() {
-            if tx.send(()).is_err() {
-                let msg =
-                    "Failed to send shutdown signal to Subscriber gRPC server: receiver dropped.";
-                error!("{}", msg);
-                return Err(CoreError::PluginShutdown(msg.to_string()));
-            }
-        }
         self.running.store(false, Ordering::SeqCst);
         Ok(())
     }

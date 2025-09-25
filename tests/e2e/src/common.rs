@@ -66,7 +66,7 @@ impl TestContext {
     /// Creates a new `TestContext` by starting an isolated Docker container
     /// running the `rock-node-e2e` image.
     pub async fn new() -> Result<TestContext> {
-        Self::with_config(None, None).await
+        Self::with_config_and_ports(None, None, None, None).await
     }
 
     /// Creates a new `TestContext` with a specific configuration and optional
@@ -74,6 +74,17 @@ impl TestContext {
     pub async fn with_config(
         config_override: Option<&str>,
         volume_name: Option<&str>,
+    ) -> Result<TestContext> {
+        Self::with_config_and_ports(config_override, volume_name, None, None).await
+    }
+
+    /// Creates a new `TestContext` with a specific configuration, optional
+    /// named volume for data persistence across restarts, and optional custom ports.
+    pub async fn with_config_and_ports(
+        config_override: Option<&str>,
+        volume_name: Option<&str>,
+        _http_port: Option<u16>,
+        _grpc_port: Option<u16>,
     ) -> Result<TestContext> {
         Lazy::force(&E2E_IMAGE_BUILT);
 
@@ -90,10 +101,6 @@ impl TestContext {
         let mut image = GenericImage::new("rock-node-e2e", "latest")
             .with_exposed_port(8080.tcp())
             .with_exposed_port(50051.tcp())
-            .with_exposed_port(50052.tcp())
-            .with_exposed_port(50053.tcp())
-            .with_exposed_port(50054.tcp())
-            .with_exposed_port(50055.tcp())
             .with_wait_for(WaitFor::message_on_stdout(
                 "Rock Node running successfully!",
             ))
@@ -134,13 +141,13 @@ impl TestContext {
 
     pub async fn subscriber_client_port(&self) -> Result<u16> {
         self.container
-            .get_host_port_ipv4(50052)
+            .get_host_port_ipv4(50051)
             .await
             .map_err(Into::into)
     }
 
     pub async fn subscriber_client(&self) -> Result<BlockStreamSubscribeServiceClient<Channel>> {
-        let port = self.container.get_host_port_ipv4(50052).await?;
+        let port = self.container.get_host_port_ipv4(50051).await?;
         let endpoint = format!("http://localhost:{}", port);
         let channel = Channel::from_shared(endpoint)?.connect().await?;
         Ok(BlockStreamSubscribeServiceClient::new(channel))
@@ -153,7 +160,7 @@ impl TestContext {
             Channel,
         >,
     >{
-        let port = self.container.get_host_port_ipv4(50053).await?;
+        let port = self.container.get_host_port_ipv4(50051).await?;
         let endpoint = format!("http://localhost:{}", port);
         let channel = Channel::from_shared(endpoint)?.connect().await?;
         Ok(
@@ -170,7 +177,7 @@ impl TestContext {
             Channel,
         >,
     >{
-        let port = self.container.get_host_port_ipv4(50054).await?;
+        let port = self.container.get_host_port_ipv4(50051).await?;
         let endpoint = format!("http://localhost:{}", port);
         let channel = Channel::from_shared(endpoint)?.connect().await?;
         Ok(
@@ -181,49 +188,49 @@ impl TestContext {
     }
 
     pub async fn query_client(&self) -> Result<CryptoServiceClient<Channel>> {
-        let port = self.container.get_host_port_ipv4(50055).await?;
+        let port = self.container.get_host_port_ipv4(50051).await?;
         let endpoint = format!("http://localhost:{}", port);
         let channel = Channel::from_shared(endpoint)?.connect().await?;
         Ok(CryptoServiceClient::new(channel))
     }
 
     pub async fn consensus_client(&self) -> Result<ConsensusServiceClient<Channel>> {
-        let port = self.container.get_host_port_ipv4(50055).await?;
+        let port = self.container.get_host_port_ipv4(50051).await?;
         let endpoint = format!("http://localhost:{}", port);
         let channel = Channel::from_shared(endpoint)?.connect().await?;
         Ok(ConsensusServiceClient::new(channel))
     }
 
     pub async fn file_client(&self) -> Result<FileServiceClient<Channel>> {
-        let port = self.container.get_host_port_ipv4(50055).await?;
+        let port = self.container.get_host_port_ipv4(50051).await?;
         let endpoint = format!("http://localhost:{}", port);
         let channel = Channel::from_shared(endpoint)?.connect().await?;
         Ok(FileServiceClient::new(channel))
     }
 
     pub async fn network_client(&self) -> Result<NetworkServiceClient<Channel>> {
-        let port = self.container.get_host_port_ipv4(50055).await?;
+        let port = self.container.get_host_port_ipv4(50051).await?;
         let endpoint = format!("http://localhost:{}", port);
         let channel = Channel::from_shared(endpoint)?.connect().await?;
         Ok(NetworkServiceClient::new(channel))
     }
 
     pub async fn schedule_client(&self) -> Result<ScheduleServiceClient<Channel>> {
-        let port = self.container.get_host_port_ipv4(50055).await?;
+        let port = self.container.get_host_port_ipv4(50051).await?;
         let endpoint = format!("http://localhost:{}", port);
         let channel = Channel::from_shared(endpoint)?.connect().await?;
         Ok(ScheduleServiceClient::new(channel))
     }
 
     pub async fn token_client(&self) -> Result<TokenServiceClient<Channel>> {
-        let port = self.container.get_host_port_ipv4(50055).await?;
+        let port = self.container.get_host_port_ipv4(50051).await?;
         let endpoint = format!("http://localhost:{}", port);
         let channel = Channel::from_shared(endpoint)?.connect().await?;
         Ok(TokenServiceClient::new(channel))
     }
 
     pub async fn contract_client(&self) -> Result<SmartContractServiceClient<Channel>> {
-        let port = self.container.get_host_port_ipv4(50055).await?;
+        let port = self.container.get_host_port_ipv4(50051).await?;
         let endpoint = format!("http://localhost:{}", port);
         let channel = Channel::from_shared(endpoint)?.connect().await?;
         Ok(SmartContractServiceClient::new(channel))

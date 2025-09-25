@@ -14,23 +14,20 @@ async fn main() -> Result<()> {
     info!("cargo run -p rock-node -- --config-path source-config.toml\n");
 
     // 1. Define the peer to connect to.
-    let peers = vec!["http://127.0.0.1:6895".to_string()];
-    let start_block = 0;
-    let end_block = 1000000;
+    let peers = vec!["[http://127.0.0.1:6895](http://127.0.0.1:6895)".to_string()];
+
+    // --- Case 1: Stream a finite, specific range ---
+    let start_block = Some(10);
+    let end_block = Some(20);
 
     info!(
-        "Attempting to stream blocks [{}, {}] from peers: {:?}",
+        "Attempting to stream blocks [{:?}, {:?}] from peers: {:?}",
         start_block, end_block, peers
     );
 
-    // 2. Call the public function to get a stream of blocks.
     match stream_blocks_from_peers(&peers, start_block, end_block).await {
         Ok(mut block_stream) => {
-            info!("✅ Successfully connected to peer and established stream.");
-
-            // 3. Consume the stream.
-            // This loop receives blocks as they arrive from the peer.
-            // An external user can do anything they want with the blocks here.
+            info!("✅ Successfully connected to peer and established finite stream.");
             while let Some(block_result) = block_stream.next().await {
                 match block_result {
                     Ok(block) => {
@@ -47,7 +44,42 @@ async fn main() -> Result<()> {
                     }
                 }
             }
-            info!("Stream finished.");
+            info!("Finite stream finished.");
+        }
+        Err(e) => {
+            tracing::error!("Failed to establish a block stream: {}", e);
+        }
+    }
+
+    // --- Case 2: Stream from the latest block onwards (continuous mode) ---
+    let start_block_live = None;
+    let end_block_live = None;
+
+    info!(
+        "\nAttempting to stream blocks from [{:?}] to [{:?}] from peers: {:?}",
+        start_block_live, end_block_live, peers
+    );
+
+    match stream_blocks_from_peers(&peers, start_block_live, end_block_live).await {
+        Ok(mut block_stream) => {
+            info!("✅ Successfully connected to peer and established live stream.");
+            let mut count = 0;
+            while let Some(block_result) = block_stream.next().await {
+                if let Ok(block) = block_result {
+                    let block_num = block.items.first().map_or(0, |item| {
+                        if let Some(rock_node_protobufs::com::hedera::hapi::block::stream::block_item::Item::BlockHeader(h)) = &item.item {
+                            h.number
+                        } else {0}
+                    });
+                    info!("Received live Block #{}", block_num);
+                    count += 1;
+                    if count > 5 {
+                        // Stop after 5 live blocks for the example
+                        break;
+                    }
+                }
+            }
+            info!("Live stream finished.");
         }
         Err(e) => {
             tracing::error!("Failed to establish a block stream: {}", e);

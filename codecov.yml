@@ -1,0 +1,21 @@
+codecov:
+  max_report_age: off
+
+comment:
+  layout: "diff, flags, files"
+  behavior: new
+  require_changes: true
+
+coverage:
+  status:
+    patch:
+      default:
+        target: 80%
+        threshold: 1%
+        only_pulls: true
+    project:
+      default:
+        target: 80%
+        threshold: 1%
+        branches:
+          - main

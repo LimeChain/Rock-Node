@@ -4,8 +4,10 @@
 
 [core]
 log_level = "info"
-database_path = "/app/data" # Use the path inside the container
+database_path = "/app/data"
 start_block_number = 0
+grpc_address = "0.0.0.0"
+grpc_port = 50051
 
 [plugins]
 
@@ -27,8 +29,6 @@ enabled = true
 
 [plugins.publish_service]
 enabled = true
-grpc_address = "0.0.0.0"
-grpc_port = 50051
 max_concurrent_streams = 10
 persistence_ack_timeout_seconds = 60
 stale_winner_timeout_seconds = 60
@@ -37,8 +37,6 @@ winner_cleanup_threshold_blocks = 1000
 
 [plugins.subscriber_service]
 enabled = true
-grpc_address = "0.0.0.0"
-grpc_port = 50052
 max_concurrent_streams = 10
 live_stream_queue_size = 100
 max_future_block_lookahead = 100
@@ -46,15 +44,12 @@ session_timeout_seconds = 60
 
 [plugins.block_access_service]
 enabled = true
-grpc_address = "0.0.0.0"
-grpc_port = 50053
 
 [plugins.server_status_service]
 enabled = true
-grpc_address = "0.0.0.0"
-grpc_port = 50054
 
 [plugins.query_service]
 enabled = true
-grpc_address = "0.0.0.0"
-grpc_port = 50055
+
+[plugins.backfill]
+enabled = false

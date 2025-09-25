@@ -359,6 +359,8 @@ mod tests {
                 log_level: "debug".to_string(),
                 database_path: "".to_string(),
                 start_block_number: 0,
+                grpc_address: "".to_string(),
+                grpc_port: 0,
             },
             plugins: PluginConfigs {
                 observability: ObservabilityConfig {
@@ -373,8 +375,6 @@ mod tests {
                 },
                 publish_service: PublishServiceConfig {
                     enabled: false,
-                    grpc_address: "".to_string(),
-                    grpc_port: 0,
                     max_concurrent_streams: 0,
                     persistence_ack_timeout_seconds: 0,
                     stale_winner_timeout_seconds: 0,
@@ -382,31 +382,17 @@ mod tests {
                     winner_cleanup_threshold_blocks: 0,
                 },
                 verification_service: VerificationServiceConfig { enabled: false },
-                block_access_service: BlockAccessServiceConfig {
-                    enabled: false,
-                    grpc_address: "".to_string(),
-                    grpc_port: 0,
-                },
-                server_status_service: ServerStatusServiceConfig {
-                    enabled: false,
-                    grpc_address: "".to_string(),
-                    grpc_port: 0,
-                },
+                block_access_service: BlockAccessServiceConfig { enabled: false },
+                server_status_service: ServerStatusServiceConfig { enabled: false },
                 state_management_service: StateManagementServiceConfig { enabled: false },
                 subscriber_service: SubscriberServiceConfig {
                     enabled: true,
-                    grpc_address: "".to_string(),
-                    grpc_port: 0,
                     max_concurrent_streams: 10,
                     session_timeout_seconds: 0,
                     live_stream_queue_size: 10,
                     max_future_block_lookahead: 100,
                 },
-                query_service: QueryServiceConfig {
-                    enabled: false,
-                    grpc_address: "".to_string(),
-                    grpc_port: 0,
-                },
+                query_service: QueryServiceConfig { enabled: false },
                 backfill: BackfillConfig {
                     enabled: false,
                     peers: vec![],
