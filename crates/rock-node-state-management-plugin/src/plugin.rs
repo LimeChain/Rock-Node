@@ -136,7 +136,7 @@ impl StateManagementPlugin {
                     error!("Could not read last processed block: {:?}. Halting.", e);
                     running_clone.store(false, Ordering::SeqCst);
                     return;
-                }
+                },
             };
 
             if let Some(last) = last_processed_block {

@@ -1,0 +1,109 @@
+# Pre-commit configuration for Rock Node
+# See https://pre-commit.com for more information
+# Install with: pip install pre-commit
+# Setup with: pre-commit install
+
+repos:
+  # Rust formatting and linting
+  - repo: local
+    hooks:
+      # Format Rust code with rustfmt
+      - id: cargo-fmt
+        name: cargo fmt
+        description: Format Rust code
+        entry: cargo
+        args: [fmt, --all, --]
+        language: system
+        files: \.rs$
+        pass_filenames: false
+
+      # Lint Rust code with clippy
+      - id: cargo-clippy
+        name: cargo clippy
+        description: Lint Rust code
+        entry: cargo
+        args: [clippy, --all-targets, --all-features, --workspace, --, -W, "clippy::pedantic", -A, "clippy::doc_overindented_list_items", -A, "clippy::doc_lazy_continuation", -A, "clippy::large_enum_variant", -A, unused-imports, -A, dead-code, -A, "clippy::derivable_impls", -A, "clippy::clone_on_copy", -A, "clippy::needless_borrows_for_generic_args", -A, "clippy::empty_line_after_doc_comments", -A, "clippy::assertions_on_constants"]
+        language: system
+        files: \.rs$
+        pass_filenames: false
+
+      # Run cargo check to ensure compilation
+      - id: cargo-check
+        name: cargo check
+        description: Check Rust compilation
+        entry: cargo
+        args: [check, --all-targets, --all-features, --workspace]
+        language: system
+        files: \.rs$
+        pass_filenames: false
+
+      # Run unit tests (excluding e2e tests)
+      - id: cargo-test
+        name: cargo test
+        description: Run Rust unit tests
+        entry: cargo
+        args: [test, --workspace, --exclude, e2e]
+        language: system
+        files: \.rs$
+        pass_filenames: false
+
+  # General file formatting and checks
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      # Remove trailing whitespace
+      - id: trailing-whitespace
+        exclude: ^.*\.(md|rst)$
+
+      # Ensure files end with newline
+      - id: end-of-file-fixer
+        exclude: ^.*\.(md|rst)$
+
+      # Check for large files
+      - id: check-added-large-files
+        args: ['--maxkb=1000']
+
+      # Check YAML/TOML syntax
+      - id: check-yaml
+      - id: check-toml
+
+      # Check for merge conflicts
+      - id: check-merge-conflict
+
+      # Check for private keys
+      - id: detect-private-key
+
+  # Security audit (local)
+  - repo: local
+    hooks:
+      - id: cargo-audit
+        name: cargo audit
+        description: Audit Rust dependencies for security vulnerabilities
+        entry: bash
+        args: [-c, 'if command -v cargo-audit >/dev/null 2>&1; then cargo audit; else echo "cargo-audit not installed, skipping..."; fi']
+        language: system
+        files: Cargo\.(toml|lock)$
+        pass_filenames: false
+
+  # Docker and documentation
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      # Check JSON syntax
+      - id: check-json
+
+      # Check shell scripts
+      - id: check-executables-have-shebangs
+
+# CI configuration
+ci:
+  autofix_commit_msg: |
+    [pre-commit.ci] auto fixes from pre-commit hooks
+
+    for more information, see https://pre-commit.ci
+  autofix_prs: true
+  autoupdate_branch: ''
+  autoupdate_commit_msg: '[pre-commit.ci] pre-commit autoupdate'
+  autoupdate_schedule: weekly
+  skip: [cargo-test]  # Skip tests in CI to avoid timeouts
+  submodules: false

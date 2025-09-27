@@ -1,0 +1,32 @@
+# rustfmt configuration for Rock Node
+# See https://rust-lang.github.io/rustfmt/ for all options
+
+# Edition to use for parsing
+edition = "2021"
+
+# Line width
+max_width = 100
+
+# Indentation
+hard_tabs = false
+tab_spaces = 4
+
+# Imports
+reorder_imports = true
+
+# Functions
+fn_params_layout = "Tall"
+
+# Misc formatting
+match_block_trailing_comma = true
+use_small_heuristics = "Default"
+
+# Chain formatting
+chain_width = 60
+single_line_if_else_max_width = 50
+
+# Type formatting
+use_try_shorthand = true
+
+# Note: Many formatting options require nightly rustfmt
+# This configuration only uses stable options for broader compatibility

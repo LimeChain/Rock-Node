@@ -62,7 +62,7 @@ pub async fn stream_blocks_from_peers(
                     Ok(Some(stream)) => return Ok(stream),
                     Ok(None) => {
                         break;
-                    }
+                    },
                     Err(e) => {
                         warn!(
                             "Failed to connect to peer {}: {}. Retrying in {}s.",
@@ -83,7 +83,7 @@ pub async fn stream_blocks_from_peers(
                         ))
                         .await;
                         retries += 1;
-                    }
+                    },
                 }
             }
         }
@@ -166,11 +166,11 @@ async fn try_connect_and_stream(
                             break;
                         }
                     }
-                }
+                },
                 Err(status) => {
                     let _ = tx.send(Err(status)).await;
                     break;
-                }
+                },
             }
         }
     });
@@ -272,7 +272,7 @@ impl BackfillWorker {
                         e
                     );
                     -1
-                }
+                },
             };
             let mut retries = 0;
             loop {
@@ -316,7 +316,7 @@ impl BackfillWorker {
                             Ok(()) => {
                                 info!("Continuous stream from {} ended gracefully.", peer_addr);
                                 return;
-                            }
+                            },
                             Err(e) => {
                                 error!(
                                     "Continuous stream from {} failed: {}. Retrying peer.",
@@ -330,16 +330,16 @@ impl BackfillWorker {
                                 if retries > PEER_RETRY_LIMIT {
                                     break;
                                 }
-                            }
+                            },
                         }
-                    }
+                    },
                     Ok(None) => {
                         warn!(
                             "Could not get server status from peer {}. Trying next peer.",
                             peer_addr
                         );
                         break;
-                    }
+                    },
                     Err(e) => {
                         warn!(
                             "Failed to connect for status check to peer {}: {}. Retrying...",
@@ -353,7 +353,7 @@ impl BackfillWorker {
                         if retries > PEER_RETRY_LIMIT {
                             break;
                         }
-                    }
+                    },
                 }
             }
         }
@@ -428,14 +428,14 @@ impl BackfillWorker {
                                 );
                                 break 'peer_loop;
                             }
-                        }
+                        },
                         Ok(None) => {
                             warn!(
                                 "Could not get server status from peer {}. Trying next peer.",
                                 peer_addr
                             );
                             break;
-                        }
+                        },
                         Err(e) => {
                             warn!(
                                 "Failed to connect for status check to peer {}: {}. Retrying...",
@@ -449,7 +449,7 @@ impl BackfillWorker {
                             if retries > PEER_RETRY_LIMIT {
                                 break;
                             }
-                        }
+                        },
                     }
                 }
             }
@@ -474,7 +474,7 @@ impl BackfillWorker {
             Err(e) => {
                 warn!("Failed to get server status from peer {}: {}", peer_addr, e);
                 Ok(None)
-            }
+            },
         }
     }
 
@@ -532,7 +532,7 @@ impl BackfillWorker {
                         }
                         self.block_writer.write_block(&block).await?;
                     }
-                }
+                },
                 Err(status) => return Err(anyhow!("gRPC stream error: {}", status)),
             }
         }

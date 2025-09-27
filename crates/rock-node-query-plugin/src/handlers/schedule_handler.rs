@@ -88,7 +88,7 @@ impl ScheduleQueryHandler {
                         "State inconsistency: Expected Schedule value, found other type",
                     ));
                 }
-            }
+            },
             None => {
                 trace!("No schedule found for the given schedule_id");
                 ScheduleGetInfoResponse {
@@ -98,7 +98,7 @@ impl ScheduleQueryHandler {
                     )),
                     schedule_info: None,
                 }
-            }
+            },
         };
 
         Ok(response)

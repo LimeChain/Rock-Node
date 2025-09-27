@@ -96,7 +96,9 @@ mod tests {
 
         fn initialize(&mut self, _context: AppContext) -> Result<()> {
             if self.should_fail_init {
-                return Err(Error::PluginInitialization("Mock initialization failure".to_string()));
+                return Err(Error::PluginInitialization(
+                    "Mock initialization failure".to_string(),
+                ));
             }
             self.initialized = true;
             Ok(())
@@ -104,10 +106,14 @@ mod tests {
 
         fn start(&mut self) -> Result<()> {
             if self.should_fail_start {
-                return Err(Error::PluginInitialization("Mock start failure".to_string()));
+                return Err(Error::PluginInitialization(
+                    "Mock start failure".to_string(),
+                ));
             }
             if !self.initialized {
-                return Err(Error::PluginInitialization("Plugin not initialized".to_string()));
+                return Err(Error::PluginInitialization(
+                    "Plugin not initialized".to_string(),
+                ));
             }
             self.started = true;
             Ok(())
@@ -201,7 +207,7 @@ mod tests {
         match result.unwrap_err() {
             Error::PluginInitialization(msg) => {
                 assert!(msg.contains("Mock initialization failure"));
-            }
+            },
             _ => panic!("Expected PluginInitialization error"),
         }
     }
@@ -223,7 +229,7 @@ mod tests {
         match result.unwrap_err() {
             Error::PluginInitialization(msg) => {
                 assert!(msg.contains("Mock start failure"));
-            }
+            },
             _ => panic!("Expected PluginInitialization error"),
         }
     }
@@ -240,7 +246,7 @@ mod tests {
         match result.unwrap_err() {
             Error::PluginInitialization(msg) => {
                 assert!(msg.contains("Plugin not initialized"));
-            }
+            },
             _ => panic!("Expected PluginInitialization error"),
         }
     }
@@ -264,7 +270,7 @@ mod tests {
         match result.unwrap_err() {
             Error::PluginShutdown(msg) => {
                 assert!(msg.contains("Mock stop failure"));
-            }
+            },
             _ => panic!("Expected PluginShutdown error"),
         }
     }

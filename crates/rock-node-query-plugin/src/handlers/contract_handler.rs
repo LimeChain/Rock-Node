@@ -108,7 +108,7 @@ impl ContractQueryHandler {
                         "State inconsistency: Expected Account value for contract, found other type",
                     ));
                 }
-            }
+            },
             None => {
                 trace!("No contract found for the given contract_id");
                 ContractGetInfoResponse {
@@ -118,7 +118,7 @@ impl ContractQueryHandler {
                     )),
                     contract_info: None,
                 }
-            }
+            },
         };
         Ok(response)
     }
@@ -164,7 +164,7 @@ impl ContractQueryHandler {
                         "State inconsistency: Expected Bytecode value, found other type",
                     ));
                 }
-            }
+            },
             None => {
                 trace!("No bytecode found for the given contract_id");
                 ContractGetBytecodeResponse {
@@ -174,7 +174,7 @@ impl ContractQueryHandler {
                     )),
                     bytecode: vec![],
                 }
-            }
+            },
         };
         Ok(response)
     }

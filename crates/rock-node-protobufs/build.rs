@@ -97,7 +97,7 @@ fn main() -> Result<()> {
         .into_iter()
         .filter_map(Result::ok)
         .filter(|e| {
-            e.file_type().is_file() && e.path().extension().map_or(false, |ext| ext == "proto")
+            e.file_type().is_file() && e.path().extension().is_some_and(|ext| ext == "proto")
         })
         .map(|e| e.into_path())
         .collect();

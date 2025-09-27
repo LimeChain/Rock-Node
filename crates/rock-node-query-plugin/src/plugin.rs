@@ -89,7 +89,7 @@ impl Plugin for QueryPlugin {
                 None => {
                     warn!("StateReaderProvider not found. QueryPlugin cannot register services.");
                     return Ok(false); // Can't proceed without the state reader.
-                }
+                },
             }
         };
 

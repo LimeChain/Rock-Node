@@ -644,7 +644,10 @@ mod tests {
 
         // Verify final counts
         assert_eq!(metrics.blocks_acknowledged.get(), 1000); // 10 tasks * 100 increments
-        assert!(metrics.active_publish_sessions.get() >= 0 && metrics.active_publish_sessions.get() < 10);
+        assert!(
+            metrics.active_publish_sessions.get() >= 0
+                && metrics.active_publish_sessions.get() < 10
+        );
     }
 
     #[test]

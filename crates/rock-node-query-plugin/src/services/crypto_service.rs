@@ -286,7 +286,7 @@ mod tests {
                     ResponseCodeEnum::Ok as i32
                 );
                 assert_eq!(info.account_info.unwrap().memo, "test");
-            }
+            },
             _ => panic!("Incorrect response type"),
         }
     }
@@ -317,7 +317,7 @@ mod tests {
                     ResponseCodeEnum::InvalidAccountId as i32
                 );
                 assert!(info.account_info.is_none());
-            }
+            },
             _ => panic!("Incorrect response type"),
         }
     }
@@ -365,7 +365,7 @@ mod tests {
                     ResponseCodeEnum::Ok as i32
                 );
                 assert_eq!(balance_info.balance, 1_000_000);
-            }
+            },
             _ => panic!("Incorrect response type"),
         }
     }
@@ -392,7 +392,7 @@ mod tests {
                     ResponseCodeEnum::Ok as i32
                 );
                 assert!(records_info.records.is_empty());
-            }
+            },
             _ => panic!("Incorrect response type"),
         }
     }
@@ -420,7 +420,7 @@ mod tests {
                     receipt_info.header.unwrap().node_transaction_precheck_code,
                     ResponseCodeEnum::ReceiptNotFound as i32
                 );
-            }
+            },
             _ => panic!("Incorrect response type"),
         }
     }
@@ -448,7 +448,7 @@ mod tests {
                     record_info.header.unwrap().node_transaction_precheck_code,
                     ResponseCodeEnum::RecordNotFound as i32
                 );
-            }
+            },
             _ => panic!("Incorrect response type"),
         }
     }

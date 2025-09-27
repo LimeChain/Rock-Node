@@ -75,7 +75,7 @@ impl Plugin for StatusPlugin {
                 None => {
                     warn!("BlockReaderProvider not found. StatusService will not be available.");
                     return Ok(false);
-                }
+                },
             }
         };
 

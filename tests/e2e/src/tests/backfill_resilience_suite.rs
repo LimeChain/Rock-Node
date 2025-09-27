@@ -138,14 +138,14 @@ async fn spawn_mock_failing_peer(
     match tokio::time::timeout(tokio::time::Duration::from_secs(5), ready_rx).await {
         Ok(Ok(_)) => {
             println!("Mock server is ready on port {}", addr.port());
-        }
+        },
         Ok(Err(_)) => {
             return Err(anyhow::anyhow!("Mock server failed to signal readiness"));
-        }
+        },
         Err(_) => {
             server_handle.abort();
             return Err(anyhow::anyhow!("Mock server startup timed out"));
-        }
+        },
     }
 
     // For Docker containers, try to get the actual host IP

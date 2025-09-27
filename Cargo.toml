@@ -25,4 +25,4 @@ tonic = { version = "0.13.1", features = ["transport"] }
 prost = "0.13.5"
 config = "0.13"
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] } 
+tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }

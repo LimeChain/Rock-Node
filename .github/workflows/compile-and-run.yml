@@ -60,4 +60,4 @@ jobs:
         run: |
           if [[ -f rocknode_pid ]]; then
             kill $(cat rocknode_pid) || true
-          fi 
+          fi

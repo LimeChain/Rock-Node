@@ -74,7 +74,7 @@ impl Plugin for PublishPlugin {
                         e
                     );
                     -1
-                }
+                },
             };
 
             shared_state.set_latest_persisted_block(latest);

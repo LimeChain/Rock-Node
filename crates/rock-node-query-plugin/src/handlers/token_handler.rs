@@ -109,14 +109,14 @@ impl TokenQueryHandler {
                         "State inconsistency: Expected Token value, found other type",
                     ));
                 }
-            }
+            },
             None => {
                 trace!("No token found for the given token_id");
                 TokenGetInfoResponse {
                     header: Some(build_response_header(ResponseCodeEnum::InvalidTokenId, 0)),
                     token_info: None,
                 }
-            }
+            },
         };
         Ok(response)
     }
@@ -170,14 +170,14 @@ impl TokenQueryHandler {
                         "State inconsistency: Expected Nft value, found other type",
                     ));
                 }
-            }
+            },
             None => {
                 trace!("No NFT found for the given nft_id");
                 TokenGetNftInfoResponse {
                     header: Some(build_response_header(ResponseCodeEnum::InvalidNftId, 0)),
                     nft: None,
                 }
-            }
+            },
         };
         Ok(response)
     }

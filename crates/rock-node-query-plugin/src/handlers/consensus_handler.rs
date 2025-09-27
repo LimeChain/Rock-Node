@@ -96,7 +96,7 @@ impl ConsensusQueryHandler {
                         "State inconsistency: Expected Topic value, found other type",
                     ));
                 }
-            }
+            },
             None => {
                 trace!("No topic found for the given topic_id");
                 ConsensusGetTopicInfoResponse {
@@ -104,7 +104,7 @@ impl ConsensusQueryHandler {
                     topic_id: Some(topic_id),
                     topic_info: None,
                 }
-            }
+            },
         };
 
         trace!(

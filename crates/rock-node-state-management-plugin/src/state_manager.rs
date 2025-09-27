@@ -147,11 +147,11 @@ impl StateManager {
                     let key = self.construct_db_key(change.state_id, &update.key)?;
                     let val = update.value.context("MapUpdateChange is missing value")?;
                     batch.put_cf(cf, &key, &val.encode_to_vec());
-                }
+                },
                 ChangeOperation::MapDelete(deletion) => {
                     let key = self.construct_db_key(change.state_id, &deletion.key)?;
                     batch.delete_cf(cf, &key);
-                }
+                },
                 ChangeOperation::SingletonUpdate(update) => {
                     let key = change.state_id.to_be_bytes();
                     let value_enum = update.new_value.context("SingletonUpdate missing value")?;
@@ -159,47 +159,47 @@ impl StateManager {
                         // Add all the new singleton variants from the logs
                         singleton_update_change::NewValue::PlatformStateValue(v) => {
                             v.encode_to_vec()
-                        }
+                        },
                         singleton_update_change::NewValue::NodeRewardsValue(v) => v.encode_to_vec(),
                         singleton_update_change::NewValue::BlockStreamInfoValue(v) => {
                             v.encode_to_vec()
-                        }
+                        },
                         singleton_update_change::NewValue::HintsConstructionValue(v) => {
                             v.encode_to_vec()
-                        }
+                        },
                         singleton_update_change::NewValue::EntityCountsValue(v) => {
                             v.encode_to_vec()
-                        }
+                        },
                         singleton_update_change::NewValue::CrsStateValue(v) => v.encode_to_vec(),
                         singleton_update_change::NewValue::EntityNumberValue(v) => {
                             v.encode_to_vec()
-                        }
+                        },
                         singleton_update_change::NewValue::NetworkStakingRewardsValue(v) => {
                             v.encode_to_vec()
-                        }
+                        },
                         singleton_update_change::NewValue::ThrottleUsageSnapshotsValue(v) => {
                             v.encode_to_vec()
-                        }
+                        },
                         singleton_update_change::NewValue::CongestionLevelStartsValue(v) => {
                             v.encode_to_vec()
-                        }
+                        },
                         singleton_update_change::NewValue::RunningHashesValue(v) => {
                             v.encode_to_vec()
-                        }
+                        },
                         singleton_update_change::NewValue::BlockInfoValue(v) => v.encode_to_vec(),
                         singleton_update_change::NewValue::ExchangeRateSetValue(v) => {
                             v.encode_to_vec()
-                        }
+                        },
                         singleton_update_change::NewValue::BytesValue(v) => v.encode_to_vec(),
                         singleton_update_change::NewValue::TimestampValue(v) => v.encode_to_vec(),
                         singleton_update_change::NewValue::RosterStateValue(v) => v.encode_to_vec(),
                         _ => {
                             warn!("Unhandled SingletonUpdate variant: {:?}", value_enum);
                             return Ok(());
-                        }
+                        },
                     };
                     batch.put_cf(cf, &key, &value_bytes);
-                }
+                },
                 ChangeOperation::QueuePush(push) => {
                     let key = [
                         change.state_id.to_be_bytes().as_slice(),
@@ -210,14 +210,14 @@ impl StateManager {
                     let value_bytes = match value_enum {
                         queue_push_change::Value::TransactionReceiptEntriesElement(v) => {
                             v.encode_to_vec()
-                        }
+                        },
                         _ => {
                             warn!("Unhandled QueuePush variant: {:?}", value_enum);
                             return Ok(());
-                        }
+                        },
                     };
                     batch.put_cf(cf, &key, &value_bytes);
-                }
+                },
                 ChangeOperation::QueuePop(_pop) => {
                     let prefix = change.state_id.to_be_bytes();
                     let mut iter = db.prefix_iterator_cf(cf, prefix);
@@ -229,7 +229,7 @@ impl StateManager {
                             change.state_id
                         );
                     }
-                }
+                },
                 _ => warn!("Unhandled StateChange operation: {:?}", op),
             }
         }

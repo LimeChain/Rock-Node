@@ -51,7 +51,7 @@ jobs:
         run: |
           echo "Installing cargo-nextest..."
           cargo install cargo-nextest --locked
-          
+
           echo "Running E2E tests with retries..."
           cd tests/e2e
           cargo nextest run --retries 2 --no-capture
