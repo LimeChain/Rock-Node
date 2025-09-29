@@ -39,11 +39,11 @@ async fn test_multiple_containers_independence() -> Result<()> {
     let client = reqwest::Client::new();
 
     let response1 = client
-        .get(&format!("http://localhost:{}/livez", port1))
+        .get(format!("http://localhost:{}/livez", port1))
         .send()
         .await?;
     let response2 = client
-        .get(&format!("http://localhost:{}/livez", port2))
+        .get(format!("http://localhost:{}/livez", port2))
         .send()
         .await?;
 

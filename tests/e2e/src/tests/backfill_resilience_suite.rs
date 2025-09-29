@@ -1,6 +1,5 @@
 use crate::common::{publish_blocks, TestContext};
 use anyhow::Result;
-use prost::Message;
 use rock_node_protobufs::com::hedera::hapi::block::stream::{block_item, Block, BlockItem};
 use rock_node_protobufs::org::hiero::block::api::{
     block_node_service_server::{BlockNodeService, BlockNodeServiceServer},
@@ -18,16 +17,14 @@ use serial_test::serial;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
-use testcontainers::core::Host;
 use tokio::net::TcpListener;
-use tokio::sync::{mpsc, Mutex};
-use tokio_stream::wrappers::TcpListenerStream;
-use tokio_stream::StreamExt;
+use tokio::sync::mpsc;
 use tonic::{transport::Server, Request, Response, Status};
 
 /// A mock peer server that can be configured to fail a specific number of times
 /// before it starts successfully streaming blocks. It also responds to ServerStatus requests.
 #[derive(Clone, Default)]
+#[allow(dead_code)]
 struct MockFailingPeerServer {
     fail_count: Arc<AtomicUsize>,
     total_failures_to_simulate: usize,
@@ -96,6 +93,7 @@ impl BlockStreamSubscribeService for MockFailingPeerServer {
     }
 }
 
+#[allow(dead_code)]
 async fn spawn_mock_failing_peer(
     failures_to_simulate: usize,
     first: u64,
@@ -334,7 +332,7 @@ grpc_port = 50051
 /// Test Case: Backfill with multiple peers, one of which works.
 /// Objective: Verify that the backfill plugin can failover from one or more
 /// offline peers and successfully connect to a working one.
-
+#[allow(dead_code)]
 async fn test_backfill_with_multiple_peers_failover() -> Result<()> {
     // --- 1. Setup a working source peer ---
     let source_ctx = TestContext::new().await?;

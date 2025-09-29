@@ -53,7 +53,7 @@ async fn test_get_token_info_successfully() -> Result<()> {
     let query = TopLevelQuery {
         query: Some(Query::TokenGetInfo(TokenGetInfoQuery {
             header: None,
-            token: Some(token_id.clone()),
+            token: Some(token_id),
         })),
     };
 
@@ -162,7 +162,7 @@ async fn test_get_token_nft_info_successfully() -> Result<()> {
     let query = TopLevelQuery {
         query: Some(Query::TokenGetNftInfo(TokenGetNftInfoQuery {
             header: None,
-            nft_id: Some(nft_id.clone()),
+            nft_id: Some(nft_id),
         })),
     };
 

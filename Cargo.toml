@@ -23,6 +23,7 @@ version = "0.1.0"
 tokio = { version = "1", features = ["full"] }
 tonic = { version = "0.13.1", features = ["transport"] }
 prost = "0.13.5"
-config = "0.13"
+config = "0.14"  # Updated to avoid unmaintained yaml-rust
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
+tracing-subscriber = { version = "0.3.20", features = ["fmt", "env-filter"] }  # Fix RUSTSEC-2025-0055
+slab = "0.4.11"  # Fix RUSTSEC-2025-0047
