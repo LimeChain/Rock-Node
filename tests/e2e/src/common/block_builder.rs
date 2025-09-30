@@ -193,7 +193,7 @@ impl BlockBuilder {
         };
 
         let topic_value = Topic {
-            topic_id: Some(topic_id.clone()),
+            topic_id: Some(topic_id),
             memo: memo.to_string(),
             ..Default::default()
         };
@@ -237,7 +237,7 @@ impl BlockBuilder {
         };
 
         let file_value = File {
-            file_id: Some(file_id.clone()),
+            file_id: Some(file_id),
             memo: memo.to_string(),
             contents: contents.to_vec(),
             ..Default::default()
@@ -282,7 +282,7 @@ impl BlockBuilder {
         };
 
         let schedule_value = Schedule {
-            schedule_id: Some(schedule_id.clone()),
+            schedule_id: Some(schedule_id),
             memo: memo.to_string(),
             ..Default::default()
         };
@@ -326,7 +326,7 @@ impl BlockBuilder {
         };
 
         let token_value = Token {
-            token_id: Some(token_id.clone()),
+            token_id: Some(token_id),
             symbol: symbol.to_string(),
             name: name.to_string(),
             ..Default::default()
@@ -385,7 +385,7 @@ impl BlockBuilder {
         };
 
         let nft_value = Nft {
-            nft_id: Some(nft_id.clone()),
+            nft_id: Some(nft_id),
             owner_id: Some(owner_id),
             ..Default::default()
         };

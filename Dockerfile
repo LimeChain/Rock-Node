@@ -32,5 +32,5 @@ USER nonroot
 COPY --from=builder --chown=nonroot:nonroot /dist/bin/rock-node /app/rock-node
 
 # This entrypoint passes the config path argument to our application.
-# The path `/config/development.toml` will be created by the docker-compose volume mount.
+# The path `/config/config.toml` will be created by the docker-compose volume mount.
 ENTRYPOINT ["/app/rock-node", "--config-path", "/config/config.toml"]

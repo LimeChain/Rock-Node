@@ -59,7 +59,7 @@ impl NetworkQueryHandler {
 
                 // Assuming HAPI version is the same as services version for now
                 (Some(software_version.clone()), Some(software_version))
-            }
+            },
             None => (None, None),
         };
 
@@ -174,14 +174,14 @@ impl NetworkQueryHandler {
                         "State inconsistency: Expected Account value, found other type",
                     ));
                 }
-            }
+            },
             None => {
                 trace!("No account found for the given account_id");
                 GetAccountDetailsResponse {
                     header: Some(build_response_header(ResponseCodeEnum::InvalidAccountId, 0)),
                     account_details: None,
                 }
-            }
+            },
         };
         Ok(response)
     }

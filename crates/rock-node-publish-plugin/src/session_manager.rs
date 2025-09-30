@@ -102,11 +102,11 @@ impl SessionManager {
                         }
                     }
                 }
-            }
+            },
             PublishRequestType::EndStream(_) => {
                 debug!(session_id = %self.id, "Publisher sent EndStream. Closing connection.");
                 return true;
-            }
+            },
         }
         false
     }
@@ -290,7 +290,7 @@ impl SessionManager {
 
                 self.shared_state.block_winners.remove(&block_to_await);
                 Ok(())
-            }
+            },
             _ => {
                 // FAILURE/TIMEOUT CASE
                 warn!(session_id = %self.id, block = block_to_await, "Did not receive persistence ACK. Broadcasting ResendBlock request.");
@@ -334,7 +334,7 @@ impl SessionManager {
                     .inc();
 
                 Err(())
-            }
+            },
         }
     }
 
@@ -505,7 +505,7 @@ mod tests {
                     publish_stream_response::end_of_stream::Code::DuplicateBlock as i32
                 );
                 assert_eq!(eos.block_number, 100);
-            }
+            },
             _ => panic!("Expected EndStream DuplicateBlock"),
         }
     }
@@ -537,7 +537,7 @@ mod tests {
         match msg.response.unwrap() {
             publish_stream_response::Response::SkipBlock(sk) => {
                 assert_eq!(sk.block_number, 101);
-            }
+            },
             _ => panic!("Expected SkipBlock"),
         }
 
@@ -648,7 +648,7 @@ mod tests {
         match msg.response.unwrap() {
             publish_stream_response::Response::Acknowledgement(ack) => {
                 assert_eq!(ack.block_number, 200)
-            }
+            },
             _ => panic!("Expected Acknowledgement"),
         }
 

@@ -52,7 +52,7 @@ grpc_port = 8090
 
     [plugins.query_service]
     enabled = true
-    
+
     [plugins.backfill]
     enabled = true
     mode = "GapFill"

@@ -77,10 +77,10 @@ impl Plugin for BackfillPlugin {
             match mode {
                 BackfillMode::GapFill => {
                     worker.run_gap_fill_loop(shutdown_notify).await;
-                }
+                },
                 BackfillMode::Continuous => {
                     worker.run_continuous_loop(shutdown_notify).await;
-                }
+                },
             }
 
             running_clone.store(false, Ordering::SeqCst);

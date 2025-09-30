@@ -37,18 +37,18 @@ async fn main() -> Result<()> {
                             } else {0}
                         });
                         info!("Received Block #{}", block_num);
-                    }
+                    },
                     Err(status) => {
                         tracing::error!("An error occurred during streaming: {}", status);
                         break;
-                    }
+                    },
                 }
             }
             info!("Finite stream finished.");
-        }
+        },
         Err(e) => {
             tracing::error!("Failed to establish a block stream: {}", e);
-        }
+        },
     }
 
     // --- Case 2: Stream from the latest block onwards (continuous mode) ---
@@ -80,10 +80,10 @@ async fn main() -> Result<()> {
                 }
             }
             info!("Live stream finished.");
-        }
+        },
         Err(e) => {
             tracing::error!("Failed to establish a block stream: {}", e);
-        }
+        },
     }
 
     info!("🎉 Example finished.");

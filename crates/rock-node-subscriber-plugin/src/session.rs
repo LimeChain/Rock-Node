@@ -115,8 +115,8 @@ impl SubscriberSession {
                     .with_label_values(&["historical"])
                     .inc();
                 return Ok(Some(block_to_send + 1));
-            }
-            Ok(None) => {}
+            },
+            Ok(None) => {},
             Err(e) => return Err(SubscriberError::Persistence(e)),
         }
 
@@ -146,19 +146,19 @@ impl SubscriberSession {
                             .inc();
                         return Ok(());
                     }
-                }
+                },
                 Ok(Err(tokio::sync::broadcast::error::RecvError::Lagged(_))) => {
                     warn!(session_id = %self.id, "Subscriber lagged behind event bus. Forcing persistence check.");
                     return Ok(());
-                }
+                },
                 Ok(Err(tokio::sync::broadcast::error::RecvError::Closed)) => {
                     return Err(SubscriberError::Internal(
                         "Broadcast channel closed".to_string(),
                     ));
-                }
+                },
                 Err(_) => {
                     return Err(SubscriberError::TimeoutWaitingForBlock(block_number_needed));
-                }
+                },
             }
         }
     }

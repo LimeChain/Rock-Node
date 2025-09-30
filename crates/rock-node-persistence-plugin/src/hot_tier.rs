@@ -33,7 +33,7 @@ impl HotTier {
             Some(db_vec) => {
                 let stored_block: StoredBlock = bincode::deserialize(&db_vec)?;
                 Ok(Some(stored_block.contents))
-            }
+            },
             None => Ok(None),
         }
     }

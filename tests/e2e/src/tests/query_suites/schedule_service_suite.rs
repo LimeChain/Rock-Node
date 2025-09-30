@@ -54,7 +54,7 @@ async fn test_get_schedule_info_successfully() -> Result<()> {
     };
     let query = TopLevelQuery {
         query: Some(Query::ScheduleGetInfo(ScheduleGetInfoQuery {
-            schedule_id: Some(schedule_id.clone()),
+            schedule_id: Some(schedule_id),
             header: None,
         })),
     };

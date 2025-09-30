@@ -54,7 +54,7 @@ async fn test_get_file_info_and_content_successfully() -> Result<()> {
     };
     let info_query = TopLevelQuery {
         query: Some(Query::FileGetInfo(FileGetInfoQuery {
-            file_id: Some(file_id.clone()),
+            file_id: Some(file_id),
             header: None,
         })),
     };

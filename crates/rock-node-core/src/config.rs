@@ -143,16 +143,10 @@ impl Default for SubscriberServiceConfig {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone)]
+#[derive(Debug, Deserialize, Serialize, Clone, Default)]
 #[serde(default)]
 pub struct VerificationServiceConfig {
     pub enabled: bool,
-}
-
-impl Default for VerificationServiceConfig {
-    fn default() -> Self {
-        Self { enabled: false }
-    }
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -191,7 +185,7 @@ impl Default for QueryServiceConfig {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone)]
+#[derive(Debug, Deserialize, Serialize, Clone, Default)]
 pub enum BackfillMode {
     #[serde(
         rename = "gap-fill",
@@ -199,15 +193,10 @@ pub enum BackfillMode {
         alias = "gapFill",
         alias = "GAPFILL"
     )]
+    #[default]
     GapFill,
     #[serde(alias = "continuous", alias = "CONTINUOUS")]
     Continuous,
-}
-
-impl Default for BackfillMode {
-    fn default() -> Self {
-        BackfillMode::GapFill
-    }
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]

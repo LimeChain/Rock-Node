@@ -60,7 +60,7 @@ impl BlockStreamSubscribeService for SubscriberServiceImpl {
             Err(status) => {
                 error!("Failed to create subscriber session: {}", status);
                 return Err(status);
-            }
+            },
         };
         let session_id = session.id;
         self.active_sessions

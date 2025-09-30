@@ -156,6 +156,130 @@ cargo install cargo-tarpaulin
 cargo tarpaulin --out Html
 ```
 
+### Development Workflow
+
+#### Recommended Daily Workflow
+
+```bash
+# 1. Start your work
+git checkout -b feature/my-feature
+
+# 2. Make your changes
+# ... edit code ...
+
+# 3. Run development checks (before committing)
+make dev-check
+
+# 4. Commit your changes
+git add .
+git commit -m "feat: add my feature"
+# Pre-commit hooks run automatically
+
+# 5. Push and create PR
+git push origin feature/my-feature
+```
+
+#### Available Make Commands
+
+```bash
+make help              # Show all available commands
+make install           # Setup development environment
+make dev-check         # Run full development check
+make quick-check       # Quick compilation check
+make clean             # Clean build artifacts
+make docs              # Generate documentation
+```
+
+## Code Quality Standards
+
+### Compilation
+- All code must compile without warnings
+- Use `#[allow(...)]` sparingly and with justification
+
+### Formatting
+- Code must be formatted with `rustfmt`
+- No manual formatting overrides
+
+### Linting
+- All clippy warnings must be addressed
+- Prefer fixing the issue over allowing the lint
+- Document any necessary `#[allow(...)]` with comments
+
+### Testing
+- New code should include appropriate tests
+- Tests should cover both success and error paths
+- Use descriptive test names: `test_function_scenario_outcome`
+
+### Documentation
+- Public APIs should have doc comments
+- Use `///` for public documentation
+- Include examples in doc comments where helpful
+
+## CI/CD Integration
+
+### GitHub Actions
+
+The project includes several CI workflows:
+
+- **Code Quality** ([.github/workflows/code-quality.yml](.github/workflows/code-quality.yml))
+  - Formatting check
+  - Clippy linting
+  - Compilation check
+  - Security audit
+  - Pre-commit validation
+
+- **Unit Tests** ([.github/workflows/unit-tests.yml](.github/workflows/unit-tests.yml))
+  - Run unit tests across platforms
+  - Generate coverage reports
+
+- **E2E Tests** ([.github/workflows/e2e-tests.yml](.github/workflows/e2e-tests.yml))
+  - Integration testing with Docker
+
+### Status Checks
+
+All PRs must pass:
+- ✅ Code formatting (`cargo fmt --check`)
+- ✅ Linting (`cargo clippy`)
+- ✅ Compilation (`cargo check`)
+- ✅ Unit tests (`cargo test`)
+- ✅ Security audit (`cargo audit`)
+
+## Troubleshooting
+
+### Pre-commit Issues
+
+```bash
+# Update hooks
+pre-commit autoupdate
+
+# Clear cache
+pre-commit clean
+
+# Reinstall hooks
+pre-commit uninstall
+pre-commit install
+```
+
+### Formatting Conflicts
+
+```bash
+# Check what rustfmt would change
+cargo fmt --all -- --check
+
+# Apply formatting
+cargo fmt --all
+```
+
+### Clippy Issues
+
+```bash
+# See detailed clippy output
+cargo clippy --all-targets --all-features --workspace
+
+# Fix automatically fixable issues
+cargo clippy --fix --all-targets --all-features --workspace
+```
+
 ## Submitting Changes
 
 ### Pull Request Process
@@ -283,6 +407,13 @@ Contributors will be recognized in:
 ## License
 
 By contributing to Rock Node, you agree that your contributions will be licensed under the same license as the project (Apache License 2.0).
+
+## Additional Resources
+
+- [Rust Book](https://doc.rust-lang.org/book/)
+- [Clippy Lint Documentation](https://rust-lang.github.io/rust-clippy/master/)
+- [rustfmt Configuration](https://rust-lang.github.io/rustfmt/)
+- [Pre-commit Documentation](https://pre-commit.com/)
 
 ## Questions?
 

@@ -423,3 +423,304 @@ impl MetricsRegistry {
         buffer
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Arc;
+
+    #[test]
+    fn test_metrics_registry_new_success() {
+        let metrics = MetricsRegistry::new();
+        assert!(metrics.is_ok());
+    }
+
+    #[test]
+    fn test_metrics_registry_with_custom_registry() {
+        let custom_registry = Registry::new();
+        let metrics = MetricsRegistry::with_registry(custom_registry);
+        assert!(metrics.is_ok());
+    }
+
+    #[test]
+    fn test_all_core_metrics_are_registered() {
+        let metrics = MetricsRegistry::new().unwrap();
+
+        // Test core metrics can be accessed
+        metrics.blocks_acknowledged.inc();
+        assert_eq!(metrics.blocks_acknowledged.get(), 1);
+
+        metrics.active_publish_sessions.set(5);
+        assert_eq!(metrics.active_publish_sessions.get(), 5);
+    }
+
+    #[test]
+    fn test_block_access_metrics_are_registered() {
+        let metrics = MetricsRegistry::new().unwrap();
+
+        // Test block access metrics
+        metrics
+            .block_access_requests_total
+            .with_label_values(&["success", "get_block"])
+            .inc();
+
+        metrics.block_access_latest_available_block.set(100);
+        assert_eq!(metrics.block_access_latest_available_block.get(), 100);
+
+        // Test histogram metric
+        metrics
+            .block_access_request_duration_seconds
+            .with_label_values(&["success", "get_block"])
+            .observe(0.5);
+    }
+
+    #[test]
+    fn test_publish_plugin_metrics_are_registered() {
+        let metrics = MetricsRegistry::new().unwrap();
+
+        // Test publish metrics
+        metrics
+            .publish_blocks_received_total
+            .with_label_values(&["success"])
+            .inc();
+
+        metrics.publish_items_processed_total.inc();
+        assert_eq!(metrics.publish_items_processed_total.get(), 1);
+
+        metrics
+            .publish_persistence_duration_seconds
+            .with_label_values(&["success"])
+            .observe(1.5);
+    }
+
+    #[test]
+    fn test_persistence_plugin_metrics_are_registered() {
+        let metrics = MetricsRegistry::new().unwrap();
+
+        // Test persistence metrics
+        metrics
+            .persistence_writes_total
+            .with_label_values(&["live"])
+            .inc();
+
+        metrics.persistence_archival_cycles_total.inc();
+        assert_eq!(metrics.persistence_archival_cycles_total.get(), 1);
+
+        metrics.persistence_hot_tier_block_count.set(50);
+        metrics.persistence_cold_tier_block_count.set(1000);
+        assert_eq!(metrics.persistence_hot_tier_block_count.get(), 50);
+        assert_eq!(metrics.persistence_cold_tier_block_count.get(), 1000);
+    }
+
+    #[test]
+    fn test_subscriber_plugin_metrics_are_registered() {
+        let metrics = MetricsRegistry::new().unwrap();
+
+        // Test subscriber metrics
+        metrics.subscriber_active_sessions.set(3);
+        assert_eq!(metrics.subscriber_active_sessions.get(), 3);
+
+        metrics
+            .subscriber_blocks_sent_total
+            .with_label_values(&["live"])
+            .inc();
+
+        metrics
+            .subscriber_sessions_total
+            .with_label_values(&["completed"])
+            .inc();
+
+        metrics
+            .subscriber_average_inter_block_time_seconds
+            .with_label_values(&["session_123"])
+            .set(2.5);
+    }
+
+    #[test]
+    fn test_backfill_plugin_metrics_are_registered() {
+        let metrics = MetricsRegistry::new().unwrap();
+
+        // Test backfill metrics
+        metrics.backfill_gaps_found_total.inc();
+        assert_eq!(metrics.backfill_gaps_found_total.get(), 1);
+
+        metrics
+            .backfill_blocks_fetched_total
+            .with_label_values(&["GapFill"])
+            .inc();
+
+        metrics
+            .backfill_peer_connection_attempts_total
+            .with_label_values(&["peer1", "success"])
+            .inc();
+
+        metrics.backfill_active_streams.set(2);
+        metrics.backfill_latest_continuous_block.set(12345);
+        assert_eq!(metrics.backfill_active_streams.get(), 2);
+        assert_eq!(metrics.backfill_latest_continuous_block.get(), 12345);
+    }
+
+    #[test]
+    fn test_metric_isolation_in_tests() {
+        // Create two separate metric registries
+        let metrics1 = MetricsRegistry::new().unwrap();
+        let metrics2 = MetricsRegistry::new().unwrap();
+
+        // Modify metrics in first registry
+        metrics1.blocks_acknowledged.inc();
+        metrics1.active_publish_sessions.set(5);
+
+        // Verify second registry is isolated
+        assert_eq!(metrics1.blocks_acknowledged.get(), 1);
+        assert_eq!(metrics1.active_publish_sessions.get(), 5);
+        assert_eq!(metrics2.blocks_acknowledged.get(), 0);
+        assert_eq!(metrics2.active_publish_sessions.get(), 0);
+    }
+
+    #[test]
+    fn test_prometheus_export_format() {
+        let metrics = MetricsRegistry::new().unwrap();
+
+        // Set some metric values
+        metrics.blocks_acknowledged.inc();
+        metrics.active_publish_sessions.set(3);
+        metrics
+            .block_access_requests_total
+            .with_label_values(&["success", "get_block"])
+            .inc();
+
+        // Export to Prometheus format
+        let exported = metrics.gather();
+        let exported_str = String::from_utf8(exported).unwrap();
+
+        // Verify the output contains expected metric names
+        assert!(exported_str.contains("rocknode_blocks_acknowledged"));
+        assert!(exported_str.contains("rocknode_active_publish_sessions"));
+        assert!(exported_str.contains("rocknode_block_access_requests_total"));
+
+        // Verify it contains metric values
+        assert!(exported_str.contains("rocknode_blocks_acknowledged 1"));
+        assert!(exported_str.contains("rocknode_active_publish_sessions 3"));
+    }
+
+    #[test]
+    fn test_gather_with_empty_metrics() {
+        let metrics = MetricsRegistry::new().unwrap();
+
+        // Export without setting any values
+        let exported = metrics.gather();
+        let exported_str = String::from_utf8(exported).unwrap();
+
+        // Should still contain metric definitions (with 0 values)
+        assert!(exported_str.contains("rocknode_blocks_acknowledged"));
+        assert!(exported_str.contains("rocknode_active_publish_sessions"));
+    }
+
+    #[tokio::test]
+    async fn test_concurrent_metric_updates() {
+        let metrics = Arc::new(MetricsRegistry::new().unwrap());
+
+        // Spawn multiple tasks that update metrics concurrently
+        let handles: Vec<_> = (0..10)
+            .map(|i| {
+                let metrics = Arc::clone(&metrics);
+                tokio::spawn(async move {
+                    for _ in 0..100 {
+                        metrics.blocks_acknowledged.inc();
+                        metrics.active_publish_sessions.set(i as i64);
+                        metrics
+                            .block_access_requests_total
+                            .with_label_values(&["success", "get_block"])
+                            .inc();
+                    }
+                })
+            })
+            .collect();
+
+        // Wait for all tasks to complete
+        for handle in handles {
+            handle.await.unwrap();
+        }
+
+        // Verify final counts
+        assert_eq!(metrics.blocks_acknowledged.get(), 1000); // 10 tasks * 100 increments
+        assert!(
+            metrics.active_publish_sessions.get() >= 0
+                && metrics.active_publish_sessions.get() < 10
+        );
+    }
+
+    #[test]
+    fn test_metrics_registry_debug_format() {
+        let metrics = MetricsRegistry::new().unwrap();
+        let debug_str = format!("{:?}", metrics);
+        assert!(debug_str.contains("MetricsRegistry"));
+    }
+
+    #[test]
+    fn test_metrics_registry_clone() {
+        let metrics1 = MetricsRegistry::new().unwrap();
+        let metrics2 = metrics1.clone();
+
+        // Modify metrics through first instance
+        metrics1.blocks_acknowledged.inc();
+
+        // Verify both instances see the change (shared underlying registry)
+        assert_eq!(metrics1.blocks_acknowledged.get(), 1);
+        assert_eq!(metrics2.blocks_acknowledged.get(), 1);
+    }
+
+    #[test]
+    fn test_custom_registry_isolation() {
+        let registry1 = Registry::new();
+        let registry2 = Registry::new();
+
+        let metrics1 = MetricsRegistry::with_registry(registry1).unwrap();
+        let metrics2 = MetricsRegistry::with_registry(registry2).unwrap();
+
+        // Modify metrics in first registry
+        metrics1.blocks_acknowledged.inc();
+
+        // Verify isolation between registries
+        assert_eq!(metrics1.blocks_acknowledged.get(), 1);
+        assert_eq!(metrics2.blocks_acknowledged.get(), 0);
+
+        // Verify exports are isolated
+        let export1 = String::from_utf8(metrics1.gather()).unwrap();
+        let export2 = String::from_utf8(metrics2.gather()).unwrap();
+
+        assert!(export1.contains("rocknode_blocks_acknowledged 1"));
+        assert!(export2.contains("rocknode_blocks_acknowledged 0"));
+    }
+
+    #[test]
+    fn test_histogram_and_gauge_vec_metrics() {
+        let metrics = MetricsRegistry::new().unwrap();
+
+        // Test histogram metrics
+        metrics
+            .block_access_request_duration_seconds
+            .with_label_values(&["success", "get_block"])
+            .observe(0.1);
+        metrics
+            .block_access_request_duration_seconds
+            .with_label_values(&["success", "get_block"])
+            .observe(0.2);
+
+        // Test gauge vec metrics
+        metrics
+            .publish_average_header_to_proof_time_seconds
+            .with_label_values(&["session_1"])
+            .set(1.5);
+        metrics
+            .subscriber_average_inter_block_time_seconds
+            .with_label_values(&["session_2"])
+            .set(2.0);
+
+        // Verify metrics were recorded by checking the export
+        let exported = String::from_utf8(metrics.gather()).unwrap();
+        assert!(exported.contains("rocknode_block_access_request_duration_seconds"));
+        assert!(exported.contains("rocknode_publish_average_header_to_proof_time_seconds"));
+        assert!(exported.contains("rocknode_subscriber_average_inter_block_time_seconds"));
+    }
+}

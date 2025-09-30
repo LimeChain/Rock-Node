@@ -136,10 +136,10 @@ impl CryptoQueryHandler {
                             staked_id: account.staked_id.map(|id| match id {
                                 AccountStakedId::StakedNodeId(node) => {
                                     InfoStakedId::StakedNodeId(node)
-                                }
+                                },
                                 AccountStakedId::StakedAccountId(acc) => {
                                     InfoStakedId::StakedAccountId(acc)
-                                }
+                                },
                             }),
                         }),
                         ethereum_nonce: account.ethereum_nonce,
@@ -159,14 +159,14 @@ impl CryptoQueryHandler {
                         "State inconsistency: Expected Account value, found other type",
                     ));
                 }
-            }
+            },
             None => {
                 trace!("No account found for the given account_id");
                 CryptoGetInfoResponse {
                     header: Some(build_response_header(ResponseCodeEnum::InvalidAccountId, 0)),
                     account_info: None,
                 }
-            }
+            },
         };
 
         trace!(
@@ -229,7 +229,7 @@ impl CryptoQueryHandler {
                         "State inconsistency: Expected Account value, found other type",
                     ))
                 }
-            }
+            },
             None => Ok(CryptoGetAccountBalanceResponse {
                 header: Some(build_response_header(ResponseCodeEnum::InvalidAccountId, 0)),
                 account_id: Some(account_id),

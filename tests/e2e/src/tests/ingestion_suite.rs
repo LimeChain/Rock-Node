@@ -50,7 +50,7 @@ async fn test_publish_single_block_successfully() -> Result<()> {
                 ack.block_number, 0,
                 "Acknowledgement has wrong block number"
             );
-        }
+        },
         other => panic!("Expected BlockAcknowledgement, got {:?}", other),
     }
 
@@ -115,7 +115,7 @@ async fn test_duplicate_block_rejected() -> Result<()> {
                 end.block_number, 0,
                 "EndStream should report last persisted block"
             );
-        }
+        },
         other => panic!("Expected EndStream DuplicateBlock, got {:?}", other),
     }
 

@@ -32,7 +32,7 @@ impl BlockNodeService for StatusServiceImpl {
                     "Database error while fetching earliest block: {}",
                     e
                 )));
-            }
+            },
         };
 
         let latest_block_val = match self.block_reader.get_latest_persisted_block_number() {
@@ -44,7 +44,7 @@ impl BlockNodeService for StatusServiceImpl {
                     "Database error while fetching latest block: {}",
                     e
                 )));
-            }
+            },
         };
 
         let response = ServerStatusResponse {

@@ -95,7 +95,7 @@ impl TestContext {
                     .join("../../config/config.e2e.toml")
                     .canonicalize()?;
                 std::fs::read_to_string(&config_path)?
-            }
+            },
         };
 
         let mut image = GenericImage::new("rock-node-e2e", "latest")

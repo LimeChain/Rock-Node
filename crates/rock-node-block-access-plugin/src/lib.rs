@@ -77,7 +77,7 @@ impl Plugin for BlockAccessPlugin {
                         "BlockReaderProvider not found. BlockAccessService will not be available."
                     );
                     return Ok(false);
-                }
+                },
             }
         };
 

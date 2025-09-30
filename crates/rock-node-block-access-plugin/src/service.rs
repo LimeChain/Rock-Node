@@ -45,7 +45,7 @@ impl BlockAccessService for BlockAccessServiceImpl {
                 Err(response) => {
                     // If parsing the request fails, record metrics and exit early.
                     return self.record_metrics(response, start_time, "invalid");
-                }
+                },
             };
 
         // Step 2: Try to read the block from the persistence layer.
@@ -61,7 +61,7 @@ impl BlockAccessService for BlockAccessServiceImpl {
                     block: None,
                 };
                 return self.record_metrics(response, start_time, request_type);
-            }
+            },
         };
 
         // Step 3: Process the result of the read operation.
@@ -122,14 +122,14 @@ impl BlockAccessServiceImpl {
                     status: block_response::Code::NotFound as i32,
                     block: None,
                 })
-            }
+            },
             Err(e) => {
                 error!("Failed to get latest block number: {}", e);
                 Err(BlockResponse {
                     status: block_response::Code::Unknown as i32,
                     block: None,
                 })
-            }
+            },
         }
     }
 
@@ -153,14 +153,14 @@ impl BlockAccessServiceImpl {
                     status: block_response::Code::Success as i32,
                     block: Some(block),
                 }
-            }
+            },
             Err(e) => {
                 error!("Failed to decode block #{}: {}", block_number, e);
                 BlockResponse {
                     status: block_response::Code::Unknown as i32,
                     block: None,
                 }
-            }
+            },
         }
     }
 

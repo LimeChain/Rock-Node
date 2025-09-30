@@ -83,14 +83,14 @@ impl FileQueryHandler {
                         "State inconsistency: Expected File value, found other type",
                     ));
                 }
-            }
+            },
             None => {
                 trace!("No file found for the given file_id");
                 FileGetInfoResponse {
                     header: Some(build_response_header(ResponseCodeEnum::InvalidFileId, 0)),
                     file_info: None,
                 }
-            }
+            },
         };
         Ok(response)
     }
@@ -140,14 +140,14 @@ impl FileQueryHandler {
                         "State inconsistency: Expected File value, found other type",
                     ));
                 }
-            }
+            },
             None => {
                 trace!("No file found for the given file_id");
                 FileGetContentsResponse {
                     header: Some(build_response_header(ResponseCodeEnum::InvalidFileId, 0)),
                     file_contents: None,
                 }
-            }
+            },
         };
         Ok(response)
     }

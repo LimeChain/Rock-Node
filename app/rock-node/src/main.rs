@@ -29,7 +29,7 @@ use tonic::{
     service::RoutesBuilder,
     transport::{server::Router, Server},
 };
-use tracing::{error, info, warn};
+use tracing::{error, info};
 
 /// Reports the startup status of all plugins with detailed information.
 pub fn report_plugin_startup_status(plugins: &[Box<dyn Plugin>]) {
@@ -142,8 +142,8 @@ fn print_config(config_value: &toml::Value) {
 const BANNER: &str = r#"
 ██████╗  ██████╗  ██████╗██╗  ██╗    ███╗   ██╗ ██████╗ ██████╗ ███████╗
 ██╔══██╗██╔═══██╗██╔════╝██║ ██╔╝    ████╗  ██║██════██╗██╔══██╗██╔════╝
-██████╔╝██║   ██║██║     █████╔╝     ██╔██╗ ██║██║   ██║██║  ██║█████╗  
-██╔══██╗██║   ██║██║     ██╔═██╗     ██║╚██╗██║██║   ██║██║  ██║██╔══╝  
+██████╔╝██║   ██║██║     █████╔╝     ██╔██╗ ██║██║   ██║██║  ██║█████╗
+██╔══██╗██║   ██║██║     ██╔═██╗     ██║╚██╗██║██║   ██║██║  ██║██╔══╝
 ██║  ██║╚██████╔╝╚██████╗██║  ██╗    ██║ ╚████║╚██████╔╝██████╔╝███████╗
 ╚═╝  ╚═╝ ╚═════╝  ╚═════╝╚═╝  ╚═╝    ╚═╝  ╚═══╝ ╚═════╝ ╚═════╝ ╚══════╝
 "#;

@@ -29,7 +29,7 @@ impl StateManager {
                     .try_into()
                     .map_err(|_| anyhow!("Invalid byte length for u64 metadata key '{:?}'", key))?;
                 Ok(Some(u64::from_be_bytes(bytes)))
-            }
+            },
             None => Ok(None),
         }
     }
@@ -74,10 +74,10 @@ impl StateManager {
                 if new_earliest < current_earliest {
                     self.put_u64_direct(TRUE_EARLIEST_PERSISTED_KEY, new_earliest)?;
                 }
-            }
+            },
             None => {
                 self.put_u64_direct(TRUE_EARLIEST_PERSISTED_KEY, new_earliest)?;
-            }
+            },
         }
         Ok(())
     }

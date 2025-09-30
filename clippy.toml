@@ -1,0 +1,39 @@
+# Clippy configuration for Rock Node
+# See https://doc.rust-lang.org/clippy/configuration.html for all options
+
+# Cognitive complexity threshold
+cognitive-complexity-threshold = 30
+
+# Type complexity threshold
+type-complexity-threshold = 250
+
+# Single character variable names that are allowed
+single-char-binding-names-threshold = 4
+
+# Maximum number of lines for a function
+too-many-lines-threshold = 100
+
+# Maximum number of arguments for a function
+too-many-arguments-threshold = 7
+
+# Trivial copy threshold (in bytes)
+trivial-copy-size-limit = 64
+
+# Maximum size of types passed by value
+pass-by-value-size-limit = 256
+
+# Enforce documentation for public items
+# missing-docs-in-crate-items = true
+
+# Allow certain lint groups
+# We can be more permissive in tests
+allow-dbg-in-tests = true
+allow-print-in-tests = true
+allow-unwrap-in-tests = true
+
+# Disable certain lints that may be too noisy for this codebase
+# These are temporarily allowed to unblock CI while code is being refactored:
+# - bool_assert_comparison: Test code uses explicit assert_eq! with booleans
+# - clone_on_copy: Copy types are cloned in many places - needs systematic refactoring
+# - assertions_on_constants: Test utilities may have temporary constant assertions
+avoid-breaking-exported-api = false

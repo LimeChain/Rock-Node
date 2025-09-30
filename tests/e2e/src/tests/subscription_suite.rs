@@ -59,11 +59,11 @@ async fn test_historical_stream() -> Result<()> {
                 assert_eq!(num, expected, "Blocks received out of order");
                 expected += 1;
                 received += 1;
-            }
+            },
             Some(SubResponse::Status(code)) => {
                 assert_eq!(code, SubCode::Success as i32);
                 break;
-            }
+            },
             other => panic!("Unexpected response: {:?}", other),
         }
     }
@@ -133,11 +133,11 @@ async fn test_historical_to_live_stream() -> Result<()> {
                 let num = header_number(&set);
                 assert_eq!(num, expected);
                 expected += 1;
-            }
+            },
             Some(SubResponse::Status(code)) => {
                 assert_eq!(code, SubCode::Success as i32);
                 break;
-            }
+            },
             other => panic!("Unexpected response: {:?}", other),
         }
     }
@@ -166,7 +166,7 @@ async fn test_invalid_end_block_number() -> Result<()> {
     match first.response {
         Some(SubResponse::Status(code)) => {
             assert_eq!(code, SubCode::InvalidEndBlockNumber as i32);
-        }
+        },
         other => panic!("Unexpected response: {:?}", other),
     }
     assert!(

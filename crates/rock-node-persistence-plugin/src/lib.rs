@@ -302,13 +302,13 @@ async fn process_event(event: InboundEvent, context: &AppContext, service: &Pers
                         warn!("No active subscribers for persisted block events.");
                     }
                 }
-            }
+            },
             Err(e) => {
                 warn!(
                     "Could not decode BlockData from cache for block #{}: {}",
                     block_number, e
                 )
-            }
+            },
         }
     } else {
         warn!(

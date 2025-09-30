@@ -369,7 +369,7 @@ async fn get_metrics(State(metrics): State<Arc<MetricsRegistry>>) -> impl IntoRe
                 .status(500)
                 .body(Body::from("Internal Server Error"))
                 .unwrap_or_else(|_| Response::new(Body::from("Fatal Error")))
-        }
+        },
     }
 }
 
@@ -432,7 +432,7 @@ impl Plugin for ObservabilityPlugin {
                         listen_address
                     );
                     listener
-                }
+                },
                 Err(e) => {
                     error!(
                         "Failed to bind observability server to {}: {}",
@@ -440,7 +440,7 @@ impl Plugin for ObservabilityPlugin {
                     );
                     running_clone.store(false, Ordering::SeqCst);
                     return;
-                }
+                },
             };
 
             let server_future = axum::serve(listener, app.into_make_service())

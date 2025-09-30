@@ -97,7 +97,7 @@ fn main() -> Result<()> {
         .into_iter()
         .filter_map(Result::ok)
         .filter(|e| {
-            e.file_type().is_file() && e.path().extension().map_or(false, |ext| ext == "proto")
+            e.file_type().is_file() && e.path().extension().is_some_and(|ext| ext == "proto")
         })
         .map(|e| e.into_path())
         .collect();
@@ -112,6 +112,11 @@ fn main() -> Result<()> {
     );
     tonic_build::configure()
         .type_attribute(".", "#[derive(serde::Serialize, serde::Deserialize)]")
+        .type_attribute(".", "#[allow(clippy::large_enum_variant)]")
+        .type_attribute(".", "#[allow(clippy::doc_overindented_list_items)]")
+        .type_attribute(".", "#[allow(clippy::doc_lazy_continuation)]")
+        .type_attribute(".", "#[allow(clippy::enum_variant_names)]")
+        .field_attribute(".", "#[allow(clippy::large_enum_variant)]")
         .compile_protos(&all_protos, &[unified_proto_dir])?;
 
     Ok(())
