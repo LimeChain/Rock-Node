@@ -37,16 +37,6 @@ repos:
         files: \.rs$
         pass_filenames: false
 
-      # Run unit tests (excluding e2e tests)
-      - id: cargo-test
-        name: cargo test
-        description: Run Rust unit tests
-        entry: cargo
-        args: [test, --workspace, --exclude, e2e]
-        language: system
-        files: \.rs$
-        pass_filenames: false
-
   # General file formatting and checks
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
@@ -105,5 +95,5 @@ ci:
   autoupdate_branch: ''
   autoupdate_commit_msg: '[pre-commit.ci] pre-commit autoupdate'
   autoupdate_schedule: weekly
-  skip: [cargo-test]  # Skip tests in CI to avoid timeouts
+  skip: []
   submodules: false
