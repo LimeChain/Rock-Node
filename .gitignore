@@ -6,3 +6,6 @@ target/
 *.pdb
 
 **/mutants.out*/
+
+# Integration test artifacts
+tests/integration/data/
