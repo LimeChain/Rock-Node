@@ -1,0 +1,37 @@
+[package]
+name = "integration-tests"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# Core
+rock-node-core = { path = "../../crates/rock-node-core" }
+rock-node-protobufs = { path = "../../crates/rock-node-protobufs" }
+
+# Plugins
+rock-node-persistence-plugin = { path = "../../crates/rock-node-persistence-plugin" }
+rock-node-publish-plugin = { path = "../../crates/rock-node-publish-plugin" }
+rock-node-verifier-plugin = { path = "../../crates/rock-node-verifier-plugin" }
+rock-node-backfill-plugin = { path = "../../crates/rock-node-backfill-plugin" }
+rock-node-query-plugin = { path = "../../crates/rock-node-query-plugin" }
+rock-node-subscriber-plugin = { path = "../../crates/rock-node-subscriber-plugin" }
+rock-node-state-management-plugin = { path = "../../crates/rock-node-state-management-plugin" }
+rock-node-observability-plugin = { path = "../../crates/rock-node-observability-plugin" }
+rock-node-block-access-plugin = { path = "../../crates/rock-node-block-access-plugin" }
+rock-node-server-status-plugin = { path = "../../crates/rock-node-server-status-plugin" }
+
+# Testing utilities
+tokio = { workspace = true, features = ["test-util"] }
+tempfile = "3"
+serial_test = "3"
+anyhow = "1"
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true, features = ["env-filter"] }
+tracing-test = "0.2"
+uuid = { version = "1", features = ["v4"] }
+prost = { workspace = true }
+async-trait = "0.1"
+prometheus = "0.14"
+
+[dev-dependencies]
+# None needed - tests are part of lib

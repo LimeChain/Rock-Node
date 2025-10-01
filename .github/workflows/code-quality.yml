@@ -117,7 +117,7 @@ jobs:
           CARGO_INCREMENTAL: "0"
           RUSTFLAGS: "-Cinstrument-coverage"
           LLVM_PROFILE_FILE: "target/coverage/default_%p_%m.profraw"
-        run: cargo test --workspace --locked --exclude e2e
+        run: cargo test --workspace --locked --exclude e2e --exclude integration-tests
 
       - name: Generate lcov report
         run: |
@@ -137,6 +137,45 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: ./lcov.info
           fail_ci_if_error: true
+
+  integration-tests:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    needs: code-quality
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: compiled-workspace-${{ github.sha }}
+          path: .
+
+      - name: Restore cargo cache to home directory
+        run: |
+          mkdir -p ~/.cargo
+          if [ -d ".cargo/registry" ]; then
+            cp -r .cargo/registry ~/.cargo/
+          fi
+          if [ -d ".cargo/git" ]; then
+            cp -r .cargo/git ~/.cargo/
+          fi
+
+      - name: Install dependencies (protoc)
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y protobuf-compiler
+
+      - name: Set up Rust toolchain (stable)
+        uses: dtolnay/rust-toolchain@v1
+        with:
+          toolchain: stable
+
+      - name: Run integration tests
+        run: cargo test --package integration-tests --lib
+        env:
+          RUST_LOG: info
 
   e2e-tests:
     name: E2E Tests
