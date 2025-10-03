@@ -39,7 +39,7 @@ impl FileQueryHandler {
 
         let state_id = StateIdentifier::StateIdFiles as u32;
         let map_key = MapChangeKey {
-            key_choice: Some(map_change_key::KeyChoice::FileIdKey(file_id.clone())),
+            key_choice: Some(map_change_key::KeyChoice::FileIdKey(file_id)),
         };
         let db_key = [state_id.to_be_bytes().as_slice(), &map_key.encode_to_vec()].concat();
 
@@ -59,7 +59,7 @@ impl FileQueryHandler {
                     map_change_value.value_choice
                 {
                     let file_info = file_get_info_response::FileInfo {
-                        file_id: Some(file_id.clone()),
+                        file_id: Some(file_id),
                         size: file.contents.len() as i64,
                         expiration_time: if file.expiration_second > 0 {
                             Some(Timestamp {
@@ -108,7 +108,7 @@ impl FileQueryHandler {
 
         let state_id = StateIdentifier::StateIdFiles as u32;
         let map_key = MapChangeKey {
-            key_choice: Some(map_change_key::KeyChoice::FileIdKey(file_id.clone())),
+            key_choice: Some(map_change_key::KeyChoice::FileIdKey(file_id)),
         };
         let db_key = [state_id.to_be_bytes().as_slice(), &map_key.encode_to_vec()].concat();
 
@@ -128,7 +128,7 @@ impl FileQueryHandler {
                     map_change_value.value_choice
                 {
                     let file_contents = file_get_contents_response::FileContents {
-                        file_id: Some(file_id.clone()),
+                        file_id: Some(file_id),
                         contents: file.contents,
                     };
                     FileGetContentsResponse {

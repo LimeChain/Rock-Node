@@ -6,7 +6,7 @@ use rock_node_core::{
     config::BackfillMode, database::CF_GAPS, BlockReaderProvider, BlockWriterProvider,
 };
 use rock_node_protobufs::{
-    com::hedera::hapi::block::stream::{block_item, Block, BlockItem},
+    com::hedera::hapi::block::stream::Block,
     org::hiero::block::api::{
         block_node_service_client::BlockNodeServiceClient,
         block_stream_subscribe_service_client::BlockStreamSubscribeServiceClient,
@@ -505,7 +505,7 @@ impl BackfillWorker {
             .context
             .metrics
             .backfill_stream_duration_seconds
-            .with_label_values(&[peer_addr, &mode_str.to_string()])
+            .with_label_values(&[peer_addr, mode_str])
             .start_timer();
         self.context.metrics.backfill_active_streams.inc();
         let _drop_guard = DecrementingGuard::new(&self.context.metrics.backfill_active_streams);
@@ -567,6 +567,8 @@ impl BackfillWorker {
         };
 
         for block_number in start_block..=end_block {
+            use rock_node_protobufs::com::hedera::hapi::block::stream::{block_item, BlockItem};
+
             let block = Block {
                 items: vec![BlockItem {
                     item: Some(block_item::Item::BlockHeader(
@@ -806,6 +808,7 @@ mod tests {
             block_data_cache: Arc::new(rock_node_core::cache::BlockDataCache::default()),
             tx_block_items_received: tokio::sync::mpsc::channel(100).0,
             tx_block_verified: tokio::sync::mpsc::channel(100).0,
+            tx_block_verification_failed: tokio::sync::broadcast::channel(100).0,
             tx_block_persisted: tokio::sync::broadcast::channel(100).0,
         }
     }
@@ -965,6 +968,7 @@ mod tests {
             block_data_cache: Arc::new(rock_node_core::cache::BlockDataCache::default()),
             tx_block_items_received: tokio::sync::mpsc::channel(100).0,
             tx_block_verified: tokio::sync::mpsc::channel(100).0,
+            tx_block_verification_failed: tokio::sync::broadcast::channel(100).0,
             tx_block_persisted: tokio::sync::broadcast::channel(100).0,
         };
 

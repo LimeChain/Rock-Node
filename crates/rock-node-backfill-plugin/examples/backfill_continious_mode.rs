@@ -125,6 +125,7 @@ async fn main() -> Result<()> {
     let (tx_persisted, _) = broadcast::channel(1);
     let (tx_items, _) = mpsc::channel(1);
     let (tx_verified, _) = mpsc::channel(1);
+    let (tx_verification_failed, _) = broadcast::channel(1);
     let app_context = AppContext {
         config: Arc::new(config),
         metrics: Arc::new(create_isolated_metrics()),
@@ -133,6 +134,7 @@ async fn main() -> Result<()> {
         block_data_cache: Arc::new(Default::default()),
         tx_block_items_received: tx_items,
         tx_block_verified: tx_verified,
+        tx_block_verification_failed: tx_verification_failed,
         tx_block_persisted: tx_persisted,
     };
 

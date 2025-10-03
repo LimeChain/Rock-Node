@@ -1,7 +1,6 @@
 use anyhow::Result;
 use clap::Parser;
 use config as config_rs;
-use dotenvy::dotenv;
 use rock_node_backfill_plugin::BackfillPlugin;
 use rock_node_block_access_plugin::BlockAccessPlugin;
 use rock_node_core::{
@@ -25,10 +24,7 @@ use std::{
     time::Duration,
 };
 use tokio::sync::{broadcast, mpsc, watch};
-use tonic::{
-    service::RoutesBuilder,
-    transport::{server::Router, Server},
-};
+use tonic::{service::RoutesBuilder, transport::Server};
 use tracing::{error, info};
 
 /// Reports the startup status of all plugins with detailed information.
@@ -230,6 +226,7 @@ async fn main() -> Result<()> {
     // --- Step 5: Build the AppContext ---
     let (tx_items, rx_items) = mpsc::channel::<events::BlockItemsReceived>(100);
     let (tx_verified, rx_verified) = mpsc::channel::<events::BlockVerified>(100);
+    let (tx_verification_failed, _) = broadcast::channel::<events::BlockVerificationFailed>(100);
     let (tx_persisted, _) = broadcast::channel::<events::BlockPersisted>(100);
     info!("Building application context...");
     let app_context = AppContext {
@@ -240,6 +237,7 @@ async fn main() -> Result<()> {
         block_data_cache: Arc::new(BlockDataCache::new()),
         tx_block_items_received: tx_items,
         tx_block_verified: tx_verified,
+        tx_block_verification_failed: tx_verification_failed,
         tx_block_persisted: tx_persisted,
     };
 

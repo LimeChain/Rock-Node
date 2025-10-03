@@ -39,7 +39,7 @@ impl StateManager {
             .db
             .cf_handle(CF_METADATA)
             .ok_or_else(|| anyhow!("Could not get handle for CF: {}", CF_METADATA))?;
-        batch.put_cf(cf, key, &value.to_be_bytes());
+        batch.put_cf(cf, key, value.to_be_bytes());
         Ok(())
     }
 
@@ -48,7 +48,7 @@ impl StateManager {
             .db
             .cf_handle(CF_METADATA)
             .ok_or_else(|| anyhow!("Could not get handle for CF: {}", CF_METADATA))?;
-        self.db.put_cf(cf, key, &value.to_be_bytes())?;
+        self.db.put_cf(cf, key, value.to_be_bytes())?;
         Ok(())
     }
 
@@ -197,7 +197,7 @@ impl StateManager {
             }
         }
 
-        batch.put_cf(cf, &final_start.to_be_bytes(), &final_end.to_be_bytes());
+        batch.put_cf(cf, final_start.to_be_bytes(), final_end.to_be_bytes());
         Ok(())
     }
 
@@ -207,12 +207,12 @@ impl StateManager {
             .cf_handle(CF_GAPS)
             .ok_or_else(|| anyhow!("Could not get handle for CF: {}", CF_GAPS))?;
         if let Some((start, end)) = self.find_containing_gap(block_number)? {
-            batch.delete_cf(cf, &start.to_be_bytes());
+            batch.delete_cf(cf, start.to_be_bytes());
             if block_number > start {
-                batch.put_cf(cf, &start.to_be_bytes(), &(block_number - 1).to_be_bytes());
+                batch.put_cf(cf, start.to_be_bytes(), (block_number - 1).to_be_bytes());
             }
             if block_number < end {
-                batch.put_cf(cf, &(block_number + 1).to_be_bytes(), &end.to_be_bytes());
+                batch.put_cf(cf, (block_number + 1).to_be_bytes(), end.to_be_bytes());
             }
         }
         Ok(())
@@ -223,7 +223,7 @@ impl StateManager {
             .db
             .cf_handle(CF_SKIPPED_BATCHES)
             .ok_or_else(|| anyhow!("Could not get handle for CF: {}", CF_SKIPPED_BATCHES))?;
-        batch.put_cf(cf, &batch_start_block.to_be_bytes(), b"");
+        batch.put_cf(cf, batch_start_block.to_be_bytes(), b"");
         Ok(())
     }
 
@@ -236,7 +236,7 @@ impl StateManager {
             .db
             .cf_handle(CF_SKIPPED_BATCHES)
             .ok_or_else(|| anyhow!("Could not get handle for CF: {}", CF_SKIPPED_BATCHES))?;
-        batch.delete_cf(cf, &batch_start_block.to_be_bytes());
+        batch.delete_cf(cf, batch_start_block.to_be_bytes());
         Ok(())
     }
 
@@ -247,7 +247,7 @@ impl StateManager {
             .ok_or_else(|| anyhow!("Could not get handle for CF: {}", CF_SKIPPED_BATCHES))?;
         Ok(self
             .db
-            .get_cf(cf, &batch_start_block.to_be_bytes())?
+            .get_cf(cf, batch_start_block.to_be_bytes())?
             .is_some())
     }
 }

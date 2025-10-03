@@ -145,4 +145,13 @@ impl SmartContractService for SmartContractServiceImpl {
             cost: 0,
         }))
     }
+    async fn lambda_s_store(
+        &self,
+        _request: Request<Transaction>,
+    ) -> Result<Response<TransactionResponse>, Status> {
+        Ok(Response::new(TransactionResponse {
+            node_transaction_precheck_code: ResponseCodeEnum::NotSupported as i32,
+            cost: 0,
+        }))
+    }
 }

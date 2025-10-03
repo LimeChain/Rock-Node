@@ -16,6 +16,25 @@ pub enum SessionState {
     Behind,
 }
 
+/// Action to take for a block request (matches Java's BlockAction)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BlockAction {
+    /// Accept block items, add to buffer
+    Accept,
+    /// Send SkipBlock response
+    Skip,
+    /// Send ResendBlock response
+    Resend,
+    /// Send EndOfStream(BEHIND)
+    EndBehind,
+    /// Send EndOfStream(DUPLICATE_BLOCK)
+    EndDuplicate,
+    /// Send EndOfStream(ERROR)
+    EndError,
+    /// Send EndOfStream(BAD_BLOCK_PROOF)
+    BadBlockProof,
+}
+
 /// The central, shared state for the entire Publish Plugin.
 #[derive(Debug)]
 pub struct SharedState {
@@ -25,6 +44,12 @@ pub struct SharedState {
     pub latest_persisted_block: AtomicI64,
     /// Maps a session ID to its response channel sender to broadcast messages.
     pub active_sessions: DashMap<Uuid, mpsc::Sender<Result<PublishStreamResponse, Status>>>,
+}
+
+impl Default for SharedState {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl SharedState {
