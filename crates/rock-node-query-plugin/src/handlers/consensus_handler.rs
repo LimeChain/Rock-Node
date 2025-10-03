@@ -47,7 +47,7 @@ impl ConsensusQueryHandler {
         let state_id = StateIdentifier::StateIdTopics as u32;
 
         let map_key = MapChangeKey {
-            key_choice: Some(map_change_key::KeyChoice::TopicIdKey(topic_id.clone())),
+            key_choice: Some(map_change_key::KeyChoice::TopicIdKey(topic_id)),
         };
 
         let db_key = [state_id.to_be_bytes().as_slice(), &map_key.encode_to_vec()].concat();

@@ -44,9 +44,7 @@ impl ScheduleQueryHandler {
         let state_id = StateIdentifier::StateIdSchedulesById as u32;
 
         let map_key = MapChangeKey {
-            key_choice: Some(map_change_key::KeyChoice::ScheduleIdKey(
-                schedule_id.clone(),
-            )),
+            key_choice: Some(map_change_key::KeyChoice::ScheduleIdKey(schedule_id)),
         };
 
         let db_key = [state_id.to_be_bytes().as_slice(), &map_key.encode_to_vec()].concat();
@@ -66,7 +64,7 @@ impl ScheduleQueryHandler {
                     map_change_value.value_choice
                 {
                     let schedule_info = ScheduleInfo {
-                        schedule_id: Some(schedule_id.clone()),
+                        schedule_id: Some(schedule_id),
                         memo: schedule.memo,
                         admin_key: schedule.admin_key,
                         payer_account_id: schedule.payer_account_id,

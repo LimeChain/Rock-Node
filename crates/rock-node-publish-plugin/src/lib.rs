@@ -167,7 +167,7 @@ impl Plugin for PublishPlugin {
                 )),
             };
             for entry in shared_state.active_sessions.iter() {
-                let _ = entry.value().send(Ok(end_stream_msg.clone())).await;
+                let _ = entry.value().send(Ok(end_stream_msg)).await;
             }
         }
 

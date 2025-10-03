@@ -50,6 +50,11 @@ message PublishStreamRequest {
          * when sending this message for any non-error condition.
          */
         EndStream end_stream = 2;
+
+        /**
+         * A message indicating the end of a block.
+         */
+        BlockEnd end_of_block = 3;
     }
 
     /**
@@ -230,15 +235,6 @@ message PublishStreamResponse {
          * one greater than this value.
          */
         uint64 block_number = 1;
-
-        /**
-         * A hash of the virtual merkle root for the block.
-         * <p>
-         * This SHALL be the hash calculated by the Block-Node for the
-         * root node of the virtual merkle tree that is signed by the source
-         * system to validate the block.
-         */
-        bytes block_root_hash = 2;
     }
 
     /**

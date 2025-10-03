@@ -40,7 +40,7 @@ fn main() -> Result<()> {
     if !consensus_node_proto_src.exists() {
         println!("cargo:info=Cloning hiero-consensus-node repository...");
         let repo_url = "https://github.com/hiero-ledger/hiero-consensus-node.git";
-        let cn_tag_hash = "c86619410f0e0da3719c39c9447a96438200166d";
+        let cn_tag_hash = "d7cb85ac7384f809a15489635122504661131af4";
         run_command(
             Command::new("git")
                 .arg("clone")

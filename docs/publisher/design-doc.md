@@ -27,7 +27,9 @@
 
 ### 1.1 Purpose
 
-This document provides the software design for the Publish Plugin. This plugin provides a gRPC endpoint for data producers (publishers) to stream block data into the Rock Node. It is designed to be highly concurrent, handling multiple simultaneous publisher connections while ensuring that blocks are processed sequentially, exactly once, and in order. It implements a robust flow-control mechanism to prevent fast publishers from overwhelming the node's persistence layer.
+This document provides the software design for the Publish Plugin. This plugin provides a gRPC endpoint for data producers (publishers) to stream block data into the Rock Node. It is designed to be highly concurrent, handling multiple simultaneous publisher connections while ensuring that blocks are processed sequentially, exactly once, and in order.
+
+The plugin implements a **Publish → Verify → Persist** flow, integrating with the Verifier Plugin to ensure only valid blocks are persisted to storage. It provides robust flow-control to prevent fast publishers from overwhelming the node's verification and persistence pipelines, and implements graceful degradation by terminating publishers that send invalid blocks while allowing others to retry.
 
 ### 1.2 Scope
 
@@ -37,7 +39,7 @@ This document covers the plugin's architecture, including its use of bidirection
 
 ## 2. High-Level Architecture (C4 Level 2)
 
-The Publish Plugin exposes a bidirectional gRPC stream. Publishers connect and push BlockItem data to the server, and the server pushes back acknowledgements, flow-control messages, and error notifications. The plugin coordinates with the core messaging bus to ingest blocks and relies on persistence events for its flow-control loop.
+The Publish Plugin exposes a bidirectional gRPC stream. Publishers connect and push BlockItem data to the server, and the server pushes back acknowledgements, flow-control messages, and error notifications. The plugin coordinates with the core messaging bus to ingest blocks, sending them to the Verifier Plugin for validation before persistence. It relies on both verification failure events and persistence success events for its flow-control loop.
 
 ```mermaid
 graph TD
@@ -49,7 +51,7 @@ graph TD
 
     subgraph "Rock Node Boundary"
         direction TB
-        
+
         PublishPlugin["
             **Publish Plugin**
             [Rust Crate]
@@ -60,11 +62,30 @@ graph TD
             Provides flow control via explicit ACKs.
         "]
 
+        VerifierPlugin["
+            **Verifier Plugin**
+            [Rust Crate]
+            ---
+            Validates block integrity.
+            Sends verified blocks to Persistence.
+            Notifies publishers of verification failures.
+        "]
+
+        PersistencePlugin["
+            **Persistence Plugin**
+            [Rust Crate]
+            ---
+            Stores verified blocks to database.
+            Emits BlockPersisted events.
+        "]
+
         CoreMessaging("
             <b>Core Messaging Bus</b>
-            <br/>[tokio::broadcast]<br/>
-            `BlockItemsReceived` channel (write).
-            `BlockPersisted` channel (read).
+            <br/>[tokio channels]<br/>
+            `BlockItemsReceived` (mpsc).
+            `BlockVerified` (mpsc).
+            `BlockVerificationFailed` (broadcast).
+            `BlockPersisted` (broadcast).
         ")
 
         CoreCache("
@@ -72,20 +93,27 @@ graph TD
             <br/>[moka::sync::Cache]<br/>
             Temporarily stores block data between plugins.
         ")
-        
+
         PublisherA -- "1. Streams BlockItems" --> PublishPlugin
         PublisherB -- "1. Streams BlockItems" --> PublishPlugin
-        
+
         PublishPlugin -- "2. Sends 'BlockItemsReceived'" --> CoreMessaging
         PublishPlugin -- "3. Puts data in" --> CoreCache
-        PublishPlugin -- "4. Subscribes to 'BlockPersisted'" --> CoreMessaging
-        
-        PublishPlugin -- "5. Streams ACKs/NACKs back" --> PublisherA
-        PublishPlugin -- "5. Streams ACKs/NACKs back" --> PublisherB
+
+        CoreMessaging -- "4. Routes to" --> VerifierPlugin
+        VerifierPlugin -- "5a. Valid: 'BlockVerified'" --> CoreMessaging
+        VerifierPlugin -- "5b. Invalid: 'BlockVerificationFailed'" --> CoreMessaging
+
+        CoreMessaging -- "6. Routes to" --> PersistencePlugin
+        PersistencePlugin -- "7. 'BlockPersisted'" --> CoreMessaging
+
+        PublishPlugin -- "8. Subscribes to verification/persistence events" --> CoreMessaging
+        PublishPlugin -- "9. Streams ACKs/NACKs back" --> PublisherA
+        PublishPlugin -- "9. Streams ACKs/NACKs back" --> PublisherB
     end
 ```
 
-**Diagram 2.1:** Container-level view of the Publish Plugin.
+**Diagram 2.1:** Container-level view of the Publish Plugin showing the Publish → Verify → Persist flow.
 
 ---
 
@@ -160,7 +188,14 @@ The gRPC service implementation. Its sole responsibility is to handle new incomi
 
 #### SessionManager (session_manager.rs)
 
-The stateful workhorse of the plugin; one instance exists per active connection. It reads incoming `PublishStreamRequest` messages and processes them according to its internal state. It interacts with the `SharedState` to participate in the primary election for a given block. If it becomes primary, it is responsible for collecting all BlockItems for a block, publishing the completed block to the core messaging bus, and waiting for a `BlockPersisted` event as a signal to send an `Acknowledgement` back to the client.
+The stateful workhorse of the plugin; one instance exists per active connection. It reads incoming `PublishStreamRequest` messages and processes them according to its internal state. It interacts with the `SharedState` to participate in the primary election for a given block. If it becomes primary, it is responsible for:
+
+1. Collecting all BlockItems for a block
+2. Publishing the completed block to the Verifier Plugin via the core messaging bus
+3. Awaiting EITHER a verification failure OR a persistence success event
+4. Sending the appropriate response (`Acknowledgement` for success, `EndOfStream(BAD_BLOCK_PROOF)` for verification failure, or `ResendBlock` for timeout) back to the client
+
+The SessionManager ensures that blocks flow through the complete Publish → Verify → Persist pipeline before acknowledging them to the client, implementing graceful degradation by terminating publishers that send invalid blocks while allowing others to retry.
 
 #### SharedState (state.rs)
 
@@ -179,10 +214,11 @@ The core of the plugin is the "primary election" and subsequent state transition
 
 1. A SessionManager receives the first `BlockItem` for block N, which must be a `BlockHeader`.
 2. It reads `SharedState::latest_persisted_block` to perform initial validation.
-3. If N <= latest_persisted, it is a duplicate. The server sends `EndOfStream(DuplicateBlock)` and closes the connection.
-4. If N > latest_persisted + 1, it is a future block. The server sends `EndOfStream(Behind)` and closes the connection.
-5. If N == latest_persisted + 1 (the expected block), the session attempts to "win" the election by inserting its unique session ID into `SharedState::block_winners` for key N.
-6. The `DashMap::entry().or_insert()` operation atomically guarantees that only one session can be the first to write its ID.
+3. If N < latest_persisted, it is behind. The server sends `EndOfStream(Behind)` and closes the connection.
+4. If N == latest_persisted, it is a duplicate (already persisted). The server sends `EndOfStream(DuplicateBlock)` and closes the connection.
+5. If N > latest_persisted + 1, it is a future block (gap). The server sends `EndOfStream(Behind)` and closes the connection.
+6. If N == latest_persisted + 1 (the expected block), the session attempts to "win" the election by inserting its unique session ID into `SharedState::block_winners` for key N.
+7. The `DashMap::entry().or_insert()` operation atomically guarantees that only one session can be the first to write its ID.
 
 **Case A (Win):** The session's ID was successfully inserted. It transitions its internal state to `Primary`. It can now buffer `BlockItems`.
 
@@ -193,21 +229,33 @@ The core of the plugin is the "primary election" and subsequent state transition
 1. The primary SessionManager buffers all incoming `BlockItems` in memory.
 2. Upon receiving the final item for the block (the `BlockProof`), it bundles all buffered items into a `Block` protobuf object.
 3. It serializes the `Block` and places the bytes into the AppContext's `BlockDataCache`.
-4. It sends a `BlockItemsReceived` event containing the block number and cache key to the core message bus.
-5. It now synchronously awaits a `BlockPersisted` event for block N from the persistence plugin's notification channel, with a 30-second timeout.
+4. It sends a `BlockItemsReceived` event containing the block number and cache key to the core message bus, which routes it to the Verifier Plugin.
+5. It now awaits EITHER a `BlockVerificationFailed` OR a `BlockPersisted` event for block N, with a 30-second timeout.
 
-**Case A (ACK Received):** A `BlockPersisted` event for block N arrives in time.
+**Case A (Verification Success → Persistence Success):** A `BlockPersisted` event for block N arrives.
 
+- The Verifier Plugin validated the block and sent it to Persistence.
+- The Persistence Plugin successfully stored it and emitted `BlockPersisted`.
 - The SessionManager sends a `BlockAcknowledgement` response to its client.
 - It updates `SharedState::latest_persisted_block` to N.
 - It removes N from the `SharedState::block_winners` map.
 - It resets its internal state to handle the next block (N+1).
+- **Flow Control:** The client can now send block N+1.
 
-**Case B (Timeout):** No `BlockPersisted` event arrives.
+**Case B (Verification Failure):** A `BlockVerificationFailed` event for block N arrives.
 
-- The SessionManager assumes a failure in the persistence layer.
-- It sends a `ResendBlock` request to its client, asking it to try sending the entire block again.
-- It removes N from the `SharedState::block_winners` map so another session (or the same one) can retry.
+- The Verifier Plugin detected the block is invalid (e.g., failed to decode, invalid signature, bad proof).
+- The SessionManager sends an `EndOfStream(BAD_BLOCK_PROOF)` response to the failing client, terminating its connection.
+- For all **other** active sessions (non-primary publishers), it sends a `ResendBlock` message so they can attempt to publish the block.
+- It removes N from the `SharedState::block_winners` map to allow re-election.
+- The primary session terminates, as the client needs to fix its data.
+
+**Case C (Timeout):** No event arrives within 30 seconds.
+
+- The SessionManager assumes a failure or delay in the verification/persistence pipeline.
+- It sends a `ResendBlock` request to **all** active sessions, asking them to retry the block.
+- It removes N from the `SharedState::block_winners` map so another session can retry.
+- Flow control prevents runaway publishers - they must wait for the retry acknowledgement.
 
 ---
 
@@ -215,7 +263,8 @@ The core of the plugin is the "primary election" and subsequent state transition
 
 - **Winner Election:** The `DashMap` provides a highly concurrent, lock-free mechanism for the primary election, which is the main point of contention.
 - **Idempotency:** The `latest_persisted_block` atomic check provides a fast path for rejecting the vast majority of duplicate blocks without touching the more expensive `DashMap`.
-- **Flow Control:** The publish → await ACK → respond loop is the primary mechanism for flow control. A publisher cannot send block N+1 until it has received an `Acknowledgement` for block N, preventing it from running ahead of the persistence layer.
+- **Flow Control:** The publish → verify → persist → ACK loop is the primary mechanism for flow control. A publisher cannot send block N+1 until it has received an `Acknowledgement` for block N, ensuring blocks are verified and persisted sequentially. This prevents publishers from running ahead of the verification/persistence pipeline.
+- **Verification Integration:** The SessionManager awaits BOTH `BlockVerificationFailed` and `BlockPersisted` events using `tokio::select!`, allowing it to react immediately to verification failures while maintaining the flow control guarantee. Failed verifications terminate the offending publisher while allowing other sessions to retry.
 
 ---
 
@@ -234,10 +283,17 @@ The service is defined by a single bidirectional gRPC stream.
 
 ### Server-to-Client (PublishStreamResponse)
 
-- **BlockAcknowledgement:** Sent when a block has been successfully received and persisted. The primary mechanism for flow control.
-- **ResendBlock:** Sent to the primary if the server timed out waiting for persistence. The client should resend all items for that block.
+- **BlockAcknowledgement:** Sent when a block has been successfully received, verified, and persisted. The primary mechanism for flow control.
+- **ResendBlock:** Sent to active sessions when:
+  - The server timed out waiting for verification/persistence
+  - Verification failed for the primary's block (sent to non-primary sessions only)
+  - The client should resend all items for that block.
 - **SkipBlock:** Sent to a non-primary publisher to tell it another publisher won the race and it should not send data for the current block.
-- **EndOfStream:** Sent by the server when it is terminating the connection due to an unrecoverable error (e.g., duplicate or future block).
+- **EndOfStream:** Sent by the server when it is terminating the connection due to an unrecoverable error. Status codes include:
+  - **DUPLICATE_BLOCK:** Block number ≤ latest persisted block
+  - **BEHIND:** Block number > latest persisted block + 1 (future block)
+  - **BAD_BLOCK_PROOF:** Block failed verification (invalid structure, signatures, or proof)
+  - **END_STREAM_ERROR:** Generic error or client-initiated graceful close
 
 ---
 
@@ -306,3 +362,16 @@ A Counter tracking the number of successfully persisted blocks via this plugin.
 - `stale_winner_timeout_seconds`: The timeout for the stale winner eviction mechanism described above.
 
 This allows operators to tune the system's behavior without recompiling the code.
+
+### 8.4 Verification-First Architecture
+
+**Design Decision:** The publish plugin was updated to implement a **Publish → Verify → Persist** flow instead of the original **Publish → Persist → Verify** approach.
+
+**Rationale:**
+
+1. **Data Integrity:** Invalid blocks never reach the persistence layer, preventing corruption of the database with bad data.
+2. **Early Rejection:** Publishers sending invalid blocks are terminated immediately upon verification failure, saving resources on persistence attempts.
+3. **Graceful Degradation:** The system matches the Java implementation's approach - if one publisher sends bad data, other publishers can retry the block without being affected.
+4. **Simplified State Management:** By verifying before persisting, we eliminated the need for complex "unacknowledged blocks" tracking that would have been required to handle post-persistence verification failures.
+
+**Implementation:** The SessionManager uses `tokio::select!` to await EITHER a `BlockVerificationFailed` event (broadcast channel) OR a `BlockPersisted` event (broadcast channel), allowing immediate reaction to failures while maintaining sequential flow control. This ensures publishers cannot send block N+1 until block N is both verified AND persisted.

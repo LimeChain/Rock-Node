@@ -80,6 +80,7 @@ impl BlockBuilder {
             change_operation: Some(ChangeOperation::MapUpdate(MapUpdateChange {
                 key: Some(map_key),
                 value: Some(map_value),
+                identical: false,
             })),
         };
 
@@ -125,6 +126,7 @@ impl BlockBuilder {
             change_operation: Some(ChangeOperation::MapUpdate(MapUpdateChange {
                 key: Some(map_key),
                 value: Some(map_value),
+                identical: false,
             })),
         };
 
@@ -167,6 +169,7 @@ impl BlockBuilder {
             change_operation: Some(ChangeOperation::MapUpdate(MapUpdateChange {
                 key: Some(map_key),
                 value: Some(map_value),
+                identical: false,
             })),
         };
 
@@ -211,6 +214,7 @@ impl BlockBuilder {
             change_operation: Some(ChangeOperation::MapUpdate(MapUpdateChange {
                 key: Some(map_key),
                 value: Some(map_value),
+                identical: false,
             })),
         };
 
@@ -256,6 +260,7 @@ impl BlockBuilder {
             change_operation: Some(ChangeOperation::MapUpdate(MapUpdateChange {
                 key: Some(map_key),
                 value: Some(map_value),
+                identical: false,
             })),
         };
 
@@ -300,6 +305,7 @@ impl BlockBuilder {
             change_operation: Some(ChangeOperation::MapUpdate(MapUpdateChange {
                 key: Some(map_key),
                 value: Some(map_value),
+                identical: false,
             })),
         };
 
@@ -345,6 +351,7 @@ impl BlockBuilder {
             change_operation: Some(ChangeOperation::MapUpdate(MapUpdateChange {
                 key: Some(map_key),
                 value: Some(map_value),
+                identical: false,
             })),
         };
 
@@ -403,6 +410,7 @@ impl BlockBuilder {
             change_operation: Some(ChangeOperation::MapUpdate(MapUpdateChange {
                 key: Some(map_key),
                 value: Some(map_value),
+                identical: false,
             })),
         };
 

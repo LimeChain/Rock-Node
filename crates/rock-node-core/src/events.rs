@@ -23,6 +23,14 @@ pub struct BlockVerified {
     pub cache_key: Uuid,
 }
 
+/// Published by the Verifier plugin when block verification fails.
+#[derive(Debug, Clone)]
+pub struct BlockVerificationFailed {
+    pub block_number: u64,
+    pub cache_key: Uuid,
+    pub reason: String,
+}
+
 /// Published by the Persistence plugin after it has successfully saved the
 /// block to disk.
 #[derive(Debug, Clone, Copy)]

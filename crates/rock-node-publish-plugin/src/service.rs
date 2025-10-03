@@ -90,7 +90,7 @@ impl BlockStreamPublishService for PublishServiceImpl {
                 // Broadcast to all *other* active sessions.
                 for session_entry in shared_state_clone.active_sessions.iter() {
                     if *session_entry.key() != session_id {
-                        let _ = session_entry.value().send(Ok(resend_msg.clone())).await;
+                        let _ = session_entry.value().send(Ok(resend_msg)).await;
                     }
                 }
 
