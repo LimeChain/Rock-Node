@@ -38,7 +38,7 @@ impl TokenQueryHandler {
 
         let state_id = StateIdentifier::StateIdTokens as u32;
         let map_key = MapChangeKey {
-            key_choice: Some(map_change_key::KeyChoice::TokenIdKey(token_id.clone())),
+            key_choice: Some(map_change_key::KeyChoice::TokenIdKey(token_id)),
         };
         let db_key = [state_id.to_be_bytes().as_slice(), &map_key.encode_to_vec()].concat();
 
@@ -134,7 +134,7 @@ impl TokenQueryHandler {
 
         let state_id = StateIdentifier::StateIdNfts as u32;
         let map_key = MapChangeKey {
-            key_choice: Some(map_change_key::KeyChoice::NftIdKey(nft_id.clone())),
+            key_choice: Some(map_change_key::KeyChoice::NftIdKey(nft_id)),
         };
         let db_key = [state_id.to_be_bytes().as_slice(), &map_key.encode_to_vec()].concat();
 

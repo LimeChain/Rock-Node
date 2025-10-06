@@ -18,6 +18,9 @@ pub struct AppContext {
     // Can be mpsc as it's a 1-to-1 pipeline step
     pub tx_block_verified: mpsc::Sender<super::events::BlockVerified>,
 
+    // MUST be broadcast as multiple publisher sessions need to know about verification failures
+    pub tx_block_verification_failed: broadcast::Sender<super::events::BlockVerificationFailed>,
+
     // MUST be broadcast to allow multiple concurrent sessions to wait for their specific ACKs
     pub tx_block_persisted: broadcast::Sender<super::events::BlockPersisted>,
 }
@@ -61,6 +64,7 @@ mod tests {
 
         let (tx_block_items_received, _rx) = mpsc::channel(100);
         let (tx_block_verified, _rx) = mpsc::channel(100);
+        let (tx_block_verification_failed, _rx) = broadcast::channel(100);
         let (tx_block_persisted, _rx) = broadcast::channel(100);
 
         AppContext {
@@ -71,6 +75,7 @@ mod tests {
             block_data_cache,
             tx_block_items_received,
             tx_block_verified,
+            tx_block_verification_failed,
             tx_block_persisted,
         }
     }
@@ -113,6 +118,7 @@ mod tests {
 
         let (tx_block_items_received, mut rx_block_items_received) = mpsc::channel(100);
         let (tx_block_verified, _rx) = mpsc::channel(100);
+        let (tx_block_verification_failed, _rx) = broadcast::channel(100);
         let (tx_block_persisted, _rx) = broadcast::channel(100);
 
         let ctx = AppContext {
@@ -123,6 +129,7 @@ mod tests {
             block_data_cache,
             tx_block_items_received,
             tx_block_verified,
+            tx_block_verification_failed,
             tx_block_persisted,
         };
 
@@ -150,6 +157,7 @@ mod tests {
 
         let (tx_block_items_received, _rx) = mpsc::channel(100);
         let (tx_block_verified, mut rx_block_verified) = mpsc::channel(100);
+        let (tx_block_verification_failed, _rx) = broadcast::channel(100);
         let (tx_block_persisted, _rx) = broadcast::channel(100);
 
         let ctx = AppContext {
@@ -160,6 +168,7 @@ mod tests {
             block_data_cache,
             tx_block_items_received,
             tx_block_verified,
+            tx_block_verification_failed,
             tx_block_persisted,
         };
 

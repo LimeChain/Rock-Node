@@ -1,11 +1,13 @@
 use async_trait::async_trait;
+use prost::Message;
 use rock_node_core::{
     app_context::AppContext,
     error::Result,
-    events::{BlockItemsReceived, BlockVerified},
+    events::{BlockItemsReceived, BlockVerificationFailed, BlockVerified},
     plugin::Plugin,
     Capability,
 };
+use rock_node_protobufs::com::hedera::hapi::block::stream::Block;
 use std::{
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -14,7 +16,7 @@ use std::{
     time::Duration,
 };
 use tokio::sync::{mpsc::Receiver, Notify};
-use tracing::{info, trace};
+use tracing::{error, info, trace, warn};
 
 pub struct VerifierPlugin {
     context: Option<AppContext>,
@@ -85,21 +87,62 @@ impl Plugin for VerifierPlugin {
                         );
 
                         // Fetch data using the claim check.
-                        if let Some(data) = context.block_data_cache.get(&event.cache_key) {
-                            trace!("Verifier: Fetched data for block #{}: '{:?}'", event.block_number, data.contents.len());
-                        }
+                        let verification_result = if let Some(data) = context.block_data_cache.get(&event.cache_key) {
+                            trace!("Verifier: Fetched data for block #{}: {} bytes", event.block_number, data.contents.len());
 
-                        // Pretend to do work
-                        tokio::time::sleep(Duration::from_millis(50)).await;
+                            // Simulate verification work
+                            tokio::time::sleep(Duration::from_millis(50)).await;
 
-                        let verified_event = BlockVerified {
-                            block_number: event.block_number,
-                            cache_key: event.cache_key,
+                            // Basic verification: try to decode the block
+                            match Block::decode(data.contents.as_slice()) {
+                                Ok(block_proto) => {
+                                    // TODO: Add real verification logic here:
+                                    // - Verify block hash
+                                    // - Verify signatures
+                                    // - Verify block proof
+                                    // - Verify state transitions
+                                    trace!("Verifier: Block #{} decoded successfully, {} items", event.block_number, block_proto.items.len());
+                                    Ok(())
+                                }
+                                Err(e) => {
+                                    error!("Verifier: Block #{} failed to decode: {}", event.block_number, e);
+                                    Err(format!("Block decode failed: {}", e))
+                                }
+                            }
+                        } else {
+                            error!("Verifier: Block #{} data not found in cache", event.block_number);
+                            Err("Block data not found in cache".to_string())
                         };
 
-                        if context.tx_block_verified.send(verified_event).await.is_err() {
-                            // This can happen if the persistence plugin shuts down first.
-                            info!("Verifier: Could not send verified block, persistence channel may be closed.");
+                        match verification_result {
+                            Ok(()) => {
+                                // Verification succeeded - send to persistence
+                                let verified_event = BlockVerified {
+                                    block_number: event.block_number,
+                                    cache_key: event.cache_key,
+                                };
+
+                                if context.tx_block_verified.send(verified_event).await.is_err() {
+                                    warn!("Verifier: Could not send verified block, persistence channel may be closed.");
+                                }
+                            }
+                            Err(reason) => {
+                                // Verification failed - notify publishers
+                                error!("Verifier: Block #{} verification FAILED: {}", event.block_number, reason);
+
+                                let failed_event = BlockVerificationFailed {
+                                    block_number: event.block_number,
+                                    cache_key: event.cache_key,
+                                    reason: reason.clone(),
+                                };
+
+                                if context.tx_block_verification_failed.send(failed_event).is_err() {
+                                    warn!("Verifier: Could not send verification failure event, no subscribers.");
+                                }
+
+                                // Also mark cache for removal since this block won't be persisted
+                                context.block_data_cache.mark_for_removal(event.cache_key).await;
+                            }
                         }
                     }
                     else => {

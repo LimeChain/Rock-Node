@@ -53,7 +53,7 @@ impl StateManager {
             .context("Failed to get CF_METADATA handle")?;
         Ok(db
             .get_cf(&cf_metadata, STATE_LAST_PROCESSED_BLOCK)?
-            .map(|v| {
+            .and_then(|v| {
                 let bytes: [u8; 8] = v
                     .try_into()
                     .map_err(|v: Vec<u8>| {
@@ -61,8 +61,7 @@ impl StateManager {
                     })
                     .ok()?;
                 Some(u64::from_be_bytes(bytes))
-            })
-            .flatten())
+            }))
     }
 
     /// Processes a block coming from the live event stream (and its cache entry).
@@ -116,7 +115,7 @@ impl StateManager {
                     self.apply_single_state_change(
                         &mut batch,
                         &db,
-                        &cf_state,
+                        cf_state,
                         change,
                         &consensus_timestamp,
                     )?;
@@ -127,7 +126,7 @@ impl StateManager {
         batch.put_cf(
             &cf_metadata,
             STATE_LAST_PROCESSED_BLOCK,
-            &block_number.to_be_bytes(),
+            block_number.to_be_bytes(),
         );
         db.write(batch).context("Failed to write state batch")
     }
@@ -146,7 +145,7 @@ impl StateManager {
                 ChangeOperation::MapUpdate(update) => {
                     let key = self.construct_db_key(change.state_id, &update.key)?;
                     let val = update.value.context("MapUpdateChange is missing value")?;
-                    batch.put_cf(cf, &key, &val.encode_to_vec());
+                    batch.put_cf(cf, &key, val.encode_to_vec());
                 },
                 ChangeOperation::MapDelete(deletion) => {
                     let key = self.construct_db_key(change.state_id, &deletion.key)?;
@@ -198,7 +197,7 @@ impl StateManager {
                             return Ok(());
                         },
                     };
-                    batch.put_cf(cf, &key, &value_bytes);
+                    batch.put_cf(cf, key, &value_bytes);
                 },
                 ChangeOperation::QueuePush(push) => {
                     let key = [

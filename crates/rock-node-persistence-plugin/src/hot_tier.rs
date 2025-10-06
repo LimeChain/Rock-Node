@@ -29,7 +29,7 @@ impl HotTier {
             .ok_or_else(|| anyhow!("Could not get handle for CF: {}", CF_HOT_BLOCKS))?;
 
         let key = block_number.to_be_bytes();
-        match self.db.get_cf(cf, &key)? {
+        match self.db.get_cf(cf, key)? {
             Some(db_vec) => {
                 let stored_block: StoredBlock = bincode::deserialize(&db_vec)?;
                 Ok(Some(stored_block.contents))
@@ -111,7 +111,7 @@ impl HotTier {
         };
         let value = bincode::serialize(&stored_block)?;
 
-        batch.put_cf(cf, &key, &value);
+        batch.put_cf(cf, key, &value);
         Ok(())
     }
 
@@ -122,7 +122,7 @@ impl HotTier {
             .ok_or_else(|| anyhow!("Could not get handle for CF: {}", CF_HOT_BLOCKS))?;
 
         let key = block_number.to_be_bytes();
-        batch.delete_cf(cf, &key);
+        batch.delete_cf(cf, key);
         Ok(())
     }
 

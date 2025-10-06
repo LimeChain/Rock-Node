@@ -191,7 +191,7 @@ impl NetworkQueryHandler {
         account: &rock_node_protobufs::proto::Account,
     ) -> Result<Vec<TokenRelationship>, Status> {
         let mut relationships = Vec::new();
-        let mut current_token_id = account.head_token_id.clone();
+        let mut current_token_id = account.head_token_id;
 
         let state_id = StateIdentifier::StateIdTokenRelations as u32;
 
@@ -203,7 +203,7 @@ impl NetworkQueryHandler {
             let map_key = MapChangeKey {
                 key_choice: Some(map_change_key::KeyChoice::TokenRelationshipKey(
                     rock_node_protobufs::proto::TokenAssociation {
-                        token_id: current_token_id.clone(),
+                        token_id: current_token_id,
                         account_id: account.account_id.clone(),
                     },
                 )),

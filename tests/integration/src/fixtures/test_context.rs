@@ -122,6 +122,8 @@ impl IntegrationTestContextBuilder {
         let (tx_block_items_received, rx_block_items_received) =
             mpsc::channel(self.channel_buffer_size);
         let (tx_block_verified, rx_block_verified) = mpsc::channel(self.channel_buffer_size);
+        let (tx_block_verification_failed, _rx_block_verification_failed) =
+            broadcast::channel(self.channel_buffer_size);
         let (tx_block_persisted, _rx_block_persisted) =
             broadcast::channel(self.channel_buffer_size);
 
@@ -134,6 +136,7 @@ impl IntegrationTestContextBuilder {
             block_data_cache: Arc::new(block_data_cache),
             tx_block_items_received,
             tx_block_verified,
+            tx_block_verification_failed,
             tx_block_persisted,
         };
 

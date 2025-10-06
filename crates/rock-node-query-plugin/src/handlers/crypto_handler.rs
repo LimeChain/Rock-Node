@@ -89,14 +89,12 @@ impl CryptoQueryHandler {
                         contract_account_id: if account.smart_contract {
                             if !account.alias.is_empty() {
                                 hex::encode(account.alias.clone())
+                            } else if let Some(AccountIdType::AccountNum(num)) =
+                                account.account_id.as_ref().unwrap().account
+                            {
+                                format!("0.0.{}", num)
                             } else {
-                                if let Some(AccountIdType::AccountNum(num)) =
-                                    account.account_id.as_ref().unwrap().account
-                                {
-                                    format!("0.0.{}", num)
-                                } else {
-                                    String::new()
-                                }
+                                String::new()
                             }
                         } else {
                             String::new()

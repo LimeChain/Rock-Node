@@ -22,6 +22,9 @@ pub mod com {
                     pub mod output {
                         tonic::include_proto!("com.hedera.hapi.block.stream.output");
                     }
+                    pub mod trace {
+                        tonic::include_proto!("com.hedera.hapi.block.stream.trace");
+                    }
                 }
             }
             pub mod node {
@@ -50,6 +53,12 @@ pub mod com {
                     pub mod tss {
                         tonic::include_proto!("com.hedera.hapi.node.state.tss");
                     }
+                    pub mod hooks {
+                        tonic::include_proto!("com.hedera.hapi.node.state.hooks");
+                    }
+                }
+                pub mod hooks {
+                    tonic::include_proto!("com.hedera.hapi.node.hooks");
                 }
             }
             pub mod platform {

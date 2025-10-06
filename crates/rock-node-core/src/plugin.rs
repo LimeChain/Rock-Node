@@ -162,6 +162,7 @@ mod tests {
             block_data_cache: Arc::new(crate::cache::BlockDataCache::default()),
             tx_block_items_received: mpsc::channel(100).0,
             tx_block_verified: mpsc::channel(100).0,
+            tx_block_verification_failed: broadcast::channel(100).0,
             tx_block_persisted: broadcast::channel(100).0,
         }
     }

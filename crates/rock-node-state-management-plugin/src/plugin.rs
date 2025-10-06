@@ -26,6 +26,12 @@ pub struct StateManagementPlugin {
     shutdown_notify: Arc<Notify>,
 }
 
+impl Default for StateManagementPlugin {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl StateManagementPlugin {
     pub fn new() -> Self {
         Self {

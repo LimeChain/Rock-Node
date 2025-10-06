@@ -216,6 +216,7 @@ mod tests {
             block_data_cache: Arc::new(create_test_cache()),
             tx_block_items_received: tokio::sync::mpsc::channel(100).0,
             tx_block_verified: tokio::sync::mpsc::channel(100).0,
+            tx_block_verification_failed: tokio::sync::broadcast::channel(100).0,
             tx_block_persisted: tokio::sync::broadcast::channel(100).0,
         };
 

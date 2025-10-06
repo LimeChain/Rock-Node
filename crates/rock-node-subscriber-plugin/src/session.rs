@@ -421,6 +421,7 @@ mod tests {
                 block_data_cache: Arc::new(Default::default()),
                 tx_block_items_received: tokio::sync::mpsc::channel(1).0,
                 tx_block_verified: tokio::sync::mpsc::channel(1).0,
+                tx_block_verification_failed: tokio::sync::broadcast::channel(1).0,
                 tx_block_persisted: tx_persisted.clone(),
             }),
             tx_persisted,

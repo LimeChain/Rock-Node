@@ -29,6 +29,9 @@
 //! and uses `MetricsRegistry::with_registry()` to create a registry with
 //! isolated metric namespaces.
 
+#[cfg(test)]
+use std::sync::Arc;
+
 use crate::metrics::MetricsRegistry;
 
 /// Creates an isolated MetricsRegistry for testing.
@@ -80,7 +83,6 @@ pub fn create_isolated_metrics_with_prefix(_prefix: &str) -> MetricsRegistry {
 }
 
 use crate::events::BlockData;
-use std::sync::Arc;
 
 /// Creates a mock BlockReader for testing.
 ///
