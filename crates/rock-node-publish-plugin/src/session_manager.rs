@@ -199,6 +199,11 @@ impl SessionManager {
             return BlockAction::EndDuplicate;
         }
 
+        // Note: We DO NOT reject future blocks (block_number > latest_persisted + 1).
+        // The persistence layer handles out-of-order blocks by creating gap ranges,
+        // and the backfill plugin fills those gaps later. This design prioritizes
+        // data availability - we want to accept and persist all blocks we receive.
+
         // Check if this is a duplicate (we're currently streaming this block)
         if let Some(winner_entry) = self.shared_state.block_winners.get(&(block_number as u64)) {
             if *winner_entry == self.id {
@@ -971,6 +976,7 @@ mod tests {
         let metrics = create_test_metrics();
         let (context, _rx_items, _rx_verified, _rx_persisted) = make_context_with_registry(metrics);
         let shared = Arc::new(SharedState::new());
+        shared.set_latest_persisted_block(100); // Set to 100 so block 101 is the expected next
         let (tx1, mut rx1) = mpsc::channel(4);
         let (tx2, mut rx2) = mpsc::channel(4);
         let mut s1 = SessionManager::new(context.clone(), shared.clone(), tx1);
@@ -1062,6 +1068,7 @@ mod tests {
         let (context, mut rx_items, _rx_verified, _rx_persisted) =
             make_context_with_registry(metrics);
         let shared = Arc::new(SharedState::new());
+        shared.set_latest_persisted_block(100); // Set to 100 so block 101 is the expected next
         let (tx, mut rx) = mpsc::channel(8);
         let mut s = SessionManager::new(context.clone(), shared.clone(), tx);
 
@@ -1074,7 +1081,7 @@ mod tests {
                 rock_node_protobufs::com::hedera::hapi::block::stream::output::BlockHeader {
                     hapi_proto_version: None,
                     software_version: None,
-                    number: 200,
+                    number: 101,
                     block_timestamp: None,
                     hash_algorithm: 0,
                 },
@@ -1083,7 +1090,7 @@ mod tests {
         let proof_item = rock_node_protobufs::com::hedera::hapi::block::stream::BlockItem {
             item: Some(BlockItemType::BlockProof(
                 rock_node_protobufs::com::hedera::hapi::block::stream::BlockProof {
-                    block: 200,
+                    block: 101,
                     ..Default::default()
                 },
             )),
@@ -1118,11 +1125,266 @@ mod tests {
             .unwrap();
         match msg.response.unwrap() {
             publish_stream_response::Response::Acknowledgement(ack) => {
-                assert_eq!(ack.block_number, 200)
+                assert_eq!(ack.block_number, 101)
             },
             _ => panic!("Expected Acknowledgement"),
         }
 
-        assert_eq!(shared.get_latest_persisted_block(), 200);
+        assert_eq!(shared.get_latest_persisted_block(), 101);
+    }
+
+    #[tokio::test]
+    async fn verification_failure_sends_bad_block_proof_to_primary() {
+        let metrics = create_test_metrics();
+        let (context, mut rx_items, _rx_verified, _rx_persisted) =
+            make_context_with_registry(metrics);
+        let shared = Arc::new(SharedState::new());
+        shared.set_latest_persisted_block(100); // Set to 100 so block 101 is the expected next
+        let (tx, mut rx) = mpsc::channel(8);
+        let mut s = SessionManager::new(context.clone(), shared.clone(), tx);
+
+        shared.active_sessions.insert(s.id, s.response_tx.clone());
+
+        // Send header + proof for block 101
+        let header_item = rock_node_protobufs::com::hedera::hapi::block::stream::BlockItem {
+            item: Some(BlockItemType::BlockHeader(
+                rock_node_protobufs::com::hedera::hapi::block::stream::output::BlockHeader {
+                    number: 101,
+                    ..Default::default()
+                },
+            )),
+        };
+        let proof_item = rock_node_protobufs::com::hedera::hapi::block::stream::BlockItem {
+            item: Some(BlockItemType::BlockProof(
+                rock_node_protobufs::com::hedera::hapi::block::stream::BlockProof {
+                    block: 101,
+                    ..Default::default()
+                },
+            )),
+        };
+        let req = PublishRequestType::BlockItems(
+            rock_node_protobufs::org::hiero::block::api::BlockItemSet {
+                block_items: vec![header_item, proof_item],
+            },
+        );
+
+        // Simulate verification failure
+        let tx_verification_failed = s.context.tx_block_verification_failed.clone();
+        tokio::spawn(async move {
+            let items_received = rx_items.recv().await.unwrap();
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            let _ = tx_verification_failed.send(rock_node_core::events::BlockVerificationFailed {
+                block_number: items_received.block_number,
+                cache_key: items_received.cache_key,
+                reason: "Invalid block signature".to_string(),
+            });
+        });
+
+        let should_terminate = s.handle_request(req).await;
+        // Verification failure should terminate the session
+        assert!(should_terminate);
+
+        // Expect EndOfStream with BAD_BLOCK_PROOF status
+        let msg = tokio::time::timeout(Duration::from_secs(1), rx.recv())
+            .await
+            .expect("timeout waiting for response")
+            .unwrap()
+            .unwrap();
+        match msg.response.unwrap() {
+            publish_stream_response::Response::EndStream(eos) => {
+                assert_eq!(
+                    eos.status,
+                    publish_stream_response::end_of_stream::Code::BadBlockProof as i32
+                );
+                assert_eq!(eos.block_number, 101);
+            },
+            _ => panic!("Expected EndStream with BAD_BLOCK_PROOF"),
+        }
+    }
+
+    #[tokio::test]
+    async fn verification_timeout_sends_resend_to_other_sessions() {
+        let metrics = create_test_metrics();
+        let (context, _rx_items, _rx_verified, _rx_persisted) = make_context_with_registry(metrics);
+        let shared = Arc::new(SharedState::new());
+        shared.set_latest_persisted_block(101); // Set to 101 so block 102 is the expected next
+        let (tx1, _rx1) = mpsc::channel(8);
+        let (tx2, mut rx2) = mpsc::channel(8);
+        let mut s1 = SessionManager::new(context.clone(), shared.clone(), tx1);
+        let s2_id = {
+            let s2 = SessionManager::new(context.clone(), shared.clone(), tx2.clone());
+            s2.id
+        };
+
+        // Register both sessions
+        shared.active_sessions.insert(s1.id, s1.response_tx.clone());
+        shared.active_sessions.insert(s2_id, tx2.clone());
+
+        // Send header + proof for block 102
+        let header_item = rock_node_protobufs::com::hedera::hapi::block::stream::BlockItem {
+            item: Some(BlockItemType::BlockHeader(
+                rock_node_protobufs::com::hedera::hapi::block::stream::output::BlockHeader {
+                    number: 102,
+                    ..Default::default()
+                },
+            )),
+        };
+        let proof_item = rock_node_protobufs::com::hedera::hapi::block::stream::BlockItem {
+            item: Some(BlockItemType::BlockProof(
+                rock_node_protobufs::com::hedera::hapi::block::stream::BlockProof {
+                    block: 102,
+                    ..Default::default()
+                },
+            )),
+        };
+        let req = PublishRequestType::BlockItems(
+            rock_node_protobufs::org::hiero::block::api::BlockItemSet {
+                block_items: vec![header_item, proof_item],
+            },
+        );
+
+        // Don't send any verification or persistence events - let it timeout
+        let should_terminate = s1.handle_request(req).await;
+        // Timeout DOES terminate the primary session
+        assert!(should_terminate);
+
+        // Session 2 (non-primary) should receive ResendBlock
+        let msg2 = tokio::time::timeout(Duration::from_secs(2), rx2.recv())
+            .await
+            .expect("timeout waiting for ResendBlock to non-primary")
+            .unwrap()
+            .unwrap();
+        match msg2.response.unwrap() {
+            publish_stream_response::Response::ResendBlock(resend) => {
+                assert_eq!(resend.block_number, 102);
+            },
+            _ => panic!("Expected ResendBlock to non-primary"),
+        }
+    }
+
+    #[tokio::test]
+    async fn header_handles_behind_blocks() {
+        let (context, _rx_items, _rx_verified, _rx_persisted) = make_context();
+        let shared = Arc::new(SharedState::new());
+        shared.set_latest_persisted_block(100);
+        let (tx, mut rx) = mpsc::channel(4);
+        let mut session = SessionManager::new(context, shared, tx);
+
+        // Sending header 50 (< latest_persisted = 100) should be Behind
+        let header_item = rock_node_protobufs::com::hedera::hapi::block::stream::BlockItem {
+            item: Some(BlockItemType::BlockHeader(
+                rock_node_protobufs::com::hedera::hapi::block::stream::output::BlockHeader {
+                    number: 50,
+                    ..Default::default()
+                },
+            )),
+        };
+        let req = PublishRequestType::BlockItems(
+            rock_node_protobufs::org::hiero::block::api::BlockItemSet {
+                block_items: vec![header_item],
+            },
+        );
+
+        // Should terminate with Behind
+        assert!(session.handle_request(req).await);
+        let msg = rx.try_recv().unwrap().unwrap();
+        match msg.response.unwrap() {
+            publish_stream_response::Response::EndStream(eos) => {
+                assert_eq!(
+                    eos.status,
+                    publish_stream_response::end_of_stream::Code::Behind as i32
+                );
+                // EndOfStream contains latest_persisted (100), not the attempted block (50)
+                assert_eq!(eos.block_number, 100);
+            },
+            _ => panic!("Expected EndStream Behind"),
+        }
+    }
+
+    #[tokio::test]
+    async fn verification_failure_sends_resend_to_other_sessions() {
+        let metrics = create_test_metrics();
+        let (context, mut rx_items, _rx_verified, _rx_persisted) =
+            make_context_with_registry(metrics);
+        let shared = Arc::new(SharedState::new());
+        shared.set_latest_persisted_block(102); // Set to 102 so block 103 is the expected next
+        let (tx1, mut rx1) = mpsc::channel(8);
+        let (tx2, mut rx2) = mpsc::channel(8);
+        let mut s1 = SessionManager::new(context.clone(), shared.clone(), tx1);
+        let s2_id = {
+            let s2 = SessionManager::new(context.clone(), shared.clone(), tx2.clone());
+            s2.id
+        };
+
+        // Register both sessions
+        shared.active_sessions.insert(s1.id, s1.response_tx.clone());
+        shared.active_sessions.insert(s2_id, tx2.clone());
+
+        // Send header + proof from primary session
+        let header_item = rock_node_protobufs::com::hedera::hapi::block::stream::BlockItem {
+            item: Some(BlockItemType::BlockHeader(
+                rock_node_protobufs::com::hedera::hapi::block::stream::output::BlockHeader {
+                    number: 103,
+                    ..Default::default()
+                },
+            )),
+        };
+        let proof_item = rock_node_protobufs::com::hedera::hapi::block::stream::BlockItem {
+            item: Some(BlockItemType::BlockProof(
+                rock_node_protobufs::com::hedera::hapi::block::stream::BlockProof {
+                    block: 103,
+                    ..Default::default()
+                },
+            )),
+        };
+        let req = PublishRequestType::BlockItems(
+            rock_node_protobufs::org::hiero::block::api::BlockItemSet {
+                block_items: vec![header_item, proof_item],
+            },
+        );
+
+        // Simulate verification failure
+        let tx_verification_failed = s1.context.tx_block_verification_failed.clone();
+        tokio::spawn(async move {
+            let items_received = rx_items.recv().await.unwrap();
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            let _ = tx_verification_failed.send(rock_node_core::events::BlockVerificationFailed {
+                block_number: items_received.block_number,
+                cache_key: items_received.cache_key,
+                reason: "Invalid proof".to_string(),
+            });
+        });
+
+        let should_terminate = s1.handle_request(req).await;
+        assert!(should_terminate);
+
+        // Primary session should get BAD_BLOCK_PROOF
+        let msg1 = tokio::time::timeout(Duration::from_secs(1), rx1.recv())
+            .await
+            .expect("timeout waiting for BAD_BLOCK_PROOF")
+            .unwrap()
+            .unwrap();
+        match msg1.response.unwrap() {
+            publish_stream_response::Response::EndStream(eos) => {
+                assert_eq!(
+                    eos.status,
+                    publish_stream_response::end_of_stream::Code::BadBlockProof as i32
+                );
+            },
+            _ => panic!("Expected BAD_BLOCK_PROOF to primary"),
+        }
+
+        // Other session should get ResendBlock
+        let msg2 = tokio::time::timeout(Duration::from_secs(1), rx2.recv())
+            .await
+            .expect("timeout waiting for ResendBlock")
+            .unwrap()
+            .unwrap();
+        match msg2.response.unwrap() {
+            publish_stream_response::Response::ResendBlock(resend) => {
+                assert_eq!(resend.block_number, 103);
+            },
+            _ => panic!("Expected ResendBlock to other session"),
+        }
     }
 }

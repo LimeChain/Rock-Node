@@ -216,9 +216,10 @@ The core of the plugin is the "primary election" and subsequent state transition
 2. It reads `SharedState::latest_persisted_block` to perform initial validation.
 3. If N < latest_persisted, it is behind. The server sends `EndOfStream(Behind)` and closes the connection.
 4. If N == latest_persisted, it is a duplicate (already persisted). The server sends `EndOfStream(DuplicateBlock)` and closes the connection.
-5. If N > latest_persisted + 1, it is a future block (gap). The server sends `EndOfStream(Behind)` and closes the connection.
-6. If N == latest_persisted + 1 (the expected block), the session attempts to "win" the election by inserting its unique session ID into `SharedState::block_winners` for key N.
-7. The `DashMap::entry().or_insert()` operation atomically guarantees that only one session can be the first to write its ID.
+5. If N > latest_persisted (including future blocks that create gaps), the session attempts to "win" the election by inserting its unique session ID into `SharedState::block_winners` for key N.
+6. The `DashMap::entry().or_insert()` operation atomically guarantees that only one session can be the first to write its ID.
+
+**Note on Future Blocks:** The publish plugin does NOT reject blocks that arrive out of order (N > latest_persisted + 1). This design prioritizes data availability - the persistence layer handles out-of-order blocks by creating gap ranges, and the backfill plugin fills those gaps later.
 
 **Case A (Win):** The session's ID was successfully inserted. It transitions its internal state to `Primary`. It can now buffer `BlockItems`.
 
@@ -290,8 +291,8 @@ The service is defined by a single bidirectional gRPC stream.
   - The client should resend all items for that block.
 - **SkipBlock:** Sent to a non-primary publisher to tell it another publisher won the race and it should not send data for the current block.
 - **EndOfStream:** Sent by the server when it is terminating the connection due to an unrecoverable error. Status codes include:
-  - **DUPLICATE_BLOCK:** Block number ≤ latest persisted block
-  - **BEHIND:** Block number > latest persisted block + 1 (future block)
+  - **DUPLICATE_BLOCK:** Block number == latest persisted block (already stored)
+  - **BEHIND:** Block number < latest persisted block (old block we already have)
   - **BAD_BLOCK_PROOF:** Block failed verification (invalid structure, signatures, or proof)
   - **END_STREAM_ERROR:** Generic error or client-initiated graceful close
 
@@ -328,7 +329,7 @@ A Counter tracking the number of successfully persisted blocks via this plugin.
 ### 7.2 Logging
 
 - **INFO:** New connections, session state transitions (becoming primary), successful block publications, and connection terminations are logged with the unique `session_id`.
-- **WARN:** Duplicate/future blocks, persistence timeouts, and failures to send messages to a client (likely due to a disconnected client) are logged.
+- **WARN:** Duplicate/behind blocks, verification failures, persistence timeouts, and failures to send messages to a client (likely due to a disconnected client) are logged.
 - **ERROR:** Critical failures like the gRPC server failing to start or failure to send an event on a core channel.
 
 ---
