@@ -121,6 +121,23 @@ impl SessionManager {
                 .publish_blocks_received_total
                 .with_label_values(&["validation_error"])
                 .inc();
+
+            // Send error response to client before terminating
+            let response = PublishStreamResponse {
+                response: Some(publish_stream_response::Response::EndStream(
+                    publish_stream_response::EndOfStream {
+                        status: publish_stream_response::end_of_stream::Code::Error as i32,
+                        block_number: self.current_block_number as u64,
+                    },
+                )),
+            };
+            let _ = self.send_response(response).await;
+            self.context
+                .metrics
+                .publish_responses_sent_total
+                .with_label_values(&["EndStream_ValidationError"])
+                .inc();
+
             return true; // Terminate session on validation error
         }
 
