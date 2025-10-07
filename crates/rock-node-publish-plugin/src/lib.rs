@@ -23,9 +23,11 @@ use std::{
 use tonic::service::RoutesBuilder;
 use tracing::{debug, info, warn};
 
+mod error;
 mod service;
 mod session_manager;
 mod state;
+mod validation;
 
 #[derive(Debug, Default)]
 pub struct PublishPlugin {
@@ -134,9 +136,14 @@ impl Plugin for PublishPlugin {
             context: context.clone(),
             shared_state: self.shared_state.as_ref().unwrap().clone(),
         };
-        const MAX_MESSAGE_SIZE: usize = 1024 * 1024 * 32;
+        let max_message_size = context
+            .config
+            .plugins
+            .publish_service
+            .max_message_size_bytes;
         let server = BlockStreamPublishServiceServer::new(service)
-            .max_decoding_message_size(MAX_MESSAGE_SIZE);
+            .max_decoding_message_size(max_message_size)
+            .max_encoding_message_size(max_message_size);
 
         builder.add_service(server);
         Ok(true)

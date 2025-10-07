@@ -53,6 +53,8 @@ impl BlockStreamPublishService for PublishServiceImpl {
                     }
                 }
             }
+            // Log session statistics before cleanup
+            session_manager.log_session_stats();
             info!(%session_id, "Session handler task finished.");
 
             // When the session finishes, it may have been the recorded winner for

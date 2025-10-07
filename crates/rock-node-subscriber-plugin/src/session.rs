@@ -380,6 +380,8 @@ mod tests {
                     stale_winner_timeout_seconds: 0,
                     winner_cleanup_interval_seconds: 0,
                     winner_cleanup_threshold_blocks: 0,
+                    max_message_size_bytes: todo!(),
+                    max_items_per_set: todo!(),
                 },
                 verification_service: VerificationServiceConfig { enabled: false },
                 block_access_service: BlockAccessServiceConfig { enabled: false },

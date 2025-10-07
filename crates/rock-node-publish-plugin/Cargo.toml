@@ -17,6 +17,7 @@ tonic = "0.13.1"
 
 # For easy error handling
 anyhow = "1"
+thiserror = "1"
 
 # For logging
 tracing = "0.1"

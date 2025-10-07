@@ -1,4 +1,8 @@
-use crate::state::{BlockAction, SessionState, SharedState};
+use crate::{
+    error::PublishError,
+    state::{BlockAction, SessionState, SharedState},
+    validation::RequestValidator,
+};
 use anyhow::Result;
 use prost::Message;
 use rock_node_core::AppContext;
@@ -20,16 +24,24 @@ use uuid::Uuid;
 
 pub struct SessionManager {
     pub id: Uuid,
+    /// Optional publisher identifier for tracking/metrics
+    pub publisher_id: Option<String>,
     context: AppContext,
     shared_state: Arc<SharedState>,
     state: SessionState,
     current_block_number: i64,
     current_block_action: Option<BlockAction>,
     block_start_time: Option<Instant>,
+    session_start_time: Instant,
     item_buffer: Vec<rock_node_protobufs::com::hedera::hapi::block::stream::BlockItem>,
     response_tx: mpsc::Sender<Result<PublishStreamResponse, Status>>,
     header_proof_total_duration: f64,
     header_proof_count: u64,
+    validator: RequestValidator,
+    // Metrics tracking
+    blocks_received: u64,
+    blocks_accepted: u64,
+    blocks_skipped: u64,
 }
 
 impl SessionManager {
@@ -38,18 +50,25 @@ impl SessionManager {
         shared_state: Arc<SharedState>,
         response_tx: mpsc::Sender<Result<PublishStreamResponse, Status>>,
     ) -> Self {
+        let max_items = context.config.plugins.publish_service.max_items_per_set;
         Self {
             id: Uuid::new_v4(),
+            publisher_id: None,
             context,
             shared_state,
             state: SessionState::New,
             current_block_number: 0,
             current_block_action: None,
             block_start_time: None,
+            session_start_time: Instant::now(),
             item_buffer: Vec::new(),
             response_tx,
             header_proof_total_duration: 0.0,
             header_proof_count: 0,
+            validator: RequestValidator::new(max_items),
+            blocks_received: 0,
+            blocks_accepted: 0,
+            blocks_skipped: 0,
         }
     }
 
@@ -72,6 +91,8 @@ impl SessionManager {
         &mut self,
         block_item_set: rock_node_protobufs::org::hiero::block::api::BlockItemSet,
     ) -> bool {
+        self.blocks_received += 1;
+
         let mut block_number: Option<i64> = None;
 
         // First pass - extract block number from header if present
@@ -80,6 +101,27 @@ impl SessionManager {
                 block_number = Some(header.number as i64);
                 break;
             }
+        }
+
+        // Determine if this is a new block or continuation
+        let is_new_block = block_number.is_some();
+
+        // Validate request format
+        if let Err(e) = self
+            .validator
+            .validate_block_items(&block_item_set, is_new_block)
+        {
+            error!(
+                session_id = %self.id,
+                error = %e,
+                "Validation failed for block items"
+            );
+            self.context
+                .metrics
+                .publish_blocks_received_total
+                .with_label_values(&["validation_error"])
+                .inc();
+            return true; // Terminate session on validation error
         }
 
         // Get action for this request
@@ -378,6 +420,7 @@ impl SessionManager {
 
     /// Handle Skip action - send SkipBlock response and reset
     async fn handle_skip(&mut self) {
+        self.blocks_skipped += 1;
         let response = PublishStreamResponse {
             response: Some(publish_stream_response::Response::SkipBlock(SkipBlock {
                 block_number: self.current_block_number as u64,
@@ -575,6 +618,7 @@ impl SessionManager {
     /// Complete block: send to verification, wait for result, then persistence, then ACK
     /// Returns false to continue the session, true to terminate
     async fn complete_block(&mut self) -> bool {
+        self.blocks_accepted += 1;
         info!(session_id = %self.id, block_number = self.current_block_number, "Block is complete. Sending to verification.");
 
         let block_proto = Block {
@@ -817,6 +861,32 @@ impl SessionManager {
             Ok(())
         }
     }
+
+    /// Log session statistics (call when session ends)
+    pub fn log_session_stats(&self) {
+        let session_duration = self.session_start_time.elapsed();
+        info!(
+            session_id = %self.id,
+            publisher_id = ?self.publisher_id,
+            duration_secs = session_duration.as_secs(),
+            blocks_received = self.blocks_received,
+            blocks_accepted = self.blocks_accepted,
+            blocks_skipped = self.blocks_skipped,
+            avg_header_to_proof_secs = if self.header_proof_count > 0 {
+                self.header_proof_total_duration / self.header_proof_count as f64
+            } else {
+                0.0
+            },
+            "Publisher session completed"
+        );
+
+        // Record session duration metric
+        self.context
+            .metrics
+            .publish_session_duration_seconds
+            .with_label_values::<&str>(&[])
+            .observe(session_duration.as_secs_f64());
+    }
 }
 
 #[cfg(test)]
@@ -884,6 +954,8 @@ mod tests {
                     stale_winner_timeout_seconds: 1,
                     winner_cleanup_interval_seconds: 60,
                     winner_cleanup_threshold_blocks: 100,
+                    max_message_size_bytes: 32 * 1024 * 1024,
+                    max_items_per_set: 10000,
                 },
                 verification_service: VerificationServiceConfig { enabled: true },
                 block_access_service: BlockAccessServiceConfig { enabled: true },
@@ -1386,5 +1458,512 @@ mod tests {
             },
             _ => panic!("Expected ResendBlock to other session"),
         }
+    }
+
+    // ============================================
+    // NEW COMPREHENSIVE MULTI-PUBLISHER TESTS
+    // ============================================
+
+    #[tokio::test]
+    async fn three_publishers_race_for_same_block() {
+        // Test that when 3 publishers race for the same block,
+        // only one wins and the other two get SkipBlock
+        let metrics = create_test_metrics();
+        let (context, _rx_items, _rx_verified, _rx_persisted) = make_context_with_registry(metrics);
+        let shared = Arc::new(SharedState::new());
+        shared.set_latest_persisted_block(200);
+
+        let (tx1, mut rx1) = mpsc::channel(4);
+        let (tx2, mut rx2) = mpsc::channel(4);
+        let (tx3, mut rx3) = mpsc::channel(4);
+
+        let mut s1 = SessionManager::new(context.clone(), shared.clone(), tx1);
+        let mut s2 = SessionManager::new(context.clone(), shared.clone(), tx2);
+        let mut s3 = SessionManager::new(context.clone(), shared.clone(), tx3);
+
+        // Register all three sessions
+        shared.active_sessions.insert(s1.id, s1.response_tx.clone());
+        shared.active_sessions.insert(s2.id, s2.response_tx.clone());
+        shared.active_sessions.insert(s3.id, s3.response_tx.clone());
+
+        // All three send header for block 201
+        let header = rock_node_protobufs::com::hedera::hapi::block::stream::BlockItem {
+            item: Some(BlockItemType::BlockHeader(
+                rock_node_protobufs::com::hedera::hapi::block::stream::output::BlockHeader {
+                    number: 201,
+                    ..Default::default()
+                },
+            )),
+        };
+
+        let req1 = PublishRequestType::BlockItems(
+            rock_node_protobufs::org::hiero::block::api::BlockItemSet {
+                block_items: vec![header.clone()],
+            },
+        );
+        let req2 = PublishRequestType::BlockItems(
+            rock_node_protobufs::org::hiero::block::api::BlockItemSet {
+                block_items: vec![header.clone()],
+            },
+        );
+        let req3 = PublishRequestType::BlockItems(
+            rock_node_protobufs::org::hiero::block::api::BlockItemSet {
+                block_items: vec![header],
+            },
+        );
+
+        // s1 wins
+        assert!(!s1.handle_request(req1).await);
+        assert_eq!(s1.state, SessionState::Primary);
+
+        // s2 and s3 should get SkipBlock
+        assert!(!s2.handle_request(req2).await);
+        assert!(!s3.handle_request(req3).await);
+
+        // Verify both losers got SkipBlock
+        for (name, rx) in [("s2", &mut rx2), ("s3", &mut rx3)] {
+            let msg = tokio::time::timeout(Duration::from_millis(200), rx.recv())
+                .await
+                .expect(&format!("{} should receive SkipBlock", name))
+                .unwrap()
+                .unwrap();
+            match msg.response.unwrap() {
+                publish_stream_response::Response::SkipBlock(sk) => {
+                    assert_eq!(sk.block_number, 201);
+                },
+                other => panic!("{} expected SkipBlock, got {:?}", name, other),
+            }
+        }
+
+        // Winner should not receive anything yet
+        assert!(rx1.try_recv().is_err());
+
+        // Verify block_winners map has correct entry
+        assert_eq!(shared.block_winners.get(&201).unwrap().value(), &s1.id);
+    }
+
+    #[tokio::test]
+    async fn validation_error_empty_block_items() {
+        // Test that validation rejects empty block items
+        let metrics = create_test_metrics();
+        let (context, _rx_items, _rx_verified, _rx_persisted) = make_context_with_registry(metrics);
+        let shared = Arc::new(SharedState::new());
+        shared.set_latest_persisted_block(100);
+
+        let (tx, _rx) = mpsc::channel(4);
+        let mut session = SessionManager::new(context, shared, tx);
+
+        // Send empty block items
+        let req = PublishRequestType::BlockItems(
+            rock_node_protobufs::org::hiero::block::api::BlockItemSet {
+                block_items: vec![],
+            },
+        );
+
+        // Should terminate due to validation error
+        assert!(session.handle_request(req).await);
+    }
+
+    #[tokio::test]
+    async fn validation_error_missing_header_for_new_block() {
+        // Test that validation rejects new blocks without header
+        let metrics = create_test_metrics();
+        let (context, _rx_items, _rx_verified, _rx_persisted) = make_context_with_registry(metrics);
+        let shared = Arc::new(SharedState::new());
+        shared.set_latest_persisted_block(100);
+
+        let (tx, _rx) = mpsc::channel(4);
+        let mut session = SessionManager::new(context, shared, tx);
+
+        // Send proof without header (new block should start with header)
+        let proof_item = rock_node_protobufs::com::hedera::hapi::block::stream::BlockItem {
+            item: Some(BlockItemType::BlockProof(
+                rock_node_protobufs::com::hedera::hapi::block::stream::BlockProof {
+                    block: 101,
+                    ..Default::default()
+                },
+            )),
+        };
+        let req = PublishRequestType::BlockItems(
+            rock_node_protobufs::org::hiero::block::api::BlockItemSet {
+                block_items: vec![proof_item],
+            },
+        );
+
+        // Should terminate due to validation error
+        assert!(session.handle_request(req).await);
+    }
+
+    #[tokio::test]
+    async fn validation_error_too_many_items() {
+        // Test that validation rejects excessive items
+        let metrics = create_test_metrics();
+        let (context, _rx_items, _rx_verified, _rx_persisted) = make_context_with_registry(metrics);
+
+        // Create a new context with modified config
+        let mut config = (*context.config).clone();
+        config.plugins.publish_service.max_items_per_set = 5;
+        let modified_context = rock_node_core::AppContext {
+            config: Arc::new(config),
+            metrics: context.metrics.clone(),
+            capability_registry: context.capability_registry.clone(),
+            service_providers: context.service_providers.clone(),
+            block_data_cache: context.block_data_cache.clone(),
+            tx_block_items_received: context.tx_block_items_received.clone(),
+            tx_block_verified: context.tx_block_verified.clone(),
+            tx_block_verification_failed: context.tx_block_verification_failed.clone(),
+            tx_block_persisted: context.tx_block_persisted.clone(),
+        };
+
+        let shared = Arc::new(SharedState::new());
+        shared.set_latest_persisted_block(100);
+
+        let (tx, _rx) = mpsc::channel(4);
+        let mut session = SessionManager::new(modified_context, shared, tx);
+
+        // Create header + 10 items (exceeds limit of 5)
+        let header = rock_node_protobufs::com::hedera::hapi::block::stream::BlockItem {
+            item: Some(BlockItemType::BlockHeader(
+                rock_node_protobufs::com::hedera::hapi::block::stream::output::BlockHeader {
+                    number: 101,
+                    ..Default::default()
+                },
+            )),
+        };
+        let mut items = vec![header];
+        for _ in 0..9 {
+            items.push(
+                rock_node_protobufs::com::hedera::hapi::block::stream::BlockItem {
+                    item: Some(BlockItemType::BlockProof(
+                        rock_node_protobufs::com::hedera::hapi::block::stream::BlockProof::default(
+                        ),
+                    )),
+                },
+            );
+        }
+
+        let req = PublishRequestType::BlockItems(
+            rock_node_protobufs::org::hiero::block::api::BlockItemSet { block_items: items },
+        );
+
+        // Should terminate due to validation error
+        assert!(session.handle_request(req).await);
+    }
+
+    #[tokio::test]
+    async fn multiple_consecutive_blocks_from_different_publishers() {
+        // Test that different publishers can win consecutive blocks
+        let metrics = create_test_metrics();
+        let (context, mut rx_items, _rx_verified, _rx_persisted) =
+            make_context_with_registry(metrics);
+        let shared = Arc::new(SharedState::new());
+        shared.set_latest_persisted_block(100);
+
+        let (tx1, mut rx1) = mpsc::channel(8);
+        let (tx2, _rx2) = mpsc::channel(8);
+
+        let mut s1 = SessionManager::new(context.clone(), shared.clone(), tx1);
+        let mut s2 = SessionManager::new(context.clone(), shared.clone(), tx2);
+
+        shared.active_sessions.insert(s1.id, s1.response_tx.clone());
+        shared.active_sessions.insert(s2.id, s2.response_tx.clone());
+
+        // Publisher 1 wins block 101
+        let header_101 = rock_node_protobufs::com::hedera::hapi::block::stream::BlockItem {
+            item: Some(BlockItemType::BlockHeader(
+                rock_node_protobufs::com::hedera::hapi::block::stream::output::BlockHeader {
+                    number: 101,
+                    ..Default::default()
+                },
+            )),
+        };
+        let proof_101 = rock_node_protobufs::com::hedera::hapi::block::stream::BlockItem {
+            item: Some(BlockItemType::BlockProof(
+                rock_node_protobufs::com::hedera::hapi::block::stream::BlockProof {
+                    block: 101,
+                    ..Default::default()
+                },
+            )),
+        };
+
+        let req_101_s1 = PublishRequestType::BlockItems(
+            rock_node_protobufs::org::hiero::block::api::BlockItemSet {
+                block_items: vec![header_101, proof_101],
+            },
+        );
+
+        // Simulate persistence for block 101
+        let tx_persisted = s1.context.tx_block_persisted.clone();
+        tokio::spawn(async move {
+            let items_received = rx_items.recv().await.unwrap();
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            let _ = tx_persisted.send(rock_node_core::events::BlockPersisted {
+                block_number: items_received.block_number,
+                cache_key: items_received.cache_key,
+            });
+        });
+
+        assert!(!s1.handle_request(req_101_s1).await);
+
+        // Wait for ACK
+        let ack = tokio::time::timeout(Duration::from_secs(1), rx1.recv())
+            .await
+            .expect("timeout waiting for ACK")
+            .unwrap()
+            .unwrap();
+        match ack.response.unwrap() {
+            publish_stream_response::Response::Acknowledgement(a) => {
+                assert_eq!(a.block_number, 101);
+            },
+            _ => panic!("Expected Acknowledgement"),
+        }
+
+        // Now publisher 2 wins block 102
+        shared.set_latest_persisted_block(101);
+
+        let header_102 = rock_node_protobufs::com::hedera::hapi::block::stream::BlockItem {
+            item: Some(BlockItemType::BlockHeader(
+                rock_node_protobufs::com::hedera::hapi::block::stream::output::BlockHeader {
+                    number: 102,
+                    ..Default::default()
+                },
+            )),
+        };
+
+        let req_102_s2 = PublishRequestType::BlockItems(
+            rock_node_protobufs::org::hiero::block::api::BlockItemSet {
+                block_items: vec![header_102],
+            },
+        );
+
+        assert!(!s2.handle_request(req_102_s2).await);
+        assert_eq!(s2.state, SessionState::Primary);
+
+        // Publisher 1 tries block 102 and should be skipped
+        let header_102_s1 = rock_node_protobufs::com::hedera::hapi::block::stream::BlockItem {
+            item: Some(BlockItemType::BlockHeader(
+                rock_node_protobufs::com::hedera::hapi::block::stream::output::BlockHeader {
+                    number: 102,
+                    ..Default::default()
+                },
+            )),
+        };
+
+        let req_102_s1 = PublishRequestType::BlockItems(
+            rock_node_protobufs::org::hiero::block::api::BlockItemSet {
+                block_items: vec![header_102_s1],
+            },
+        );
+
+        assert!(!s1.handle_request(req_102_s1).await);
+
+        // s1 should get SkipBlock for 102
+        let skip = tokio::time::timeout(Duration::from_millis(200), rx1.recv())
+            .await
+            .expect("timeout waiting for SkipBlock")
+            .unwrap()
+            .unwrap();
+        match skip.response.unwrap() {
+            publish_stream_response::Response::SkipBlock(sk) => {
+                assert_eq!(sk.block_number, 102);
+            },
+            _ => panic!("Expected SkipBlock"),
+        }
+    }
+
+    #[tokio::test]
+    async fn winner_cleanup_on_session_disconnect() {
+        // Test that when winner disconnects, block_winners entry is cleaned up
+        // and other sessions get ResendBlock
+        let metrics = create_test_metrics();
+        let (context, _rx_items, _rx_verified, _rx_persisted) = make_context_with_registry(metrics);
+        let shared = Arc::new(SharedState::new());
+        shared.set_latest_persisted_block(100);
+
+        let (tx1, _rx1) = mpsc::channel(4);
+        let (tx2, mut rx2) = mpsc::channel(4);
+
+        let s1 = SessionManager::new(context.clone(), shared.clone(), tx1);
+        let s2 = SessionManager::new(context.clone(), shared.clone(), tx2.clone());
+
+        let s1_id = s1.id;
+
+        shared.active_sessions.insert(s1.id, s1.response_tx.clone());
+        shared.active_sessions.insert(s2.id, tx2.clone());
+
+        // Manually set s1 as winner for block 101
+        shared.block_winners.insert(101, s1_id);
+
+        // Simulate s1 disconnecting (drop it)
+        drop(s1);
+
+        // Remove s1 from active sessions and clean up affected blocks
+        shared.active_sessions.remove(&s1_id);
+
+        // Find affected blocks and broadcast ResendBlock
+        let mut affected_blocks = Vec::new();
+        for entry in shared.block_winners.iter() {
+            if entry.value() == &s1_id {
+                affected_blocks.push(*entry.key());
+            }
+        }
+
+        // Cleanup and broadcast
+        for block_num in &affected_blocks {
+            shared.block_winners.remove(block_num);
+
+            // Broadcast ResendBlock to remaining sessions
+            for session_entry in shared.active_sessions.iter() {
+                let resend_msg = rock_node_protobufs::org::hiero::block::api::PublishStreamResponse {
+                    response: Some(publish_stream_response::Response::ResendBlock(
+                        rock_node_protobufs::org::hiero::block::api::publish_stream_response::ResendBlock {
+                            block_number: *block_num,
+                        },
+                    )),
+                };
+                let _ = session_entry.value().try_send(Ok(resend_msg));
+            }
+        }
+
+        // s2 should receive ResendBlock for 101
+        let resend = tokio::time::timeout(Duration::from_millis(200), rx2.recv())
+            .await
+            .expect("timeout waiting for ResendBlock")
+            .unwrap()
+            .unwrap();
+
+        match resend.response.unwrap() {
+            publish_stream_response::Response::ResendBlock(rb) => {
+                assert_eq!(rb.block_number, 101);
+            },
+            _ => panic!("Expected ResendBlock"),
+        }
+
+        // Verify block_winners is cleaned up
+        assert!(!shared.block_winners.contains_key(&101));
+    }
+
+    #[tokio::test]
+    async fn session_stats_recorded_correctly() {
+        // Test that session statistics are correctly tracked
+        let metrics = create_test_metrics();
+        let (context, _rx_items, _rx_verified, _rx_persisted) = make_context_with_registry(metrics);
+        let shared = Arc::new(SharedState::new());
+        shared.set_latest_persisted_block(100);
+
+        let (tx, mut rx) = mpsc::channel(8);
+        let mut session = SessionManager::new(context, shared, tx);
+
+        // Set publisher ID
+        session.publisher_id = Some("test-publisher-1".to_string());
+
+        // Send 3 blocks: 2 accepted, 1 skipped
+        let header_101 = rock_node_protobufs::com::hedera::hapi::block::stream::BlockItem {
+            item: Some(BlockItemType::BlockHeader(
+                rock_node_protobufs::com::hedera::hapi::block::stream::output::BlockHeader {
+                    number: 101,
+                    ..Default::default()
+                },
+            )),
+        };
+
+        // First block - accepted (wins)
+        let req1 = PublishRequestType::BlockItems(
+            rock_node_protobufs::org::hiero::block::api::BlockItemSet {
+                block_items: vec![header_101.clone()],
+            },
+        );
+        assert!(!session.handle_request(req1).await);
+        assert_eq!(session.state, SessionState::Primary);
+
+        // Manually trigger skip
+        session.handle_skip().await;
+
+        // Clear the channel
+        let _ = rx.try_recv();
+
+        // Another block - accepted
+        session.reset_for_next_block();
+        session.state = SessionState::New;
+        let header_102 = rock_node_protobufs::com::hedera::hapi::block::stream::BlockItem {
+            item: Some(BlockItemType::BlockHeader(
+                rock_node_protobufs::com::hedera::hapi::block::stream::output::BlockHeader {
+                    number: 102,
+                    ..Default::default()
+                },
+            )),
+        };
+        let req2 = PublishRequestType::BlockItems(
+            rock_node_protobufs::org::hiero::block::api::BlockItemSet {
+                block_items: vec![header_102],
+            },
+        );
+        assert!(!session.handle_request(req2).await);
+
+        // Verify stats
+        assert_eq!(session.blocks_received, 2);
+        assert_eq!(session.blocks_skipped, 1);
+        assert!(session.session_start_time.elapsed().as_secs() < 5);
+
+        // Log stats would normally be called on disconnect
+        session.log_session_stats();
+    }
+
+    #[tokio::test]
+    async fn concurrent_different_blocks_from_multiple_publishers() {
+        // Test that different publishers can work on different blocks concurrently
+        let metrics = create_test_metrics();
+        let (context, _rx_items, _rx_verified, _rx_persisted) = make_context_with_registry(metrics);
+        let shared = Arc::new(SharedState::new());
+        shared.set_latest_persisted_block(100);
+
+        let (tx1, _rx1) = mpsc::channel(4);
+        let (tx2, _rx2) = mpsc::channel(4);
+
+        let mut s1 = SessionManager::new(context.clone(), shared.clone(), tx1);
+        let mut s2 = SessionManager::new(context.clone(), shared.clone(), tx2);
+
+        shared.active_sessions.insert(s1.id, s1.response_tx.clone());
+        shared.active_sessions.insert(s2.id, s2.response_tx.clone());
+
+        // s1 starts block 101
+        let header_101 = rock_node_protobufs::com::hedera::hapi::block::stream::BlockItem {
+            item: Some(BlockItemType::BlockHeader(
+                rock_node_protobufs::com::hedera::hapi::block::stream::output::BlockHeader {
+                    number: 101,
+                    ..Default::default()
+                },
+            )),
+        };
+        let req_101 = PublishRequestType::BlockItems(
+            rock_node_protobufs::org::hiero::block::api::BlockItemSet {
+                block_items: vec![header_101],
+            },
+        );
+        assert!(!s1.handle_request(req_101).await);
+        assert_eq!(s1.state, SessionState::Primary);
+        assert_eq!(s1.current_block_number, 101);
+
+        // s2 starts block 102 (ahead of persisted, but allowed)
+        let header_102 = rock_node_protobufs::com::hedera::hapi::block::stream::BlockItem {
+            item: Some(BlockItemType::BlockHeader(
+                rock_node_protobufs::com::hedera::hapi::block::stream::output::BlockHeader {
+                    number: 102,
+                    ..Default::default()
+                },
+            )),
+        };
+        let req_102 = PublishRequestType::BlockItems(
+            rock_node_protobufs::org::hiero::block::api::BlockItemSet {
+                block_items: vec![header_102],
+            },
+        );
+        assert!(!s2.handle_request(req_102).await);
+        assert_eq!(s2.state, SessionState::Primary);
+        assert_eq!(s2.current_block_number, 102);
+
+        // Both should be registered as winners for their respective blocks
+        assert_eq!(shared.block_winners.get(&101).unwrap().value(), &s1.id);
+        assert_eq!(shared.block_winners.get(&102).unwrap().value(), &s2.id);
     }
 }

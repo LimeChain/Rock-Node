@@ -35,6 +35,7 @@ pub struct MetricsRegistry {
     pub publish_header_to_proof_duration_seconds: HistogramVec,
     pub publish_average_header_to_proof_time_seconds: GaugeVec,
     pub publish_responses_sent_total: CounterVec,
+    pub publish_session_duration_seconds: HistogramVec,
 
     // --- Persistence Plugin Metrics ---
     pub persistence_writes_total: CounterVec,
@@ -205,6 +206,16 @@ impl MetricsRegistry {
             &["response_type"],
         )?;
         registry.register(Box::new(publish_responses_sent_total.clone()))?;
+
+        let publish_session_duration_seconds = HistogramVec::new(
+            Opts::new(
+                "rocknode_publish_session_duration_seconds",
+                "Duration of publisher sessions from connection to disconnection.",
+            )
+            .into(),
+            &[],
+        )?;
+        registry.register(Box::new(publish_session_duration_seconds.clone()))?;
 
         let persistence_writes_total = CounterVec::new(
             Opts::new(
@@ -385,6 +396,7 @@ impl MetricsRegistry {
             publish_header_to_proof_duration_seconds,
             publish_average_header_to_proof_time_seconds,
             publish_responses_sent_total,
+            publish_session_duration_seconds,
             persistence_writes_total,
             persistence_write_duration_seconds,
             persistence_event_duration_seconds,

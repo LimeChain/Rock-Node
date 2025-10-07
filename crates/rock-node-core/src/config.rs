@@ -105,6 +105,10 @@ pub struct PublishServiceConfig {
     pub stale_winner_timeout_seconds: u64,
     pub winner_cleanup_interval_seconds: u64,
     pub winner_cleanup_threshold_blocks: u64,
+    /// Maximum gRPC message size in bytes (default 32MB)
+    pub max_message_size_bytes: usize,
+    /// Maximum items per BlockItemSet
+    pub max_items_per_set: usize,
 }
 
 impl Default for PublishServiceConfig {
@@ -116,6 +120,8 @@ impl Default for PublishServiceConfig {
             stale_winner_timeout_seconds: 10,
             winner_cleanup_interval_seconds: 150,
             winner_cleanup_threshold_blocks: 1000,
+            max_message_size_bytes: 32 * 1024 * 1024, // 32MB
+            max_items_per_set: 10000,
         }
     }
 }
