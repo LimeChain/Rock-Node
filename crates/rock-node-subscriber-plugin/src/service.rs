@@ -9,7 +9,7 @@ use std::sync::Arc;
 use tokio::sync::{mpsc, Notify};
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status};
-use tracing::{error, info};
+use tracing::{debug, error, info};
 use uuid::Uuid;
 
 /// Implements the gRPC service for subscribing to block streams.
@@ -68,10 +68,16 @@ impl BlockStreamSubscribeService for SubscriberServiceImpl {
         let active_sessions_clone = self.active_sessions.clone();
 
         tokio::spawn(async move {
-            info!(session_id = %session.id, "Spawning new session handler task.");
+            debug!(session_id = %session.id, "Session handler task spawned");
             session.run().await;
+
+            // Log failure cause if any
+            if let Some(cause) = session.get_failure_cause() {
+                info!(session_id = %session.id, "Session ended with failure: {}", cause);
+            }
+
             active_sessions_clone.remove(&session_id);
-            info!(session_id = %session.id, "Session handler task finished.");
+            debug!(session_id = %session.id, "Session handler task finished");
         });
 
         Ok(Response::new(ReceiverStream::new(rx)))
