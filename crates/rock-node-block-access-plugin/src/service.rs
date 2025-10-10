@@ -24,7 +24,7 @@ fn code_to_string(code: block_response::Code) -> &'static str {
         block_response::Code::NotFound => "NotFound",
         block_response::Code::NotAvailable => "NotAvailable",
         block_response::Code::Unknown => "Unknown",
-        block_response::Code::Error => todo!(),
+        block_response::Code::Error => "Error",
     }
 }
 
@@ -207,6 +207,7 @@ impl BlockAccessServiceImpl {
         }
     }
 
+    #[allow(clippy::result_large_err)]
     fn record_metrics(
         &self,
         response: BlockResponse,
@@ -572,6 +573,6 @@ mod tests {
             "NotAvailable"
         );
         assert_eq!(code_to_string(block_response::Code::Unknown), "Unknown");
-        // Note: Error case will panic in debug mode, so we don't test it here
+        assert_eq!(code_to_string(block_response::Code::Error), "Error");
     }
 }

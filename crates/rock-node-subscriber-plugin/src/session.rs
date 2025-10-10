@@ -30,6 +30,7 @@ pub struct SubscriberSession {
 }
 
 impl SubscriberSession {
+    #[allow(clippy::result_large_err)]
     pub fn new(
         context: Arc<AppContext>,
         request: SubscribeStreamRequest,

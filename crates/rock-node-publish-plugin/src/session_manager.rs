@@ -1,5 +1,4 @@
 use crate::{
-    error::PublishError,
     state::{BlockAction, SessionState, SharedState},
     validation::RequestValidator,
 };
