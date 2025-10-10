@@ -56,6 +56,6 @@ grpc_port = 8090
     [plugins.backfill]
     enabled = false
     mode = "GapFill"
-    peers = ["http://0.0.0.0:8090"]
+    peers = ["http://127.0.0.1:8090"]
     check_interval_seconds = 5
     max_batch_size = 10

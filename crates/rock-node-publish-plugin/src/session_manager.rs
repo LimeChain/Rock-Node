@@ -126,7 +126,7 @@ impl SessionManager {
                 response: Some(publish_stream_response::Response::EndStream(
                     publish_stream_response::EndOfStream {
                         status: publish_stream_response::end_of_stream::Code::Error as i32,
-                        block_number: self.current_block_number as u64,
+                        block_number: block_number.unwrap_or(self.current_block_number) as u64,
                     },
                 )),
             };
