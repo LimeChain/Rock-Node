@@ -1,0 +1,150 @@
+name: Release
+
+on:
+  release:
+    types: [published]
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  build-and-publish:
+    name: Build and Publish Release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name }}
+
+      - name: Set up QEMU for multi-arch builds
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata for Docker
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=semver,pattern={{version}},value=${{ github.event.release.tag_name }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ github.event.release.tag_name }}
+            type=semver,pattern={{major}},value=${{ github.event.release.tag_name }}
+            type=raw,value=latest,enable=${{ !github.event.release.prerelease }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cross-compilation tools
+        run: |
+          cargo install cross --git https://github.com/cross-rs/cross
+
+      - name: Install dependencies (protoc)
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y protobuf-compiler
+
+      - name: Build Linux x86_64 binary
+        run: cross build --release --target x86_64-unknown-linux-gnu --locked
+        working-directory: app/rock-node
+
+      - name: Build Linux ARM64 binary
+        run: cross build --release --target aarch64-unknown-linux-gnu --locked
+        working-directory: app/rock-node
+
+      - name: Package binaries
+        run: |
+          mkdir -p release-artifacts
+
+          # Package x86_64
+          cd target/x86_64-unknown-linux-gnu/release
+          tar -czf ../../../release-artifacts/rock-node-${{ github.event.release.tag_name }}-linux-x86_64.tar.gz rock-node
+          cd -
+
+          # Package ARM64
+          cd target/aarch64-unknown-linux-gnu/release
+          tar -czf ../../../release-artifacts/rock-node-${{ github.event.release.tag_name }}-linux-arm64.tar.gz rock-node
+          cd -
+
+          # Generate checksums
+          cd release-artifacts
+          sha256sum * > checksums.txt
+          cd -
+
+      - name: Upload Release Assets
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.release.tag_name }}
+          files: |
+            release-artifacts/rock-node-${{ github.event.release.tag_name }}-linux-x86_64.tar.gz
+            release-artifacts/rock-node-${{ github.event.release.tag_name }}-linux-arm64.tar.gz
+            release-artifacts/checksums.txt
+          append_body: true
+          body: |
+
+            ---
+
+            ## 🐳 Docker Images
+
+            Multi-architecture images published to GitHub Container Registry:
+
+            ```bash
+            # Pull specific version
+            docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.event.release.tag_name }}
+
+            # Pull latest
+            docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+            ```
+
+            **Platforms**: `linux/amd64`, `linux/arm64`
+
+            ## 📦 Standalone Binaries
+
+            Download and verify checksums:
+
+            ```bash
+            # Set version
+            VERSION=${{ github.event.release.tag_name }}
+
+            # Download for your platform
+            wget https://github.com/${{ github.repository }}/releases/download/${VERSION}/rock-node-${VERSION}-linux-x86_64.tar.gz
+
+            # Download checksums
+            wget https://github.com/${{ github.repository }}/releases/download/${VERSION}/checksums.txt
+
+            # Verify integrity
+            sha256sum -c checksums.txt --ignore-missing
+
+            # Extract and run
+            tar -xzf rock-node-${VERSION}-linux-x86_64.tar.gz
+            ./rock-node --config-path config/config.toml
+            ```
+
+            **Available Binaries**:
+            - `rock-node-${{ github.event.release.tag_name }}-linux-x86_64.tar.gz` (Intel/AMD 64-bit)
+            - `rock-node-${{ github.event.release.tag_name }}-linux-arm64.tar.gz` (ARM 64-bit)

@@ -43,7 +43,12 @@ impl SubscriberError {
     /// Maps an internal error to a label for the metrics counter.
     pub fn to_metric_label(&self) -> &'static str {
         match self {
-            SubscriberError::Validation(_, _) => "invalid_request",
+            SubscriberError::Validation(_, code) => match code {
+                Code::InvalidStartBlockNumber => "invalid_start_block",
+                Code::InvalidEndBlockNumber => "invalid_end_block",
+                Code::NotAvailable => "not_available",
+                _ => "invalid_request",
+            },
             SubscriberError::Persistence(_) => "persistence_error",
             SubscriberError::ClientDisconnected => "client_disconnect",
             SubscriberError::StreamLagged => "stream_lagged",

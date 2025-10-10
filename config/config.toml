@@ -5,7 +5,7 @@
 log_level = "INFO"
 database_path = "data/database"
 start_block_number = 0
-grpc_address = "127.0.0.1"
+grpc_address = "0.0.0.0"
 grpc_port = 8090
 
 # =========================================
@@ -15,7 +15,7 @@ grpc_port = 8090
 
     [plugins.observability]
     enabled = true
-    listen_address = "127.0.0.1:9600"
+    listen_address = "0.0.0.0:9600"
 
     [plugins.publish_service]
     enabled = true
@@ -32,7 +32,7 @@ grpc_port = 8090
     archive_batch_size = 100
 
     [plugins.state_management_service]
-    enabled = true
+    enabled = false
 
     [plugins.subscriber_service]
     enabled = true
@@ -42,7 +42,7 @@ grpc_port = 8090
     session_timeout_seconds = 60
 
     [plugins.verification_service]
-    enabled = false
+    enabled = true
 
     [plugins.block_access_service]
     enabled = true
@@ -51,10 +51,10 @@ grpc_port = 8090
     enabled = true
 
     [plugins.query_service]
-    enabled = true
+    enabled = false
 
     [plugins.backfill]
-    enabled = true
+    enabled = false
     mode = "GapFill"
     peers = ["http://127.0.0.1:8090"]
     check_interval_seconds = 5

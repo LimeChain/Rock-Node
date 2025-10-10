@@ -259,7 +259,7 @@ impl BackfillWorker {
         }
     }
 
-    async fn run_continuous_stream_cycle(self: &Arc<Self>, shuffled_peers: &mut Vec<String>) {
+    async fn run_continuous_stream_cycle(self: &Arc<Self>, shuffled_peers: &mut [String]) {
         shuffled_peers.shuffle(&mut rand::rng());
 
         for peer_addr in shuffled_peers.iter() {
