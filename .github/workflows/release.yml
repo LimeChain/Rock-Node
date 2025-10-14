@@ -72,9 +72,16 @@ jobs:
 
           # Package binaries
           cd release-artifacts
-          tar -czf rock-node-${{ github.event.release.tag_name }}-linux-x86_64.tar.gz rock-node-amd64
-          tar -czf rock-node-${{ github.event.release.tag_name }}-linux-arm64.tar.gz rock-node-arm64
-          rm rock-node-amd64 rock-node-arm64
+          cp rock-node-amd64 rock-node
+          tar -czf rock-node-${{ github.event.release.tag_name }}-linux-x86_64.tar.gz rock-node
+          rm rock-node
+
+          cp rock-node-arm64 rock-node
+          tar -czf rock-node-${{ github.event.release.tag_name }}-linux-arm64.tar.gz rock-node
+          rm rock-node
+
+          rm rock-node-arm64
+          rm rock-node-amd64
 
           # Generate checksums
           sha256sum *.tar.gz > checksums.txt
