@@ -43,7 +43,6 @@ jobs:
           tags: |
             type=semver,pattern={{version}},value=${{ github.event.release.tag_name }}
             type=semver,pattern={{major}}.{{minor}},value=${{ github.event.release.tag_name }}
-            type=semver,pattern={{major}},value=${{ github.event.release.tag_name }}
             type=raw,value=latest,enable=${{ !github.event.release.prerelease }}
 
       - name: Build and push Docker image
@@ -57,43 +56,28 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Install cross-compilation tools
-        run: |
-          cargo install cross --git https://github.com/cross-rs/cross
-
-      - name: Install dependencies (protoc)
-        run: |
-          sudo apt-get update -y
-          sudo apt-get install -y protobuf-compiler
-
-      - name: Build Linux x86_64 binary
-        run: cross build --release --target x86_64-unknown-linux-gnu --locked
-        working-directory: app/rock-node
-
-      - name: Build Linux ARM64 binary
-        run: cross build --release --target aarch64-unknown-linux-gnu --locked
-        working-directory: app/rock-node
-
-      - name: Package binaries
+      - name: Extract binaries from Docker images
         run: |
           mkdir -p release-artifacts
 
-          # Package x86_64
-          cd target/x86_64-unknown-linux-gnu/release
-          tar -czf ../../../release-artifacts/rock-node-${{ github.event.release.tag_name }}-linux-x86_64.tar.gz rock-node
-          cd -
+          # Extract x86_64 binary from Docker image
+          docker create --name rock-node-amd64 --platform linux/amd64 ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.event.release.tag_name }}
+          docker cp rock-node-amd64:/app/rock-node release-artifacts/rock-node-amd64
+          docker rm rock-node-amd64
 
-          # Package ARM64
-          cd target/aarch64-unknown-linux-gnu/release
-          tar -czf ../../../release-artifacts/rock-node-${{ github.event.release.tag_name }}-linux-arm64.tar.gz rock-node
-          cd -
+          # Extract ARM64 binary from Docker image
+          docker create --name rock-node-arm64 --platform linux/arm64 ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.event.release.tag_name }}
+          docker cp rock-node-arm64:/app/rock-node release-artifacts/rock-node-arm64
+          docker rm rock-node-arm64
+
+          # Package binaries
+          cd release-artifacts
+          tar -czf rock-node-${{ github.event.release.tag_name }}-linux-x86_64.tar.gz rock-node-amd64
+          tar -czf rock-node-${{ github.event.release.tag_name }}-linux-arm64.tar.gz rock-node-arm64
+          rm rock-node-amd64 rock-node-arm64
 
           # Generate checksums
-          cd release-artifacts
-          sha256sum * > checksums.txt
+          sha256sum *.tar.gz > checksums.txt
           cd -
 
       - name: Upload Release Assets
