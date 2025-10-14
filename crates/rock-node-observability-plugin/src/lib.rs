@@ -7,9 +7,7 @@ use axum::{
     routing::get,
     Router,
 };
-use rock_node_core::{
-    app_context::AppContext, error::Result, plugin::Plugin, Error as CoreError, MetricsRegistry,
-};
+use rock_node_core::{app_context::AppContext, error::Result, plugin::Plugin, Error as CoreError};
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc,
@@ -251,10 +249,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_metrics_handler() {
-        let metrics = Arc::new(create_isolated_metrics());
+        let context = create_test_context(true);
 
         // Create a simple test by calling the handler function
-        let _response = get_metrics(State(metrics)).await;
+        let _response = get_metrics(State(context)).await;
 
         // Verify that get_metrics returns a response
         // The exact type checking is complex with axum's response types
@@ -358,11 +356,11 @@ impl ObservabilityPlugin {
 }
 
 /// Axum handler that serves the Prometheus metrics.
-async fn get_metrics(State(metrics): State<Arc<MetricsRegistry>>) -> impl IntoResponse {
+async fn get_metrics(State(ctx): State<AppContext>) -> impl IntoResponse {
     match Response::builder()
         .status(200)
         .header("Content-Type", prometheus::TEXT_FORMAT)
-        .body(Body::from(metrics.gather()))
+        .body(Body::from(ctx.metrics.gather()))
     {
         Ok(response) => response,
         Err(e) => {
@@ -375,9 +373,28 @@ async fn get_metrics(State(metrics): State<Arc<MetricsRegistry>>) -> impl IntoRe
     }
 }
 
-/// A simple health check handler that returns "OK".
+/// Liveness probe - checks if the process is alive.
 async fn health_check() -> impl IntoResponse {
     (StatusCode::OK, "OK")
+}
+
+/// Readiness probe - checks if the service is ready to accept traffic.
+/// Verifies that critical capabilities are registered before serving traffic.
+async fn readiness_check(State(ctx): State<AppContext>) -> impl IntoResponse {
+    use rock_node_core::capability::Capability;
+
+    // Check if critical capabilities are registered
+    // ProvidesBlockReader is essential for serving block queries
+    if !ctx
+        .capability_registry
+        .is_registered(Capability::ProvidesBlockReader)
+        .await
+    {
+        tracing::warn!("Readiness check failed: ProvidesBlockReader not registered");
+        return (StatusCode::SERVICE_UNAVAILABLE, "NOT_READY");
+    }
+
+    (StatusCode::OK, "READY")
 }
 
 #[async_trait]
@@ -409,8 +426,9 @@ impl Plugin for ObservabilityPlugin {
 
         let app = Router::new()
             .route("/livez", get(health_check))
+            .route("/readyz", get(readiness_check))
             .route("/metrics", get(get_metrics))
-            .with_state(context.metrics);
+            .with_state(context.clone());
 
         let listen_address = config.listen_address.clone();
         let socket_addr: std::net::SocketAddr = listen_address.parse().map_err(|e| {
