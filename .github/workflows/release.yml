@@ -35,6 +35,11 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Convert repository name to lowercase
+        id: repo_lowercase
+        run: |
+          echo "image_name=$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')" >> $GITHUB_OUTPUT
+
       - name: Extract metadata for Docker
         id: meta
         uses: docker/metadata-action@v5
@@ -61,12 +66,12 @@ jobs:
           mkdir -p release-artifacts
 
           # Extract x86_64 binary from Docker image
-          docker create --name rock-node-amd64 --platform linux/amd64 ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.event.release.tag_name }}
+          docker create --name rock-node-amd64 --platform linux/amd64 ${{ env.REGISTRY }}/${{ steps.repo_lowercase.outputs.image_name }}:${{ github.event.release.tag_name }}
           docker cp rock-node-amd64:/app/rock-node release-artifacts/rock-node-amd64
           docker rm rock-node-amd64
 
           # Extract ARM64 binary from Docker image
-          docker create --name rock-node-arm64 --platform linux/arm64 ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.event.release.tag_name }}
+          docker create --name rock-node-arm64 --platform linux/arm64 ${{ env.REGISTRY }}/${{ steps.repo_lowercase.outputs.image_name }}:${{ github.event.release.tag_name }}
           docker cp rock-node-arm64:/app/rock-node release-artifacts/rock-node-arm64
           docker rm rock-node-arm64
 
@@ -106,10 +111,10 @@ jobs:
 
             ```bash
             # Pull specific version
-            docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.event.release.tag_name }}
+            docker pull ${{ env.REGISTRY }}/${{ steps.repo_lowercase.outputs.image_name }}:${{ github.event.release.tag_name }}
 
             # Pull latest
-            docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+            docker pull ${{ env.REGISTRY }}/${{ steps.repo_lowercase.outputs.image_name }}:latest
             ```
 
             **Platforms**: `linux/amd64`, `linux/arm64`
