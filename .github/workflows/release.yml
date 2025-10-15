@@ -66,12 +66,12 @@ jobs:
           mkdir -p release-artifacts
 
           # Extract x86_64 binary from Docker image
-          docker create --name rock-node-amd64 --platform linux/amd64 ${{ env.REGISTRY }}/${{ steps.repo_lowercase.outputs.image_name }}:${{ github.event.release.tag_name }}
+          docker create --name rock-node-amd64 --platform linux/amd64 ${{ env.REGISTRY }}/${{ steps.repo_lowercase.outputs.image_name }}:${{ steps.meta.outputs.version }}
           docker cp rock-node-amd64:/app/rock-node release-artifacts/rock-node-amd64
           docker rm rock-node-amd64
 
           # Extract ARM64 binary from Docker image
-          docker create --name rock-node-arm64 --platform linux/arm64 ${{ env.REGISTRY }}/${{ steps.repo_lowercase.outputs.image_name }}:${{ github.event.release.tag_name }}
+          docker create --name rock-node-arm64 --platform linux/arm64 ${{ env.REGISTRY }}/${{ steps.repo_lowercase.outputs.image_name }}:${{ steps.meta.outputs.version }}
           docker cp rock-node-arm64:/app/rock-node release-artifacts/rock-node-arm64
           docker rm rock-node-arm64
 
@@ -111,7 +111,7 @@ jobs:
 
             ```bash
             # Pull specific version
-            docker pull ${{ env.REGISTRY }}/${{ steps.repo_lowercase.outputs.image_name }}:${{ github.event.release.tag_name }}
+            docker pull ${{ env.REGISTRY }}/${{ steps.repo_lowercase.outputs.image_name }}:${{ steps.meta.outputs.version }}
 
             # Pull latest
             docker pull ${{ env.REGISTRY }}/${{ steps.repo_lowercase.outputs.image_name }}:latest
