@@ -1,0 +1,9 @@
+apiVersion: v2
+name: rock-node
+description: Helm chart for deploying Rock Node data availability service
+type: application
+version: 0.1.0
+appVersion: "latest"
+
+# Optional dependencies can be declared here if needed in the future
+dependencies: []
