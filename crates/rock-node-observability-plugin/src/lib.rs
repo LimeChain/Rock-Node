@@ -24,6 +24,7 @@ mod tests {
     use super::*;
     use rock_node_core::{
         app_context::AppContext,
+        capability::Capability,
         config::{
             BackfillConfig, BlockAccessServiceConfig, Config, CoreConfig, PluginConfigs,
             ServerStatusServiceConfig,
@@ -340,6 +341,25 @@ mod tests {
         plugin.stop().await.unwrap();
         assert!(!plugin.is_running());
     }
+
+    #[tokio::test]
+    async fn test_readiness_depends_on_block_reader_capability() {
+        use axum::extract::State;
+
+        let ctx = create_test_context(true);
+
+        let (status, body) = readiness_check(State(ctx.clone())).await;
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(body, "NOT_READY");
+
+        ctx.capability_registry
+            .register(Capability::ProvidesBlockReader)
+            .await;
+
+        let (status, body) = readiness_check(State(ctx.clone())).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body, "READY");
+    }
 }
 
 #[derive(Debug, Default)]
@@ -380,7 +400,7 @@ async fn health_check() -> impl IntoResponse {
 
 /// Readiness probe - checks if the service is ready to accept traffic.
 /// Verifies that critical capabilities are registered before serving traffic.
-async fn readiness_check(State(ctx): State<AppContext>) -> impl IntoResponse {
+async fn readiness_check(State(ctx): State<AppContext>) -> (StatusCode, &'static str) {
     use rock_node_core::capability::Capability;
 
     // Check if critical capabilities are registered

@@ -24,6 +24,7 @@ pub struct StateManagementPlugin {
     state_manager: Option<Arc<StateManager>>,
     running: Arc<AtomicBool>,
     shutdown_notify: Arc<Notify>,
+    enabled: bool,
 }
 
 impl Default for StateManagementPlugin {
@@ -39,6 +40,7 @@ impl StateManagementPlugin {
             state_manager: None,
             running: Arc::new(AtomicBool::new(false)),
             shutdown_notify: Arc::new(Notify::new()),
+            enabled: false,
         }
     }
 }
@@ -50,6 +52,14 @@ impl Plugin for StateManagementPlugin {
     }
 
     fn initialize(&mut self, context: AppContext) -> CoreResult<()> {
+        self.enabled = context.config.plugins.state_management_service.enabled;
+
+        if !self.enabled {
+            info!("StateManagementPlugin is disabled via configuration; skipping initialization.");
+            self.app_context = Some(context);
+            return Ok(());
+        }
+
         self.init_internal(context)
             .map_err(|e| CoreError::PluginInitialization(e.to_string()))
     }
@@ -118,6 +128,11 @@ impl StateManagementPlugin {
             .app_context
             .clone()
             .context("AppContext not initialized")?;
+
+        if !self.enabled {
+            info!("StateManagementPlugin start skipped because it is disabled via configuration.");
+            return Ok(());
+        }
 
         // Check if start_block_number is non-zero
         if context.config.core.start_block_number > 0 {
@@ -192,5 +207,86 @@ impl StateManagementPlugin {
             info!("StateManagementPlugin event loop has terminated.");
         });
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rock_node_core::{
+        app_context::AppContext,
+        cache::BlockDataCache,
+        capability::CapabilityRegistry,
+        config::{Config, CoreConfig, PluginConfigs, StateManagementServiceConfig},
+        state_reader::StateReaderProvider,
+        test_utils::create_isolated_metrics,
+    };
+    use std::{
+        any::TypeId,
+        collections::HashMap,
+        sync::{Arc, RwLock},
+    };
+    use tokio::sync::{broadcast, mpsc};
+
+    fn create_test_context(enabled: bool) -> AppContext {
+        let config = Config {
+            core: CoreConfig::default(),
+            plugins: PluginConfigs {
+                state_management_service: StateManagementServiceConfig { enabled },
+                ..Default::default()
+            },
+        };
+
+        AppContext {
+            config: Arc::new(config),
+            metrics: Arc::new(create_isolated_metrics()),
+            capability_registry: Arc::new(CapabilityRegistry::new()),
+            service_providers: Arc::new(RwLock::new(HashMap::new())),
+            block_data_cache: Arc::new(BlockDataCache::new()),
+            tx_block_items_received: mpsc::channel(16).0,
+            tx_block_verified: mpsc::channel(16).0,
+            tx_block_verification_failed: broadcast::channel(16).0,
+            tx_block_persisted: broadcast::channel(16).0,
+        }
+    }
+
+    #[tokio::test]
+    async fn test_initialize_disabled_skips_internal_setup() {
+        let ctx = create_test_context(false);
+        let providers = ctx.service_providers.clone();
+
+        let mut plugin = StateManagementPlugin::new();
+        plugin.initialize(ctx.clone()).unwrap();
+
+        assert!(!plugin.enabled, "plugin should record disabled state");
+        assert!(
+            plugin.state_manager.is_none(),
+            "state manager should not be created"
+        );
+        assert!(
+            providers
+                .read()
+                .unwrap()
+                .get(&TypeId::of::<StateReaderProvider>())
+                .is_none(),
+            "StateReaderProvider should not be registered when disabled"
+        );
+        assert!(
+            !plugin.is_running(),
+            "plugin must not be running after initialization"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_start_disabled_does_not_run() {
+        let ctx = create_test_context(false);
+        let mut plugin = StateManagementPlugin::new();
+
+        plugin.initialize(ctx).unwrap();
+        plugin.start().unwrap();
+        assert!(
+            !plugin.is_running(),
+            "plugin should remain stopped when disabled via config"
+        );
     }
 }

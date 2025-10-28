@@ -1,0 +1,174 @@
+# Default values for rock-node Helm chart.
+# This file documents the main configuration knobs used by the templates.
+
+namespaceOverride: ""
+nameOverride: ""
+fullnameOverride: ""
+
+imagePullSecrets: []
+
+image:
+  repository: ghcr.io/limechain/rock-node
+  tag: latest
+  pullPolicy: IfNotPresent
+
+replicaCount: 1
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+
+podAnnotations: {}
+podLabels: {}
+
+resources:
+  requests:
+    cpu: 250m
+    memory: 768Mi
+  limits:
+    cpu: 2000m
+    memory: 2Gi
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+securityContext:
+  enabled: true
+  fsGroup: 2000
+  runAsUser: 1000
+  runAsGroup: 1000
+  runAsNonRoot: true
+  supplementalGroups: []
+
+containerSecurityContext:
+  enabled: true
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
+
+config:
+  existingConfigMap: ""
+  fileName: config.toml
+  content: |
+    # =========================================
+    # Core Application Configuration
+    # =========================================
+    [core]
+    log_level = "INFO"
+    database_path = "data/database"
+    start_block_number = 0
+    grpc_address = "0.0.0.0"
+    grpc_port = 8090
+
+    # =========================================
+    # Plugin-Specific Configurations
+    # =========================================
+    [plugins]
+
+        [plugins.observability]
+        enabled = true
+        listen_address = "0.0.0.0:9600"
+
+        [plugins.publish_service]
+        enabled = true
+        max_concurrent_streams = 250
+        persistence_ack_timeout_seconds = 60
+        stale_winner_timeout_seconds = 10
+        winner_cleanup_interval_seconds = 150
+        winner_cleanup_threshold_blocks = 1000
+
+        [plugins.persistence_service]
+        enabled = true
+        cold_storage_path = "data/cold_storage"
+        hot_storage_block_count = 100
+        archive_batch_size = 100
+
+        [plugins.state_management_service]
+        enabled = false
+
+        [plugins.subscriber_service]
+        enabled = true
+        max_concurrent_streams = 100
+        live_stream_queue_size = 250
+        max_future_block_lookahead = 250
+        session_timeout_seconds = 60
+
+        [plugins.verification_service]
+        enabled = true
+
+        [plugins.block_access_service]
+        enabled = true
+
+        [plugins.server_status_service]
+        enabled = true
+
+        [plugins.query_service]
+        enabled = false
+
+        [plugins.backfill]
+        enabled = false
+        mode = "GapFill"
+        peers = ["http://127.0.0.1:8090"]
+        check_interval_seconds = 5
+        max_batch_size = 10
+
+service:
+  type: ClusterIP
+  annotations: {}
+  grpc:
+    port: 8090
+    targetPort: 8090
+    nodePort: null
+  metrics:
+    enabled: true
+    port: 9600
+    targetPort: 9600
+    nodePort: null
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts: []
+  tls: []
+
+probes:
+  readiness:
+    enabled: true
+    path: /readyz
+    port: 9600
+    initialDelaySeconds: 10
+    periodSeconds: 15
+  liveness:
+    enabled: true
+    path: /livez
+    port: 9600
+    initialDelaySeconds: 30
+    periodSeconds: 30
+
+persistence:
+  enabled: true
+  accessModes:
+    - ReadWriteOnce
+  size: 100Gi
+  storageClassName: ""
+  existingClaim: ""
+  annotations: {}
+  selector: {}
+
+extraVolumeMounts: []
+extraVolumes: []
+
+extraEnv: []
+
+serviceMonitor:
+  enabled: false
+  interval: 30s
+  scrapeTimeout: 10s
+  labels: {}
+  annotations: {}
+
+# Optional topology spread constraints or pod disruption budget can be added later.

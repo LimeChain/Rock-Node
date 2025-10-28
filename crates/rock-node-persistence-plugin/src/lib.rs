@@ -207,6 +207,15 @@ impl Plugin for PersistencePlugin {
             );
             debug!("PersistencePlugin registered providers for BlockReader and BlockWriter.");
         }
+
+        // Announce that the application can serve block reads.
+        let capability_registry = context.capability_registry.clone();
+        tokio::spawn(async move {
+            capability_registry
+                .register(Capability::ProvidesBlockReader)
+                .await;
+        });
+
         Ok(())
     }
 
