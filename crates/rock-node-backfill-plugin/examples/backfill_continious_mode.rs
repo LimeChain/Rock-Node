@@ -50,7 +50,7 @@ impl BlockReader for MyAppsBlockReader {
 struct MyAppsBlockWriter;
 #[async_trait]
 impl BlockWriter for MyAppsBlockWriter {
-    async fn write_block(&self, block: &Block) -> Result<()> {
+    async fn write_block(&self, block: Arc<Block>) -> Result<()> {
         // Because this is only an example, we don't write to a database.
         info!(
             "[My App's Writer] The plugin gave me a new block to write: {:?}",
@@ -58,7 +58,7 @@ impl BlockWriter for MyAppsBlockWriter {
         );
         Ok(())
     }
-    async fn write_block_batch(&self, blocks: &[Block]) -> Result<()> {
+    async fn write_block_batch(&self, blocks: Arc<Vec<Block>>) -> Result<()> {
         info!(
             "[My App's Writer] The plugin gave me a batch of {} new blocks to write.",
             blocks.len()

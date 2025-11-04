@@ -7,8 +7,8 @@ use tokio::sync::Mutex;
 use tracing::{trace, warn};
 use uuid::Uuid;
 
-const CACHE_TTL_SECONDS: u64 = 300; // 5 minutes
-const CLEANUP_INTERVAL_SECONDS: u64 = 30;
+const CACHE_TTL_SECONDS: u64 = 60; // 1 minute fallback safety net
+const CLEANUP_INTERVAL_SECONDS: u64 = 10;
 
 /// A thread-safe, in-memory cache to hold block data temporarily
 /// while it passes through the processing pipeline.
@@ -102,10 +102,12 @@ impl BlockDataCache {
         self.cache.get(key).map(|entry| entry.value().0.clone())
     }
 
-    /// Marks a cache entry for future deletion by the background task.
+    /// Removes a cache entry immediately; if it no longer exists the key is queued as a fallback.
     pub async fn mark_for_removal(&self, key: Uuid) {
-        let mut queue = self.cleanup_queue.lock().await;
-        queue.insert(key);
+        if self.cache.remove(&key).is_none() {
+            let mut queue = self.cleanup_queue.lock().await;
+            queue.insert(key);
+        }
     }
 }
 
@@ -178,19 +180,15 @@ mod tests {
         let block_data = create_test_block_data(10);
         let key = cache.insert(block_data);
 
-        // Verify the block is in the cache
         assert!(cache.get(&key).is_some());
-
-        // Mark for removal
         cache.mark_for_removal(key).await;
 
-        // Block should still be retrievable immediately after marking
-        assert!(cache.get(&key).is_some());
+        // Entry should be dropped immediately
+        assert!(cache.get(&key).is_none());
 
-        // Wait for cleanup interval + a bit more
-        sleep(Duration::from_secs(CLEANUP_INTERVAL_SECONDS + 2)).await;
-
-        // Block should now be removed
+        // Ensure calling again is a no-op but does not panic
+        cache.mark_for_removal(key).await;
+        sleep(Duration::from_secs(CLEANUP_INTERVAL_SECONDS + 1)).await;
         assert!(cache.get(&key).is_none());
     }
 
@@ -379,13 +377,11 @@ mod tests {
         // Mark for removal
         cache.mark_for_removal(key).await;
 
-        // Still accessible before cleanup
-        assert!(cache.get(&key).is_some());
+        // Should no longer be accessible
+        assert!(cache.get(&key).is_none());
 
-        // Wait for cleanup
+        // Cleanup cycle runs without issues
         sleep(Duration::from_secs(CLEANUP_INTERVAL_SECONDS + 2)).await;
-
-        // Should be removed
         assert!(cache.get(&key).is_none());
     }
 }

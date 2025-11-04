@@ -9,12 +9,14 @@ use std::sync::Arc;
 #[async_trait]
 pub trait BlockWriter: Debug + Send + Sync + 'static {
     /// Stores a single block. Typically used by the live ingestion pipeline.
-    async fn write_block(&self, block: &Block) -> Result<()>;
+    /// Uses Arc to avoid expensive cloning of large protobuf messages.
+    async fn write_block(&self, block: Arc<Block>) -> Result<()>;
 
     /// Stores a batch of blocks. Optimized for historical backfilling.
     /// The implementation should be smart enough to route blocks to the
     /// correct tier (hot or cold) based on their block number.
-    async fn write_block_batch(&self, blocks: &[Block]) -> Result<()>;
+    /// Uses Arc to avoid expensive cloning of large protobuf messages.
+    async fn write_block_batch(&self, blocks: Arc<Vec<Block>>) -> Result<()>;
 }
 
 /// A concrete, shareable handle for the BlockWriter service.
@@ -68,19 +70,19 @@ mod tests {
 
     #[async_trait]
     impl BlockWriter for MockBlockWriter {
-        async fn write_block(&self, block: &Block) -> Result<()> {
+        async fn write_block(&self, block: Arc<Block>) -> Result<()> {
             if *self.should_fail.read().unwrap() {
                 return Err(anyhow::anyhow!("Mock write failure"));
             }
-            self.blocks.write().unwrap().push(block.clone());
+            self.blocks.write().unwrap().push((*block).clone());
             Ok(())
         }
 
-        async fn write_block_batch(&self, blocks: &[Block]) -> Result<()> {
+        async fn write_block_batch(&self, blocks: Arc<Vec<Block>>) -> Result<()> {
             if *self.should_fail.read().unwrap() {
                 return Err(anyhow::anyhow!("Mock batch write failure"));
             }
-            self.blocks.write().unwrap().extend_from_slice(blocks);
+            self.blocks.write().unwrap().extend_from_slice(&blocks);
             Ok(())
         }
     }
@@ -98,8 +100,8 @@ mod tests {
         let provider = BlockWriterProvider::new(mock_writer);
 
         let writer = provider.get_writer();
-        let block = Block::default();
-        assert!(writer.write_block(&block).await.is_ok());
+        let block = Arc::new(Block::default());
+        assert!(writer.write_block(block).await.is_ok());
     }
 
     #[tokio::test]
@@ -111,17 +113,17 @@ mod tests {
         let writer1 = provider.get_writer();
         let writer2 = provider_clone.get_writer();
 
-        let block = Block::default();
-        assert!(writer1.write_block(&block).await.is_ok());
-        assert!(writer2.write_block(&block).await.is_ok());
+        let block = Arc::new(Block::default());
+        assert!(writer1.write_block(Arc::clone(&block)).await.is_ok());
+        assert!(writer2.write_block(block).await.is_ok());
     }
 
     #[tokio::test]
     async fn test_mock_block_writer_write_single_block() {
         let writer = MockBlockWriter::new();
-        let block = Block::default();
+        let block = Arc::new(Block::default());
 
-        assert!(writer.write_block(&block).await.is_ok());
+        assert!(writer.write_block(block).await.is_ok());
         assert_eq!(writer.get_written_blocks().len(), 1);
     }
 
@@ -130,8 +132,8 @@ mod tests {
         let writer = MockBlockWriter::new();
 
         for _ in 0..5 {
-            let block = Block::default();
-            assert!(writer.write_block(&block).await.is_ok());
+            let block = Arc::new(Block::default());
+            assert!(writer.write_block(block).await.is_ok());
         }
 
         assert_eq!(writer.get_written_blocks().len(), 5);
@@ -140,27 +142,27 @@ mod tests {
     #[tokio::test]
     async fn test_mock_block_writer_write_batch() {
         let writer = MockBlockWriter::new();
-        let blocks = vec![Block::default(), Block::default(), Block::default()];
+        let blocks = Arc::new(vec![Block::default(), Block::default(), Block::default()]);
 
-        assert!(writer.write_block_batch(&blocks).await.is_ok());
+        assert!(writer.write_block_batch(blocks).await.is_ok());
         assert_eq!(writer.get_written_blocks().len(), 3);
     }
 
     #[tokio::test]
     async fn test_mock_block_writer_write_empty_batch() {
         let writer = MockBlockWriter::new();
-        let blocks: Vec<Block> = vec![];
+        let blocks: Arc<Vec<Block>> = Arc::new(vec![]);
 
-        assert!(writer.write_block_batch(&blocks).await.is_ok());
+        assert!(writer.write_block_batch(blocks).await.is_ok());
         assert_eq!(writer.get_written_blocks().len(), 0);
     }
 
     #[tokio::test]
     async fn test_mock_block_writer_write_large_batch() {
         let writer = MockBlockWriter::new();
-        let blocks = vec![Block::default(); 100];
+        let blocks = Arc::new(vec![Block::default(); 100]);
 
-        assert!(writer.write_block_batch(&blocks).await.is_ok());
+        assert!(writer.write_block_batch(blocks).await.is_ok());
         assert_eq!(writer.get_written_blocks().len(), 100);
     }
 
@@ -169,16 +171,22 @@ mod tests {
         let writer = MockBlockWriter::new();
 
         // Write single block
-        writer.write_block(&Block::default()).await.unwrap();
+        writer
+            .write_block(Arc::new(Block::default()))
+            .await
+            .unwrap();
 
         // Write batch
         writer
-            .write_block_batch(&[Block::default(), Block::default()])
+            .write_block_batch(Arc::new(vec![Block::default(), Block::default()]))
             .await
             .unwrap();
 
         // Write another single block
-        writer.write_block(&Block::default()).await.unwrap();
+        writer
+            .write_block(Arc::new(Block::default()))
+            .await
+            .unwrap();
 
         assert_eq!(writer.get_written_blocks().len(), 4);
     }
@@ -186,7 +194,10 @@ mod tests {
     #[tokio::test]
     async fn test_mock_block_writer_clear() {
         let writer = MockBlockWriter::new();
-        writer.write_block(&Block::default()).await.unwrap();
+        writer
+            .write_block(Arc::new(Block::default()))
+            .await
+            .unwrap();
         assert_eq!(writer.get_written_blocks().len(), 1);
 
         writer.clear();
@@ -198,7 +209,7 @@ mod tests {
         let writer = MockBlockWriter::new();
         writer.set_should_fail(true);
 
-        let result = writer.write_block(&Block::default()).await;
+        let result = writer.write_block(Arc::new(Block::default())).await;
         assert!(result.is_err());
         assert_eq!(writer.get_written_blocks().len(), 0);
     }
@@ -208,8 +219,8 @@ mod tests {
         let writer = MockBlockWriter::new();
         writer.set_should_fail(true);
 
-        let blocks = vec![Block::default(), Block::default()];
-        let result = writer.write_block_batch(&blocks).await;
+        let blocks = Arc::new(vec![Block::default(), Block::default()]);
+        let result = writer.write_block_batch(blocks).await;
         assert!(result.is_err());
         assert_eq!(writer.get_written_blocks().len(), 0);
     }
@@ -219,15 +230,24 @@ mod tests {
         let writer = MockBlockWriter::new();
 
         // First write succeeds
-        writer.write_block(&Block::default()).await.unwrap();
+        writer
+            .write_block(Arc::new(Block::default()))
+            .await
+            .unwrap();
 
         // Enable failures
         writer.set_should_fail(true);
-        assert!(writer.write_block(&Block::default()).await.is_err());
+        assert!(writer
+            .write_block(Arc::new(Block::default()))
+            .await
+            .is_err());
 
         // Disable failures and try again
         writer.set_should_fail(false);
-        writer.write_block(&Block::default()).await.unwrap();
+        writer
+            .write_block(Arc::new(Block::default()))
+            .await
+            .unwrap();
 
         assert_eq!(writer.get_written_blocks().len(), 2);
     }
@@ -250,8 +270,14 @@ mod tests {
         let writer1 = provider1.get_writer();
         let writer2 = provider2.get_writer();
 
-        writer1.write_block(&Block::default()).await.unwrap();
-        writer2.write_block(&Block::default()).await.unwrap();
+        writer1
+            .write_block(Arc::new(Block::default()))
+            .await
+            .unwrap();
+        writer2
+            .write_block(Arc::new(Block::default()))
+            .await
+            .unwrap();
 
         // Both should write to the same underlying storage
         assert_eq!(mock_writer.get_written_blocks().len(), 2);
@@ -265,7 +291,8 @@ mod tests {
         let mut handles = vec![];
         for _ in 0..10 {
             let writer = provider.get_writer();
-            let handle = tokio::spawn(async move { writer.write_block(&Block::default()).await });
+            let handle =
+                tokio::spawn(async move { writer.write_block(Arc::new(Block::default())).await });
             handles.push(handle);
         }
 
