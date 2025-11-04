@@ -1,14 +1,12 @@
-# File: rock-node-workspace/crates/rock-node-protobufs/Cargo.toml
 [package]
 name = "rock-node-protobufs"
-version = "0.1.0"
+version = "0.2.1"
 edition = "2021"
 
 [dependencies]
 tonic = "0.13.1"
 prost = "0.13.5"
 
-# Add serde as a dependency for the generated structs
 serde = { version = "1", features = ["derive"] }
 
 [build-dependencies]

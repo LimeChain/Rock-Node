@@ -1,6 +1,6 @@
 [package]
 name = "rock-node-backfill-plugin"
-version = "0.1.0"
+version = "0.2.1"
 edition = "2021"
 
 [dependencies]
@@ -29,7 +29,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 prometheus = "0.14"
 
 # For RocksDB access
-rocksdb = "0.22"
+rocksdb = "0.24"
 rand = "0.9"
 futures-util = "0.3"
 

@@ -1,6 +1,6 @@
 [package]
 name = "rock-node-state-management-plugin"
-version = "0.1.0"
+version = "0.2.1"
 edition = "2021"
 
 [dependencies]
@@ -23,7 +23,7 @@ tracing = "0.1"
 prost = "0.13.5"
 
 # Add the RocksDB dependency
-rocksdb = "0.22"
+rocksdb = "0.24"
 
 # Add async-trait for async methods in traits
 async-trait = "0.1"

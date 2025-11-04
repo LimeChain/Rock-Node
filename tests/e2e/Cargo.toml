@@ -1,6 +1,6 @@
 [package]
 name = "e2e"
-version = "0.1.0"
+version = "0.2.1"
 edition = "2021"
 
 [dependencies]
@@ -10,7 +10,7 @@ anyhow = "1"
 reqwest = { version = "0.12", features = ["json"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-testcontainers = "0.24"
+testcontainers = "0.25"
 rock-node-protobufs = { path = "../../crates/rock-node-protobufs" }
 tonic = { version = "0.13.1", features = ["transport", "codegen"] }
 prost = "0.13.5"
