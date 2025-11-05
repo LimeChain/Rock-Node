@@ -135,8 +135,8 @@ async fn test_cache_lifecycle() {
     // Mark for removal
     cache.mark_for_removal(key).await;
 
-    // Should still be accessible immediately
-    assert!(cache.get(&key).is_some());
+    // Should be removed immediately
+    assert!(cache.get(&key).is_none());
 }
 
 #[tokio::test]

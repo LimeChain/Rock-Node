@@ -435,9 +435,21 @@ async fn test_cache_memory_management_under_load() {
         cache.mark_for_removal(*key).await;
     }
 
-    // They should still be accessible immediately
+    // They should be removed immediately
     for key in keys.iter().take(500) {
-        assert!(cache.get(key).is_some());
+        assert!(
+            cache.get(key).is_none(),
+            "Block should be removed from cache immediately"
+        );
+    }
+
+    // Remaining 500 should still be accessible
+    for (i, key) in keys.iter().skip(500).enumerate() {
+        assert!(
+            cache.get(key).is_some(),
+            "Block {} should still be in cache",
+            i + 501
+        );
     }
 }
 
