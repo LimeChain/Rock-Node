@@ -146,14 +146,16 @@ mod tests {
     impl rock_node_core::block_writer::BlockWriter for MockBlockWriter {
         async fn write_block(
             &self,
-            _block: &rock_node_protobufs::com::hedera::hapi::block::stream::Block,
+            _block: std::sync::Arc<rock_node_protobufs::com::hedera::hapi::block::stream::Block>,
         ) -> anyhow::Result<()> {
             Ok(())
         }
 
         async fn write_block_batch(
             &self,
-            _blocks: &[rock_node_protobufs::com::hedera::hapi::block::stream::Block],
+            _blocks: std::sync::Arc<
+                Vec<rock_node_protobufs::com::hedera::hapi::block::stream::Block>,
+            >,
         ) -> anyhow::Result<()> {
             Ok(())
         }

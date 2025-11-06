@@ -530,7 +530,7 @@ impl BackfillWorker {
                                     .set(block_number as i64);
                             }
                         }
-                        self.block_writer.write_block(&block).await?;
+                        self.block_writer.write_block(Arc::new(block)).await?;
                     }
                 },
                 Err(status) => return Err(anyhow!("gRPC stream error: {}", status)),
@@ -591,7 +591,7 @@ impl BackfillWorker {
                     .backfill_latest_continuous_block
                     .set(block_number as i64);
             }
-            self.block_writer.write_block(&block).await?;
+            self.block_writer.write_block(Arc::new(block)).await?;
         }
         Ok(())
     }
@@ -738,7 +738,7 @@ mod tests {
 
     #[async_trait::async_trait]
     impl BlockWriter for MockBlockWriter {
-        async fn write_block(&self, _block: &Block) -> anyhow::Result<()> {
+        async fn write_block(&self, _block: Arc<Block>) -> anyhow::Result<()> {
             if self.should_error {
                 return Err(anyhow::anyhow!("Mock write error"));
             }
@@ -746,7 +746,7 @@ mod tests {
             Ok(())
         }
 
-        async fn write_block_batch(&self, blocks: &[Block]) -> anyhow::Result<()> {
+        async fn write_block_batch(&self, blocks: Arc<Vec<Block>>) -> anyhow::Result<()> {
             if self.should_error {
                 return Err(anyhow::anyhow!("Mock batch write error"));
             }

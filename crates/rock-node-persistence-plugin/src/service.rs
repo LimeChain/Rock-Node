@@ -97,19 +97,19 @@ impl BlockReader for PersistenceService {
 
 #[async_trait]
 impl BlockWriter for PersistenceService {
-    async fn write_block(&self, block: &Block) -> Result<()> {
+    async fn write_block(&self, block: Arc<Block>) -> Result<()> {
         let timer = self
             .metrics
             .persistence_write_duration_seconds
             .with_label_values(&["live"])
             .start_timer();
-        let block_number = get_block_number(block)?;
+        let block_number = get_block_number(&block)?;
 
         let state = self.state.clone();
         let hot_tier = self.hot_tier.clone();
         let archiver = self.archiver.clone();
         let start_block_number = self.start_block_number;
-        let block = block.clone();
+        // No cloning needed - just Arc::clone the pointer!
 
         tokio::task::spawn_blocking(move || -> Result<()> {
             let mut batch = WriteBatch::default();
@@ -197,7 +197,7 @@ impl BlockWriter for PersistenceService {
         Ok(())
     }
 
-    async fn write_block_batch(&self, blocks: &[Block]) -> Result<()> {
+    async fn write_block_batch(&self, blocks: Arc<Vec<Block>>) -> Result<()> {
         if blocks.is_empty() {
             return Ok(());
         }
@@ -214,7 +214,7 @@ impl BlockWriter for PersistenceService {
         let archiver = self.archiver.clone();
         let cold_reader = self.cold_reader.clone();
         let state = self.state.clone();
-        let blocks = blocks.to_vec();
+        // No cloning needed - blocks is already Arc!
 
         tokio::task::spawn_blocking(move || -> Result<()> {
             let new_index_path = archiver.cold_writer.write_archive(&blocks)?;
@@ -316,8 +316,14 @@ mod tests {
         let service = make_service(&tmp, 100);
 
         // write 100 and 102 to create a gap at 101
-        service.write_block(&make_block(100)).await.unwrap();
-        service.write_block(&make_block(102)).await.unwrap();
+        service
+            .write_block(Arc::new(make_block(100)))
+            .await
+            .unwrap();
+        service
+            .write_block(Arc::new(make_block(102)))
+            .await
+            .unwrap();
 
         assert_eq!(
             service.get_latest_persisted_block_number().unwrap(),
@@ -327,7 +333,10 @@ mod tests {
         assert!(service.state.find_containing_gap(101).unwrap().is_some());
 
         // Fill the gap with 101 and ensure highest_contiguous advances to 102
-        service.write_block(&make_block(101)).await.unwrap();
+        service
+            .write_block(Arc::new(make_block(101)))
+            .await
+            .unwrap();
         assert_eq!(service.get_highest_contiguous_block_number().unwrap(), 102);
 
         // Read from hot tier
@@ -341,7 +350,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let service = make_service(&tmp, 50);
         let blocks: Vec<Block> = (40..45).map(make_block).collect();
-        service.write_block_batch(&blocks).await.unwrap();
+        service.write_block_batch(Arc::new(blocks)).await.unwrap();
         assert_eq!(
             service.get_earliest_persisted_block_number().unwrap(),
             Some(40)

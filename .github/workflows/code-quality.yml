@@ -173,7 +173,7 @@ jobs:
           toolchain: stable
 
       - name: Run integration tests
-        run: cargo test --package integration-tests --lib
+        run: cargo test --package integration-tests --lib -- --test-threads=3
         env:
           RUST_LOG: info
 

@@ -176,17 +176,17 @@ impl MockBlockWriter {
 impl crate::BlockWriter for MockBlockWriter {
     async fn write_block(
         &self,
-        block: &rock_node_protobufs::com::hedera::hapi::block::stream::Block,
+        block: Arc<rock_node_protobufs::com::hedera::hapi::block::stream::Block>,
     ) -> anyhow::Result<()> {
-        self.blocks.write().unwrap().push(block.clone());
+        self.blocks.write().unwrap().push((*block).clone());
         Ok(())
     }
 
     async fn write_block_batch(
         &self,
-        blocks: &[rock_node_protobufs::com::hedera::hapi::block::stream::Block],
+        blocks: Arc<Vec<rock_node_protobufs::com::hedera::hapi::block::stream::Block>>,
     ) -> anyhow::Result<()> {
-        self.blocks.write().unwrap().extend_from_slice(blocks);
+        self.blocks.write().unwrap().extend_from_slice(&blocks);
         Ok(())
     }
 }
@@ -255,7 +255,7 @@ mod tests {
         let writer = MockBlockWriter::new();
         let block = rock_node_protobufs::com::hedera::hapi::block::stream::Block::default();
 
-        writer.write_block(&block).await.unwrap();
+        writer.write_block(Arc::new(block)).await.unwrap();
         assert_eq!(writer.get_written_blocks().len(), 1);
 
         writer.clear();

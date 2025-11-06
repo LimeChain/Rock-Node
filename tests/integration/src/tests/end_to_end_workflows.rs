@@ -5,6 +5,7 @@ use rock_node_persistence_plugin::PersistencePlugin;
 use rock_node_publish_plugin::PublishPlugin;
 use rock_node_verifier_plugin::VerifierPlugin;
 use std::any::TypeId;
+use std::sync::Arc;
 use tokio::time::{timeout, Duration};
 use tracing_test::traced_test;
 
@@ -64,7 +65,7 @@ async fn test_persist_and_retrieve_block() {
         let block = builder.create_block(1);
 
         // Write block
-        writer.write_block(&block).await.unwrap();
+        writer.write_block(Arc::new(block)).await.unwrap();
 
         // Now read it back using BlockReader
         let reader_provider = providers
@@ -111,7 +112,7 @@ async fn test_batch_block_persistence() {
         let blocks = builder.create_block_batch(10);
 
         // Write batch - this should succeed without errors
-        let result = writer.write_block_batch(&blocks).await;
+        let result = writer.write_block_batch(Arc::new(blocks)).await;
         assert!(result.is_ok(), "Batch write should succeed");
     }
 
@@ -165,9 +166,18 @@ async fn test_gap_detection() {
         let builder = TestDataBuilder::new();
 
         // Write blocks 1, 2, then skip to 5 (creating gaps)
-        writer.write_block(&builder.create_block(1)).await.unwrap();
-        writer.write_block(&builder.create_block(2)).await.unwrap();
-        writer.write_block(&builder.create_block(5)).await.unwrap();
+        writer
+            .write_block(Arc::new(builder.create_block(1)))
+            .await
+            .unwrap();
+        writer
+            .write_block(Arc::new(builder.create_block(2)))
+            .await
+            .unwrap();
+        writer
+            .write_block(Arc::new(builder.create_block(5)))
+            .await
+            .unwrap();
 
         // Check highest contiguous (should be 2, not 5)
         let reader_provider = providers
@@ -217,7 +227,8 @@ async fn test_concurrent_block_writes() {
         for i in 1..=10 {
             let writer_clone = writer.clone();
             let block = builder.create_block(i);
-            let handle = tokio::spawn(async move { writer_clone.write_block(&block).await });
+            let handle =
+                tokio::spawn(async move { writer_clone.write_block(Arc::new(block)).await });
             handles.push(handle);
         }
 
@@ -272,7 +283,7 @@ async fn test_high_throughput_block_processing() {
             let batch: Vec<_> = (batch_start..batch_start + 10)
                 .map(|i| builder.create_block(i))
                 .collect();
-            if writer.write_block_batch(&batch).await.is_ok() {
+            if writer.write_block_batch(Arc::new(batch)).await.is_ok() {
                 success_count += 10;
             }
         }
@@ -366,12 +377,21 @@ async fn test_plugin_continues_after_error() {
         let builder = TestDataBuilder::new();
 
         // Write a valid block
-        writer.write_block(&builder.create_block(1)).await.unwrap();
+        writer
+            .write_block(Arc::new(builder.create_block(1)))
+            .await
+            .unwrap();
 
         // Even if there's an error (which we can't easily simulate here),
         // the plugin should continue accepting new blocks
-        writer.write_block(&builder.create_block(2)).await.unwrap();
-        writer.write_block(&builder.create_block(3)).await.unwrap();
+        writer
+            .write_block(Arc::new(builder.create_block(2)))
+            .await
+            .unwrap();
+        writer
+            .write_block(Arc::new(builder.create_block(3)))
+            .await
+            .unwrap();
 
         // Verify all blocks persisted
         let reader_provider = providers
@@ -415,9 +435,21 @@ async fn test_cache_memory_management_under_load() {
         cache.mark_for_removal(*key).await;
     }
 
-    // They should still be accessible immediately
+    // They should be removed immediately
     for key in keys.iter().take(500) {
-        assert!(cache.get(key).is_some());
+        assert!(
+            cache.get(key).is_none(),
+            "Block should be removed from cache immediately"
+        );
+    }
+
+    // Remaining 500 should still be accessible
+    for (i, key) in keys.iter().skip(500).enumerate() {
+        assert!(
+            cache.get(key).is_some(),
+            "Block {} should still be in cache",
+            i + 501
+        );
     }
 }
 
@@ -476,7 +508,10 @@ async fn test_metrics_during_pipeline_operation() {
 
         // Write 10 blocks
         for i in 1..=10 {
-            writer.write_block(&builder.create_block(i)).await.unwrap();
+            writer
+                .write_block(Arc::new(builder.create_block(i)))
+                .await
+                .unwrap();
         }
     }
 
